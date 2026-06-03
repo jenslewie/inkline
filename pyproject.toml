@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inkline"
+version = "0.1.0"
+description = "Document ingestion, canonical book representation, EPUB export, and RAG pipeline monorepo."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+rag = ["numpy>=1.26", "faiss-cpu>=1.8", "requests>=2.31"]
+
+[project.scripts]
+inkline = "inkline_cli.main:main"
+
+[tool.setuptools.packages.find]
+where = [
+  "packages/book-canonical/src",
+  "packages/book-ingest/src",
+  "packages/book-mineru/src",
+  "packages/book-epub/src",
+  "packages/book-rag/src",
+  "packages/book-cli/src",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [
+  "packages/book-canonical/src",
+  "packages/book-ingest/src",
+  "packages/book-mineru/src",
+  "packages/book-epub/src",
+  "packages/book-rag/src",
+  "packages/book-cli/src",
+]

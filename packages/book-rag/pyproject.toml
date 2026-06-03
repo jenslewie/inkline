@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "book-rag"
+version = "0.1.0"
+description = "RAG chunking, embeddings, indexing, and search for canonical books."
+requires-python = ">=3.11"
+dependencies = ["book-canonical>=0.1.0"]
+
+[project.optional-dependencies]
+faiss = ["numpy>=1.26", "faiss-cpu>=1.8"]
+embeddings = ["requests>=2.31"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

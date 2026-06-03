@@ -1,0 +1,202 @@
+"""Note reference gap detection report. Counts footnote/endnote definitions in canonical output that lack a corresponding body note_ref, listing them per page. Used to identify where PDF image/OCR-based inline marker recovery is needed."""
+
+from __future__ import annotations
+
+from collections import Counter
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from ..extraction.text import normalize_note_marker, normalize_ws
+
+__all__ = ["build_note_ref_gap_report", "note_ref_gap_report_path"]
+
+
+def note_ref_gap_report_path(canonical_path: Path) -> Path:
+    stem = canonical_path.stem
+    if "_canonical_" in stem:
+        report_stem = stem.replace("_canonical_", "_note_ref_gaps_", 1)
+    elif stem.endswith("_canonical"):
+        report_stem = stem[: -len("_canonical")] + "_note_ref_gaps"
+    else:
+        report_stem = stem + "_note_ref_gaps"
+    return canonical_path.with_name(report_stem + ".json")
+
+
+def build_note_ref_gap_report(document: Dict[str, Any], *, canonical_path: Optional[Path] = None) -> Dict[str, Any]:
+    blocks = [block for block in document.get("blocks") or [] if isinstance(block, dict)]
+    referenced_note_ids = _referenced_note_ids(blocks)
+    missing_notes = [
+        _missing_note_entry(block)
+        for block in blocks
+        if _is_independent_note_without_body_ref(block, referenced_note_ids)
+    ]
+    missing_notes = [entry for entry in missing_notes if entry is not None]
+    unresolved_refs = _unresolved_body_note_refs(blocks)
+    unknown_inline_refs = _unknown_inline_position_refs(blocks)
+    independent_notes = [block for block in blocks if _is_independent_note(block)]
+    referenced_notes = [block for block in independent_notes if _has_body_ref(block, referenced_note_ids)]
+
+    metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+    report: Dict[str, Any] = {
+        "canonical": canonical_path.name if canonical_path else None,
+        "doc_id": metadata.get("doc_id"),
+        "title": metadata.get("title"),
+        "summary": {
+            "footnote_blocks": sum(1 for block in blocks if block.get("type") == "footnote"),
+            "note_definition_blocks": len(independent_notes),
+            "independent_notes": len(independent_notes),
+            "referenced_notes": len(referenced_notes),
+            "missing_body_ref_notes": len(missing_notes),
+            "missing_body_ref_notes_with_marker": sum(1 for item in missing_notes if item.get("note_marker")),
+            "missing_body_ref_notes_without_marker": sum(1 for item in missing_notes if not item.get("note_marker")),
+            "unresolved_body_note_refs": len(unresolved_refs),
+            "unknown_inline_position_refs": len(unknown_inline_refs),
+        },
+        "missing_by_page": _missing_by_page(missing_notes),
+        "missing_body_ref_notes": missing_notes,
+        "unresolved_body_note_refs": unresolved_refs,
+        "unknown_inline_position_refs": unknown_inline_refs,
+    }
+    return report
+
+
+def _is_independent_note(block: Dict[str, Any]) -> bool:
+    attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+    return bool(attrs.get("note_id"))
+
+
+def _referenced_by(block: Dict[str, Any]) -> List[Dict[str, Any]]:
+    attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+    refs = attrs.get("referenced_by")
+    return refs if isinstance(refs, list) else []
+
+
+def _is_independent_note_without_body_ref(block: Dict[str, Any], referenced_note_ids: set[str]) -> bool:
+    return _is_independent_note(block) and not _has_body_ref(block, referenced_note_ids)
+
+
+def _has_body_ref(block: Dict[str, Any], referenced_note_ids: set[str]) -> bool:
+    attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+    note_id = str(attrs.get("note_id") or "")
+    return bool(_referenced_by(block)) or bool(note_id and note_id in referenced_note_ids)
+
+
+def _referenced_note_ids(blocks: List[Dict[str, Any]]) -> set[str]:
+    note_ids: set[str] = set()
+    for block in blocks:
+        if _is_independent_note(block):
+            continue
+        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+        refs = attrs.get("note_refs")
+        if not isinstance(refs, list):
+            continue
+        for ref in refs:
+            if isinstance(ref, dict) and ref.get("target_note_id"):
+                note_ids.add(str(ref["target_note_id"]))
+    return note_ids
+
+
+def _missing_note_entry(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+    source = block.get("source") if isinstance(block.get("source"), dict) else {}
+    note_id = attrs.get("note_id")
+    if not note_id:
+        return None
+    text = str(block.get("text") or "")
+    return {
+        "block_id": block.get("block_id"),
+        "type": block.get("type"),
+        "page": source.get("page"),
+        "pages": source.get("pages"),
+        "bbox": source.get("bbox"),
+        "note_id": note_id,
+        "note_marker": attrs.get("note_marker"),
+        "note_strategy": attrs.get("note_strategy"),
+        "role": attrs.get("role"),
+        "raw_type": attrs.get("raw_type"),
+        "text_preview": _preview(text),
+        "text": text,
+    }
+
+
+def _missing_by_page(missing_notes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    counts: Counter[str] = Counter()
+    with_marker: Counter[str] = Counter()
+    without_marker: Counter[str] = Counter()
+    for item in missing_notes:
+        page_key = str(item.get("page") if item.get("page") is not None else "unknown")
+        counts[page_key] += 1
+        if item.get("note_marker"):
+            with_marker[page_key] += 1
+        else:
+            without_marker[page_key] += 1
+
+    def sort_key(page: str) -> tuple[int, str]:
+        try:
+            return (0, f"{int(page):08d}")
+        except ValueError:
+            return (1, page)
+
+    return [
+        {
+            "page": int(page) if page.isdigit() else page,
+            "missing_body_ref_notes": counts[page],
+            "with_marker": with_marker[page],
+            "without_marker": without_marker[page],
+        }
+        for page in sorted(counts, key=sort_key)
+    ]
+
+
+def _unresolved_body_note_refs(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for block in blocks:
+        if _is_independent_note(block):
+            continue
+        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+        refs = attrs.get("note_refs")
+        if not isinstance(refs, list):
+            continue
+        for ref in refs:
+            if not isinstance(ref, dict) or ref.get("target_note_id"):
+                continue
+            out.append(_body_ref_entry(block, ref))
+    return out
+
+
+def _unknown_inline_position_refs(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for block in blocks:
+        if _is_independent_note(block):
+            continue
+        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+        refs = attrs.get("note_refs")
+        if not isinstance(refs, list):
+            continue
+        for ref in refs:
+            if isinstance(ref, dict) and ref.get("inline_position") == "unknown":
+                out.append(_body_ref_entry(block, ref))
+    return out
+
+
+def _body_ref_entry(block: Dict[str, Any], ref: Dict[str, Any]) -> Dict[str, Any]:
+    source = block.get("source") if isinstance(block.get("source"), dict) else {}
+    text = str(block.get("text") or "")
+    return {
+        "ref_block_id": block.get("block_id"),
+        "page": source.get("page"),
+        "pages": source.get("pages"),
+        "marker": normalize_note_marker(str(ref.get("marker") or "")),
+        "source": ref.get("source"),
+        "source_page": ref.get("source_page"),
+        "target_note_id": ref.get("target_note_id"),
+        "target_block_id": ref.get("target_block_id"),
+        "inline_position": ref.get("inline_position"),
+        "inline_position_source": ref.get("inline_position_source"),
+        "text_preview": _preview(text),
+    }
+
+
+def _preview(text: str, limit: int = 180) -> str:
+    text = normalize_ws(text)
+    return text if len(text) <= limit else text[:limit] + "..."
