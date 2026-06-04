@@ -141,6 +141,7 @@ def build_canonical(
                         for item in marker_locator_evidence
                     ],
                     "artifact_dir": str(_qwen_marker_locator_artifact_dir(args)) if marker_locator_enabled else None,
+                    "timing_log": str(_qwen_marker_locator_timing_log_path(args)) if marker_locator_enabled else None,
                 }
             },
             "type_system": {
@@ -176,6 +177,7 @@ def _qwen_marker_locator_config(args: argparse.Namespace) -> QwenMarkerLocatorCo
         dpi=int(getattr(args, "marker_locator_dpi", getattr(args, "glm_ocr_dpi", 300))),
         max_megapixels=float(getattr(args, "marker_locator_max_megapixels", getattr(args, "glm_ocr_max_megapixels", 0.0))),
         reuse_evidence=bool(getattr(args, "marker_locator_reuse_evidence", False) or getattr(args, "glm_ocr_reuse_evidence", False)),
+        timing_log_path=_qwen_marker_locator_timing_log_path(args),
     )
 
 
@@ -185,3 +187,10 @@ def _qwen_marker_locator_artifact_dir(args: argparse.Namespace) -> Path:
         return Path(configured)
     output = Path(getattr(args, "output", "canonical.json"))
     return output.parent / f"{output.stem}_qwen_marker_locator"
+
+
+def _qwen_marker_locator_timing_log_path(args: argparse.Namespace) -> Path:
+    configured = getattr(args, "marker_locator_timing_log", None)
+    if configured:
+        return Path(configured)
+    return _qwen_marker_locator_artifact_dir(args) / "qwen_marker_timing.jsonl"

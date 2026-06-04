@@ -10,9 +10,11 @@ from __future__ import annotations
 import base64
 import json
 import re
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -60,6 +62,7 @@ class QwenMarkerLocatorConfig:
     footnote_prompt: str = _FOOTNOTE_DEFS_PROMPT
     reuse_evidence: bool = False
     timeout_seconds: int = 180
+    timing_log_path: Path | None = None
 
 
 @dataclass
@@ -99,9 +102,28 @@ def run_qwen_marker_locator_repairs(blocks: List[Dict[str, Any]], config: QwenMa
     if not pages:
         return []
     config.artifact_dir.mkdir(parents=True, exist_ok=True)
+    _reset_timing_log(config)
+    run_started = _now_iso()
+    run_timer = time.perf_counter()
+    _write_timing_event(
+        config,
+        {
+            "event": "run_start",
+            "started_at": run_started,
+            "model": config.model,
+            "dpi": config.dpi,
+            "reuse_evidence": config.reuse_evidence,
+            "source_pdf": str(config.source_pdf),
+            "artifact_dir": str(config.artifact_dir),
+            "planned_pages": sorted(pages),
+            "footnote_pages": sorted(plan.footnote_pages),
+            "body_ref_pages": sorted(plan.body_ref_pages),
+        },
+    )
     evidence = _collect_qwen_marker_evidence(
         sorted(pages),
         config,
+        pass_name="initial",
         footnote_pages=plan.footnote_pages,
         body_ref_pages=plan.body_ref_pages,
         expected_body_markers_by_page=_page_footnote_markers_by_page(blocks),
@@ -115,12 +137,25 @@ def run_qwen_marker_locator_repairs(blocks: List[Dict[str, Any]], config: QwenMa
             _collect_qwen_marker_evidence(
                 missing_pages,
                 config,
+                pass_name="body_ref_retry",
                 footnote_pages=set(),
                 body_ref_pages=set(missing_pages),
                 expected_body_markers_by_page=_page_footnote_markers_by_page(blocks),
             )
         )
     _write_evidence(config.artifact_dir / "qwen_marker_evidence.json", evidence)
+    _write_timing_event(
+        config,
+        {
+            "event": "run_end",
+            "started_at": run_started,
+            "finished_at": _now_iso(),
+            "duration_seconds": _duration(run_timer),
+            "evidence_items": len(evidence),
+            "unique_pages": sorted({item.page for item in evidence}),
+            "evidence_path": str(config.artifact_dir / "qwen_marker_evidence.json"),
+        },
+    )
     return evidence
 
 
@@ -145,6 +180,7 @@ def _collect_qwen_marker_evidence(
     pages: Sequence[int],
     config: QwenMarkerLocatorConfig,
     *,
+    pass_name: str,
     footnote_pages: set[int] | None = None,
     body_ref_pages: set[int] | None = None,
     expected_body_markers_by_page: Dict[int, List[str]] | None = None,
@@ -159,23 +195,158 @@ def _collect_qwen_marker_evidence(
     footnote_pages = set() if footnote_pages is None else footnote_pages
     body_ref_pages = set(pages) if body_ref_pages is None else body_ref_pages
     expected_body_markers_by_page = expected_body_markers_by_page or {}
+    pass_started = _now_iso()
+    pass_timer = time.perf_counter()
+    _write_timing_event(
+        config,
+        {
+            "event": "collect_pass_start",
+            "pass": pass_name,
+            "started_at": pass_started,
+            "pages": list(pages),
+            "footnote_pages": sorted(footnote_pages),
+            "body_ref_pages": sorted(body_ref_pages),
+        },
+    )
     with fitz.open(config.source_pdf) as doc:
         for page in pages:
             if page < 1 or page > doc.page_count:
+                _write_timing_event(
+                    config,
+                    {
+                        "event": "page_skipped",
+                        "pass": pass_name,
+                        "page": page,
+                        "reason": "outside_pdf_page_range",
+                        "page_count": doc.page_count,
+                        "finished_at": _now_iso(),
+                    },
+                )
                 continue
+            page_started = _now_iso()
+            page_timer = time.perf_counter()
+            render_duration = 0.0
+            model_calls: List[Dict[str, Any]] = []
             pdf_page = doc[page - 1]
             image_path = config.artifact_dir / f"page_{page:04d}_{config.dpi}dpi_qwen_full_page.png"
-            _render_full_page(pdf_page, image_path, config)
+            render_timer = time.perf_counter()
+            try:
+                _render_full_page(pdf_page, image_path, config)
+            except Exception as exc:
+                _write_timing_event(
+                    config,
+                    {
+                        "event": "page_error",
+                        "pass": pass_name,
+                        "page": page,
+                        "stage": "render",
+                        "started_at": page_started,
+                        "finished_at": _now_iso(),
+                        "duration_seconds": _duration(page_timer),
+                        "render_seconds": _duration(render_timer),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
+                raise
+            render_duration = _duration(render_timer)
             item = cache.get((page, image_path.name))
+            cache_hit = item is not None
             if item is None:
                 raw_parts: Dict[str, Any] = {}
                 if page in footnote_pages:
-                    footnote_raw = _call_qwen_marker_locator(image_path, config, prompt=config.footnote_prompt)
+                    call_timer = time.perf_counter()
+                    call_started = _now_iso()
+                    try:
+                        footnote_raw = _call_qwen_marker_locator(image_path, config, prompt=config.footnote_prompt)
+                    except Exception as exc:
+                        model_calls.append(
+                            {
+                                "kind": "footnote_defs",
+                                "started_at": call_started,
+                                "finished_at": _now_iso(),
+                                "duration_seconds": _duration(call_timer),
+                                "error_type": type(exc).__name__,
+                                "error": str(exc),
+                            }
+                        )
+                        _write_timing_event(
+                            config,
+                            {
+                                "event": "page_error",
+                                "pass": pass_name,
+                                "page": page,
+                                "stage": "footnote_defs",
+                                "started_at": page_started,
+                                "finished_at": _now_iso(),
+                                "duration_seconds": _duration(page_timer),
+                                "render_seconds": render_duration,
+                                "cache_hit": cache_hit,
+                                "image": str(image_path),
+                                "model_calls": model_calls,
+                                "error_type": type(exc).__name__,
+                                "error": str(exc),
+                            },
+                        )
+                        raise
+                    model_calls.append(
+                        {
+                            "kind": "footnote_defs",
+                            "started_at": call_started,
+                            "finished_at": _now_iso(),
+                            "duration_seconds": _duration(call_timer),
+                            "raw_item_count": len(footnote_raw.get("footnote_defs") or []) if isinstance(footnote_raw, dict) else 0,
+                        }
+                    )
                     raw_parts["footnote_defs"] = footnote_raw.get("footnote_defs") if isinstance(footnote_raw, dict) else []
                 if page in body_ref_pages:
                     marker_items = _clean_footnote_defs(raw_parts.get("footnote_defs"))
                     markers = _body_markers_for_prompt(marker_items, expected_body_markers_by_page.get(page, []))
-                    body_raw = _call_qwen_marker_locator(image_path, config, prompt=_body_prompt_for_markers(config.body_prompt, markers))
+                    call_timer = time.perf_counter()
+                    call_started = _now_iso()
+                    try:
+                        body_raw = _call_qwen_marker_locator(image_path, config, prompt=_body_prompt_for_markers(config.body_prompt, markers))
+                    except Exception as exc:
+                        model_calls.append(
+                            {
+                                "kind": "body_refs",
+                                "started_at": call_started,
+                                "finished_at": _now_iso(),
+                                "duration_seconds": _duration(call_timer),
+                                "markers_for_prompt": markers,
+                                "error_type": type(exc).__name__,
+                                "error": str(exc),
+                            }
+                        )
+                        _write_timing_event(
+                            config,
+                            {
+                                "event": "page_error",
+                                "pass": pass_name,
+                                "page": page,
+                                "stage": "body_refs",
+                                "started_at": page_started,
+                                "finished_at": _now_iso(),
+                                "duration_seconds": _duration(page_timer),
+                                "render_seconds": render_duration,
+                                "cache_hit": cache_hit,
+                                "image": str(image_path),
+                                "model_calls": model_calls,
+                                "error_type": type(exc).__name__,
+                                "error": str(exc),
+                            },
+                        )
+                        raise
+                    model_calls.append(
+                        {
+                            "kind": "body_refs",
+                            "started_at": call_started,
+                            "finished_at": _now_iso(),
+                            "duration_seconds": _duration(call_timer),
+                            "markers_for_prompt": markers,
+                            "raw_item_count": len(body_raw.get("body_refs") or []) if isinstance(body_raw, dict) else 0,
+                        }
+                    )
                     raw_parts["body_refs"] = body_raw.get("body_refs") if isinstance(body_raw, dict) else []
                 item = QwenMarkerPageEvidence(
                     page=page,
@@ -187,6 +358,37 @@ def _collect_qwen_marker_evidence(
                     footnote_defs=_clean_footnote_defs(raw_parts.get("footnote_defs")),
                 )
             evidence.append(item)
+            _write_timing_event(
+                config,
+                {
+                    "event": "page_end",
+                    "pass": pass_name,
+                    "page": page,
+                    "started_at": page_started,
+                    "finished_at": _now_iso(),
+                    "duration_seconds": _duration(page_timer),
+                    "render_seconds": render_duration,
+                    "cache_hit": cache_hit,
+                    "image": str(image_path),
+                    "image_bytes": image_path.stat().st_size if image_path.exists() else None,
+                    "requested_footnote_defs": page in footnote_pages,
+                    "requested_body_refs": page in body_ref_pages,
+                    "model_calls": model_calls,
+                    "footnote_def_count": len(item.footnote_defs),
+                    "body_ref_count": len(item.body_refs),
+                },
+            )
+    _write_timing_event(
+        config,
+        {
+            "event": "collect_pass_end",
+            "pass": pass_name,
+            "started_at": pass_started,
+            "finished_at": _now_iso(),
+            "duration_seconds": _duration(pass_timer),
+            "evidence_items": len(evidence),
+        },
+    )
     return evidence
 
 
@@ -492,3 +694,32 @@ def _write_evidence(path: Path, evidence: Sequence[QwenMarkerPageEvidence]) -> N
         json.dumps({"engine": "qwen_marker_locator", "pages": [item.to_json() for item in evidence]}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def _timing_log_path(config: QwenMarkerLocatorConfig) -> Path:
+    return config.timing_log_path or (config.artifact_dir / "qwen_marker_timing.jsonl")
+
+
+def _reset_timing_log(config: QwenMarkerLocatorConfig) -> None:
+    path = _timing_log_path(config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("", encoding="utf-8")
+
+
+def _write_timing_event(config: QwenMarkerLocatorConfig, event: Dict[str, Any]) -> None:
+    path = _timing_log_path(config)
+    payload = {
+        "schema": "qwen_marker_timing.v1",
+        **event,
+    }
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        f.write("\n")
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def _duration(start: float) -> float:
+    return round(time.perf_counter() - start, 6)

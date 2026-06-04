@@ -45,6 +45,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--marker-locator-dpi", type=int, default=300, help="DPI for rendering Qwen marker locator full pages")
     p.add_argument("--marker-locator-max-megapixels", type=float, default=0.0, help="Maximum megapixels for one Qwen marker locator image; 0 disables the limit")
     p.add_argument("--marker-locator-reuse-evidence", action="store_true", help="Reuse existing Qwen marker locator evidence JSON entries when the rendered image name matches")
+    p.add_argument("--marker-locator-timing-log", help="JSONL timing log for each Qwen marker locator page and model call; defaults inside the artifact directory")
     p.add_argument("--glm-ocr-artifact-dir", help=argparse.SUPPRESS)
     p.add_argument("--glm-ocr-model", default="glm-ocr:latest", help=argparse.SUPPRESS)
     p.add_argument("--glm-ocr-api-url", default="http://127.0.0.1:11434/api/generate", help=argparse.SUPPRESS)
