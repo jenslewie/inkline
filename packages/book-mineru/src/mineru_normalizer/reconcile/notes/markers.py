@@ -901,15 +901,20 @@ def _locate_qwen_body_ref(
 ) -> Optional[Tuple[Dict[str, Any], _InlineMarkerLocation]]:
     before = str(item.get("before_text") or "")
     after = str(item.get("after_text") or "")
+    before_for_match = _qwen_context_without_neighbor_markers(before)
+    after_for_match = _qwen_context_without_neighbor_markers(after)
     quote = str(item.get("quote") or "")
+    requested_block_id = str(item.get("block_id") or "")
     candidates: List[Tuple[int, Dict[str, Any], _InlineMarkerLocation]] = []
     for block_index, block in enumerate(blocks):
         if block.get("type") not in BODY_TYPES or page not in context.pages_for(block):
             continue
+        if requested_block_id and _qwen_block_id(block) != requested_block_id:
+            continue
         if not allow_existing and _existing_ref_marker_on_page(block, marker, page, context):
             continue
         text = str(block.get("text") or "")
-        offset = _qwen_marker_offset_in_text(text, marker, before, after, quote)
+        offset = _qwen_marker_offset_in_text(text, marker, before_for_match, after_for_match, quote)
         if offset is None:
             continue
         visible_marker = _qwen_visible_marker_at(text, marker, offset)
@@ -927,6 +932,8 @@ def _locate_qwen_body_ref(
                         "inline_position_offset": offset,
                         "qwen_marker": marker,
                         "qwen_quote": quote,
+                        **_qwen_body_ref_source_evidence(item),
+                        **_qwen_matching_context_evidence(before, after, before_for_match, after_for_match),
                         **(
                             {
                                 "qwen_visible_marker_offset": offset,
@@ -945,7 +952,44 @@ def _locate_qwen_body_ref(
         return block, inline_location
     if candidates:
         return None
+    if requested_block_id:
+        return None
     return _locate_qwen_cross_block_body_ref(blocks, context, page, marker, item, allow_existing=allow_existing)
+
+
+def _qwen_block_id(block: Dict[str, Any]) -> str:
+    return str(block.get("block_id") or block.get("id") or "")
+
+
+def _qwen_body_ref_source_evidence(item: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for source_key, evidence_key in (
+        ("block_id", "qwen_block_id"),
+        ("body_ref_source", "qwen_body_ref_source"),
+        ("crop_image", "qwen_crop_image"),
+        ("crop_bbox_pdf", "qwen_crop_bbox_pdf"),
+    ):
+        value = item.get(source_key)
+        if value:
+            out[evidence_key] = value
+    return out
+
+
+def _qwen_context_without_neighbor_markers(value: str) -> str:
+    text = str(value or "")
+    for marker_text in ("***", "**", "*"):
+        text = text.replace(marker_text, "")
+    superscript_digits = str.maketrans("", "", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+    return text.translate(superscript_digits)
+
+
+def _qwen_matching_context_evidence(before: str, after: str, before_for_match: str, after_for_match: str) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    if before != before_for_match:
+        out["qwen_matching_before_text"] = before_for_match
+    if after != after_for_match:
+        out["qwen_matching_after_text"] = after_for_match
+    return out
 
 
 def _existing_ref_marker_on_page(block: Dict[str, Any], marker: str, page: int, context: _NoteContext) -> bool:
@@ -978,8 +1022,8 @@ def _locate_qwen_cross_block_body_ref(
     *,
     allow_existing: bool = False,
 ) -> Optional[Tuple[Dict[str, Any], _InlineMarkerLocation]]:
-    before = normalize_ws(str(item.get("before_text") or ""))
-    after = normalize_ws(str(item.get("after_text") or ""))
+    before = normalize_ws(_qwen_context_without_neighbor_markers(str(item.get("before_text") or "")))
+    after = normalize_ws(_qwen_context_without_neighbor_markers(str(item.get("after_text") or "")))
     quote = normalize_ws(str(item.get("quote") or ""))
     if not before or not after:
         return None

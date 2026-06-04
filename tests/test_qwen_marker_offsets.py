@@ -1,4 +1,5 @@
-from mineru_normalizer.reconcile.notes.markers import _qwen_marker_offset_in_text
+from mineru_normalizer.reconcile.notes.markers import _locate_qwen_body_ref, _qwen_marker_offset_in_text
+from mineru_normalizer.reconcile.notes.resolver import _NoteContext
 
 
 def test_qwen_symbol_marker_before_omitted_comma() -> None:
@@ -59,3 +60,106 @@ def test_qwen_numeric_marker_does_not_use_before_only_when_after_is_in_quote() -
     )
 
     assert offset is None
+
+
+def test_qwen_body_ref_uses_block_id_to_disambiguate_matching_context() -> None:
+    blocks = [
+        {
+            "block_id": "b1",
+            "type": "paragraph",
+            "text": "第一段有相同之后的文字。",
+            "source": {"page": 1, "bbox": [10, 10, 100, 30]},
+            "attrs": {},
+        },
+        {
+            "block_id": "b2",
+            "type": "paragraph",
+            "text": "第二段有相同之后的文字。",
+            "source": {"page": 1, "bbox": [10, 40, 100, 60]},
+            "attrs": {},
+        },
+    ]
+
+    located = _locate_qwen_body_ref(
+        blocks,
+        _NoteContext(blocks),
+        1,
+        "1",
+        {
+            "marker": "1",
+            "before_text": "有相同",
+            "after_text": "之后的文字",
+            "quote": "有相同1之后的文字",
+            "confidence": "high",
+            "block_id": "b2",
+            "body_ref_source": "paragraph_crop",
+        },
+    )
+
+    assert located is not None
+    block, inline_location = located
+    assert block["block_id"] == "b2"
+    assert inline_location.char_index == blocks[1]["text"].index("之后的文字")
+    assert inline_location.evidence["qwen_block_id"] == "b2"
+
+
+def test_qwen_body_ref_with_block_id_does_not_fallback_to_other_block() -> None:
+    blocks = [
+        {
+            "block_id": "b1",
+            "type": "paragraph",
+            "text": "第一段有相同之后的文字。",
+            "source": {"page": 1, "bbox": [10, 10, 100, 30]},
+            "attrs": {},
+        }
+    ]
+
+    located = _locate_qwen_body_ref(
+        blocks,
+        _NoteContext(blocks),
+        1,
+        "1",
+        {
+            "marker": "1",
+            "before_text": "有相同",
+            "after_text": "之后的文字",
+            "quote": "有相同1之后的文字",
+            "confidence": "high",
+            "block_id": "missing",
+        },
+    )
+
+    assert located is None
+
+
+def test_qwen_body_ref_strips_neighbor_symbol_marker_from_matching_context() -> None:
+    blocks = [
+        {
+            "block_id": "b000102",
+            "type": "paragraph",
+            "text": "向东包括甘肃省和陕西省。今天的新疆包括了丝绸之路在中国西部的绝大部分。",
+            "source": {"page": 23, "bbox": [99, 492, 873, 600]},
+            "attrs": {},
+        }
+    ]
+
+    located = _locate_qwen_body_ref(
+        blocks,
+        _NoteContext(blocks),
+        23,
+        "1",
+        {
+            "marker": "1",
+            "before_text": "西省***。",
+            "after_text": "今天的",
+            "quote": "西省***。1今天的",
+            "confidence": "high",
+            "block_id": "b000102",
+        },
+    )
+
+    assert located is not None
+    block, inline_location = located
+    assert block["block_id"] == "b000102"
+    assert inline_location.char_index == blocks[0]["text"].index("今天的")
+    assert inline_location.evidence["qwen_matching_before_text"] == "西省。"

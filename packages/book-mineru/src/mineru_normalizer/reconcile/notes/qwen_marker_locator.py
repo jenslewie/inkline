@@ -19,8 +19,9 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+from ...analysis.page_geometry import PageGeometry
 from ...extraction.text import normalize_note_marker, normalize_ws
-from ..block_access import block_bbox, block_page
+from ..block_access import block_bbox, block_id, block_page, block_pages
 from .glm_ocr import _problem_page_plan
 from .keys import leading_note_marker
 
@@ -46,8 +47,10 @@ _FOOTNOTE_DEFS_PROMPT = (
     "near_text填写该脚注marker后面的开头文字。"
     "看不清或无法确定紧邻字符就省略该项。"
 )
-_PROMPT_VERSION = 2
+_PROMPT_VERSION = 3
 _VALID_MARKER_RE = re.compile(r"^(?:\d{1,3}|\*{1,3})$")
+_BODY_REF_BLOCK_TYPES = {"paragraph", "display_block", "blockquote", "caption", "epigraph_group"}
+_PARAGRAPH_CROP_PADDING_PDF = 12.0
 
 
 @dataclass(frozen=True)
@@ -121,6 +124,7 @@ def run_qwen_marker_locator_repairs(blocks: List[Dict[str, Any]], config: QwenMa
         },
     )
     evidence = _collect_qwen_marker_evidence(
+        blocks,
         sorted(pages),
         config,
         pass_name="initial",
@@ -135,6 +139,7 @@ def run_qwen_marker_locator_repairs(blocks: List[Dict[str, Any]], config: QwenMa
     if missing_pages:
         evidence.extend(
             _collect_qwen_marker_evidence(
+                blocks,
                 missing_pages,
                 config,
                 pass_name="body_ref_retry",
@@ -177,6 +182,7 @@ def apply_qwen_footnote_markers(blocks: List[Dict[str, Any]], evidence_pages: Se
 
 
 def _collect_qwen_marker_evidence(
+    blocks: Sequence[Dict[str, Any]],
     pages: Sequence[int],
     config: QwenMarkerLocatorConfig,
     *,
@@ -192,6 +198,8 @@ def _collect_qwen_marker_evidence(
 
     cache = _read_existing_evidence(config.artifact_dir / "qwen_marker_evidence.json") if config.reuse_evidence else {}
     evidence: List[QwenMarkerPageEvidence] = []
+    geometry = PageGeometry.from_canonical_blocks(blocks)
+    body_blocks_by_page = _body_blocks_by_page(blocks)
     footnote_pages = set() if footnote_pages is None else footnote_pages
     body_ref_pages = set(pages) if body_ref_pages is None else body_ref_pages
     expected_body_markers_by_page = expected_body_markers_by_page or {}
@@ -254,7 +262,7 @@ def _collect_qwen_marker_evidence(
             cache_hit = item is not None
             raw_parts: Dict[str, Any] = dict(item.raw_json) if item is not None else {}
             footnote_cached = item is not None and bool(item.footnote_defs)
-            body_cached = item is not None and bool(item.body_refs)
+            body_cached = item is not None and bool(item.body_refs) and raw_parts.get("body_ref_source") == "paragraph_crops"
             if item is None or (page in footnote_pages and not footnote_cached) or (page in body_ref_pages and not body_cached):
                 if page in footnote_pages and not footnote_cached:
                     call_timer = time.perf_counter()
@@ -307,11 +315,18 @@ def _collect_qwen_marker_evidence(
                     call_timer = time.perf_counter()
                     call_started = _now_iso()
                     try:
-                        body_raw = _call_qwen_marker_locator(image_path, config, prompt=_body_prompt_for_markers(config.body_prompt, markers))
+                        body_raw = _collect_paragraph_body_refs(
+                            pdf_page,
+                            page,
+                            body_blocks_by_page.get(page, []),
+                            geometry,
+                            config,
+                            markers,
+                        )
                     except Exception as exc:
                         model_calls.append(
                             {
-                                "kind": "body_refs",
+                                "kind": "paragraph_body_refs",
                                 "started_at": call_started,
                                 "finished_at": _now_iso(),
                                 "duration_seconds": _duration(call_timer),
@@ -341,15 +356,16 @@ def _collect_qwen_marker_evidence(
                         raise
                     model_calls.append(
                         {
-                            "kind": "body_refs",
+                            "kind": "paragraph_body_refs",
                             "started_at": call_started,
                             "finished_at": _now_iso(),
                             "duration_seconds": _duration(call_timer),
                             "markers_for_prompt": markers,
-                            "raw_item_count": len(body_raw.get("body_refs") or []) if isinstance(body_raw, dict) else 0,
+                            "raw_item_count": len(body_raw),
                         }
                     )
-                    raw_parts["body_refs"] = body_raw.get("body_refs") if isinstance(body_raw, dict) else []
+                    raw_parts["body_refs"] = body_raw
+                    raw_parts["body_ref_source"] = "paragraph_crops"
                 item = QwenMarkerPageEvidence(
                     page=page,
                     image=str(image_path),
@@ -413,9 +429,214 @@ def _body_prompt_for_markers(default_prompt: str, markers: Sequence[str]) -> str
     )
 
 
+def _paragraph_body_prompt_for_markers(markers: Sequence[str], block: Dict[str, Any]) -> str:
+    marker_list = ", ".join(dict.fromkeys([marker for marker in markers if marker]))
+    block_label = block_id(block) or "unknown"
+    return (
+        "/no_think\n"
+        f"只返回JSON，不要解释。当前图片是正文中的一个段落crop，block_id={block_label}。"
+        f"只在这个段落crop内定位这些脚注上标marker：{marker_list}。"
+        "不要识别页底脚注定义，不要根据脚注意义推测，只看真实印刷的小号上标、数字或星号。"
+        "如果看不到任何marker，返回{\"body_refs\":[]}。"
+        "before_text必须是marker左侧紧邻的2到8个原文字符，并以marker左边那个字符结尾；"
+        "after_text必须是marker右侧紧邻的2到8个原文字符，并以marker右边那个字符开头。"
+        "如果marker右边紧邻句号、逗号等标点，after_text必须以该标点开头；如果marker左边紧邻标点，before_text必须以该标点结尾。"
+        "quote必须等于连续原文片段 before_text + marker + after_text，多个marker相邻时必须保留相对位置。"
+        "输出格式:{\"body_refs\":[{\"marker\":\"\",\"before_text\":\"\",\"after_text\":\"\",\"quote\":\"\",\"confidence\":\"high|medium|low\"}]}。"
+        "看不清或无法确定紧邻字符就省略该项。"
+    )
+
+
 def _body_markers_for_prompt(footnote_defs: Sequence[Dict[str, Any]], expected_markers: Sequence[str]) -> List[str]:
     markers = [str(item.get("marker") or "") for item in footnote_defs]
     return list(dict.fromkeys([marker for marker in [*markers, *expected_markers] if marker]))
+
+
+def _body_blocks_by_page(blocks: Sequence[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
+    out: Dict[int, List[Dict[str, Any]]] = {}
+    for block in blocks:
+        if block.get("type") not in _BODY_REF_BLOCK_TYPES or not normalize_ws(str(block.get("text") or "")):
+            continue
+        for page in block_pages(block):
+            if _block_bbox_for_page(block, page) is not None:
+                out.setdefault(page, []).append(block)
+    for page, page_blocks in out.items():
+        page_blocks.sort(key=lambda block: _body_block_sort_key(block, page))
+    return out
+
+
+def _body_block_sort_key(block: Dict[str, Any], page: int) -> tuple[float, float, str]:
+    bbox = _block_bbox_for_page(block, page) or []
+    y = float(bbox[1]) if len(bbox) >= 2 else 0.0
+    x = float(bbox[0]) if len(bbox) >= 1 else 0.0
+    return (y, x, block_id(block))
+
+
+def _block_bbox_for_page(block: Dict[str, Any], page: int) -> Optional[List[float]]:
+    source = block.get("source") or {}
+    boxes: List[List[float]] = []
+    for span in source.get("spans") or []:
+        if not isinstance(span, dict):
+            continue
+        if span.get("page") != page:
+            continue
+        bbox = span.get("bbox")
+        if isinstance(bbox, list) and len(bbox) >= 4:
+            boxes.append([float(value) for value in bbox[:4]])
+    if boxes:
+        return _union_bboxes(boxes)
+    if block_page(block) == page:
+        bbox = block_bbox(block)
+        if bbox is not None:
+            return [float(value) for value in bbox[:4]]
+    return None
+
+
+def _union_bboxes(boxes: Sequence[Sequence[float]]) -> List[float]:
+    return [
+        min(float(box[0]) for box in boxes),
+        min(float(box[1]) for box in boxes),
+        max(float(box[2]) for box in boxes),
+        max(float(box[3]) for box in boxes),
+    ]
+
+
+def _collect_paragraph_body_refs(
+    pdf_page: Any,
+    page: int,
+    blocks: Sequence[Dict[str, Any]],
+    geometry: PageGeometry,
+    config: QwenMarkerLocatorConfig,
+    markers: Sequence[str],
+) -> List[Dict[str, Any]]:
+    markers = list(dict.fromkeys([marker for marker in markers if marker]))
+    if not markers:
+        return []
+    out: List[Dict[str, Any]] = []
+    for block in blocks:
+        bbox = _block_bbox_for_page(block, page)
+        if bbox is None:
+            continue
+        block_label = _safe_filename_part(block_id(block) or "block")
+        image_path = config.artifact_dir / f"page_{page:04d}_{block_label}_{config.dpi}dpi_qwen_body_block.png"
+        block_started = _now_iso()
+        block_timer = time.perf_counter()
+        render_timer = time.perf_counter()
+        try:
+            crop_bbox_pdf = _render_block_crop(pdf_page, image_path, page, bbox, geometry, config)
+        except Exception as exc:
+            _write_timing_event(
+                config,
+                {
+                    "event": "paragraph_body_block_error",
+                    "page": page,
+                    "block_id": block_id(block),
+                    "stage": "render",
+                    "started_at": block_started,
+                    "finished_at": _now_iso(),
+                    "duration_seconds": _duration(block_timer),
+                    "render_seconds": _duration(render_timer),
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            raise
+        render_seconds = _duration(render_timer)
+        model_timer = time.perf_counter()
+        model_started = _now_iso()
+        try:
+            raw = _call_qwen_marker_locator(image_path, config, prompt=_paragraph_body_prompt_for_markers(markers, block))
+        except Exception as exc:
+            _write_timing_event(
+                config,
+                {
+                    "event": "paragraph_body_block_error",
+                    "page": page,
+                    "block_id": block_id(block),
+                    "stage": "model",
+                    "started_at": block_started,
+                    "model_started_at": model_started,
+                    "finished_at": _now_iso(),
+                    "duration_seconds": _duration(block_timer),
+                    "render_seconds": render_seconds,
+                    "model_seconds": _duration(model_timer),
+                    "image": str(image_path),
+                    "crop_bbox_pdf": crop_bbox_pdf,
+                    "markers_for_prompt": markers,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            raise
+        cleaned_refs = _clean_body_refs(raw.get("body_refs") if isinstance(raw, dict) else [])
+        for ref in cleaned_refs:
+            ref["block_id"] = block_id(block)
+            ref["body_ref_source"] = "paragraph_crop"
+            ref["crop_image"] = str(image_path)
+            ref["crop_bbox_pdf"] = crop_bbox_pdf
+            out.append(ref)
+        _write_timing_event(
+            config,
+            {
+                "event": "paragraph_body_block_end",
+                "page": page,
+                "block_id": block_id(block),
+                "started_at": block_started,
+                "model_started_at": model_started,
+                "finished_at": _now_iso(),
+                "duration_seconds": _duration(block_timer),
+                "render_seconds": render_seconds,
+                "model_seconds": _duration(model_timer),
+                "image": str(image_path),
+                "image_bytes": image_path.stat().st_size if image_path.exists() else None,
+                "crop_bbox_pdf": crop_bbox_pdf,
+                "markers_for_prompt": markers,
+                "raw_item_count": len(raw.get("body_refs") or []) if isinstance(raw, dict) else 0,
+                "body_ref_count": len(cleaned_refs),
+            },
+        )
+    return out
+
+
+def _render_block_crop(
+    pdf_page: Any,
+    image_path: Path,
+    page: int,
+    bbox: Sequence[float],
+    geometry: PageGeometry,
+    config: QwenMarkerLocatorConfig,
+) -> List[float]:
+    try:
+        import fitz  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("Qwen marker locator paragraph rendering requires PyMuPDF (`fitz`).") from exc
+    scaled = geometry.scale_bbox(page, list(bbox[:4]), pdf_page.rect)
+    rect = fitz.Rect(*scaled)
+    page_rect = pdf_page.rect
+    pad = _PARAGRAPH_CROP_PADDING_PDF
+    rect = fitz.Rect(
+        max(page_rect.x0, rect.x0 - pad),
+        max(page_rect.y0, rect.y0 - pad),
+        min(page_rect.x1, rect.x1 + pad),
+        min(page_rect.y1, rect.y1 + pad),
+    )
+    if rect.width <= 0 or rect.height <= 0:
+        raise RuntimeError(f"Invalid paragraph crop bbox for page {page}: {list(bbox[:4])}.")
+    scale = config.dpi / 72
+    megapixels = max(1, int(rect.width * scale)) * max(1, int(rect.height * scale)) / 1_000_000
+    if config.max_megapixels > 0 and megapixels > config.max_megapixels:
+        raise RuntimeError(f"Refusing Qwen paragraph crop {image_path.name} ({megapixels:.1f}MP) above max {config.max_megapixels}MP.")
+    pix = pdf_page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=rect, alpha=False)
+    if pix.width <= 0 or pix.height <= 0:
+        raise RuntimeError(f"Invalid Qwen paragraph crop dimensions for {image_path.name}: {pix.width}x{pix.height}.")
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    pix.save(str(image_path))
+    return [round(float(rect.x0), 3), round(float(rect.y0), 3), round(float(rect.x1), 3), round(float(rect.y1), 3)]
+
+
+def _safe_filename_part(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
+    return cleaned or "block"
 
 
 def _render_full_page(pdf_page: Any, image_path: Path, config: QwenMarkerLocatorConfig) -> None:
@@ -505,15 +726,21 @@ def _clean_body_refs(value: Any) -> List[Dict[str, Any]]:
         marker = _clean_marker(item.get("marker"))
         if not marker:
             continue
-        out.append(
-            {
-                "marker": marker,
-                "before_text": str(item.get("before_text") or ""),
-                "after_text": str(item.get("after_text") or ""),
-                "quote": str(item.get("quote") or ""),
-                "confidence": _clean_confidence(item.get("confidence")),
-            }
-        )
+        cleaned = {
+            "marker": marker,
+            "before_text": str(item.get("before_text") or ""),
+            "after_text": str(item.get("after_text") or ""),
+            "quote": str(item.get("quote") or ""),
+            "confidence": _clean_confidence(item.get("confidence")),
+        }
+        for key in ("block_id", "body_ref_source", "crop_image"):
+            value = item.get(key)
+            if value:
+                cleaned[key] = str(value)
+        crop_bbox = item.get("crop_bbox_pdf")
+        if isinstance(crop_bbox, list) and len(crop_bbox) >= 4:
+            cleaned["crop_bbox_pdf"] = [float(value) for value in crop_bbox[:4]]
+        out.append(cleaned)
     return out
 
 
