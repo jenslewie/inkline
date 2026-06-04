@@ -252,9 +252,11 @@ def _collect_qwen_marker_evidence(
             render_duration = _duration(render_timer)
             item = cache.get((page, image_path.name))
             cache_hit = item is not None
-            if item is None:
-                raw_parts: Dict[str, Any] = {}
-                if page in footnote_pages:
+            raw_parts: Dict[str, Any] = dict(item.raw_json) if item is not None else {}
+            footnote_cached = item is not None and bool(item.footnote_defs)
+            body_cached = item is not None and bool(item.body_refs)
+            if item is None or (page in footnote_pages and not footnote_cached) or (page in body_ref_pages and not body_cached):
+                if page in footnote_pages and not footnote_cached:
                     call_timer = time.perf_counter()
                     call_started = _now_iso()
                     try:
@@ -299,7 +301,7 @@ def _collect_qwen_marker_evidence(
                         }
                     )
                     raw_parts["footnote_defs"] = footnote_raw.get("footnote_defs") if isinstance(footnote_raw, dict) else []
-                if page in body_ref_pages:
+                if page in body_ref_pages and not body_cached:
                     marker_items = _clean_footnote_defs(raw_parts.get("footnote_defs"))
                     markers = _body_markers_for_prompt(marker_items, expected_body_markers_by_page.get(page, []))
                     call_timer = time.perf_counter()
@@ -684,8 +686,24 @@ def _read_existing_evidence(path: Path) -> Dict[tuple[int, str], QwenMarkerPageE
         )
         if evidence.prompt_version != _PROMPT_VERSION:
             continue
-        out[(page, Path(image).name)] = evidence
+        key = (page, Path(image).name)
+        existing = out.get(key)
+        out[key] = _merge_cached_qwen_evidence(existing, evidence) if existing is not None else evidence
     return out
+
+
+def _merge_cached_qwen_evidence(left: QwenMarkerPageEvidence, right: QwenMarkerPageEvidence) -> QwenMarkerPageEvidence:
+    raw_json = {**left.raw_json, **right.raw_json}
+    return QwenMarkerPageEvidence(
+        page=right.page,
+        image=right.image or left.image,
+        crop_bbox_pdf=right.crop_bbox_pdf or left.crop_bbox_pdf,
+        dpi=right.dpi or left.dpi,
+        raw_json=raw_json,
+        body_refs=right.body_refs or left.body_refs,
+        footnote_defs=right.footnote_defs or left.footnote_defs,
+        prompt_version=right.prompt_version or left.prompt_version,
+    )
 
 
 def _write_evidence(path: Path, evidence: Sequence[QwenMarkerPageEvidence]) -> None:

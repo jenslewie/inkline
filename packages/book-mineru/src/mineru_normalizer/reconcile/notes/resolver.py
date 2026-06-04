@@ -13,6 +13,7 @@ from .scopes import (
     _NoteResolutionStrategy,
     _pages_for_block,
 )
+from .marker_inline import _rebuild_inline_note_runs_from_exact_refs
 
 __all__ = ["resolve_note_links"]
 
@@ -283,9 +284,16 @@ def _sync_inline_note_refs(blocks: List[Dict[str, Any]]) -> None:
         if not isinstance(attrs, dict):
             continue
         runs = attrs.get("inline_runs")
+        refs = [ref for ref in attrs.get("note_refs") or [] if isinstance(ref, dict)]
+        if refs and all(
+            not _ref_requires_inline_run(ref)
+            or (isinstance(ref.get("inline_offset"), int) and 0 <= int(ref.get("inline_offset")) <= len(str(block.get("text") or "")))
+            for ref in refs
+        ):
+            _rebuild_inline_note_runs_from_exact_refs(block)
+            runs = attrs.get("inline_runs")
         if not isinstance(runs, list):
             continue
-        refs = [ref for ref in attrs.get("note_refs") or [] if isinstance(ref, dict)]
         buckets: Dict[tuple[str, str, int | None], List[Dict[str, Any]]] = {}
         for ref in refs:
             buckets.setdefault(_note_ref_key(ref), []).append(ref)
@@ -317,6 +325,10 @@ def _sync_inline_note_refs(blocks: List[Dict[str, Any]]) -> None:
                 "resolution_confidence",
                 "confidence",
                 "recovery_reason",
+                "inline_position",
+                "inline_position_source",
+                "inline_position_confidence",
+                "inline_offset",
             ):
                 if key in ref:
                     synced[key] = ref[key]
