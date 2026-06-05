@@ -221,4 +221,4 @@ __marimo__/
 .DS_Store
 .idea/
 .venv/
-data/outputs/
+data/
