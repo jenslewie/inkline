@@ -62,6 +62,45 @@ def test_qwen_numeric_marker_does_not_use_before_only_when_after_is_in_quote() -
     assert offset is None
 
 
+def test_qwen_numeric_cross_block_marker_before_terminal_punctuation() -> None:
+    blocks = [
+        {
+            "block_id": "b000102",
+            "type": "paragraph",
+            "text": "今天的新疆包括了丝绸之路在中国西部的绝大部分。",
+            "source": {"page": 23, "bbox": [99, 492, 873, 600]},
+            "attrs": {},
+        },
+        {
+            "block_id": "b000103",
+            "type": "paragraph",
+            "text": "今天在这里可以看到当代新疆壮阔的景色。",
+            "source": {"page": 23, "bbox": [98, 608, 873, 745]},
+            "attrs": {},
+        },
+    ]
+
+    located = _locate_qwen_body_ref(
+        blocks,
+        _NoteContext(blocks),
+        23,
+        "1",
+        {
+            "marker": "1",
+            "before_text": "的绝大部分",
+            "after_text": "今天在这里",
+            "quote": "的绝大部分1今天在这里",
+            "confidence": "high",
+        },
+    )
+
+    assert located is not None
+    block, inline_location = located
+    assert block["block_id"] == "b000102"
+    assert inline_location.char_index == blocks[0]["text"].index("。")
+    assert inline_location.evidence["qwen_cross_block_after_text"] == "今天在这里"
+
+
 def test_qwen_body_ref_uses_block_id_to_disambiguate_matching_context() -> None:
     blocks = [
         {

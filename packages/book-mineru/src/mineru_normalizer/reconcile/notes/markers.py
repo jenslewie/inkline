@@ -1054,9 +1054,7 @@ def _locate_qwen_cross_block_body_ref(
             continue
         if not _text_starts_with_normalized(right_text, after):
             continue
-        if _qwen_reject_numeric_cross_block_terminal_mismatch(left_text, marker, before, after, quote):
-            continue
-        offset = len(left_text)
+        offset = _qwen_cross_block_marker_offset(left_text, marker, before, after, quote)
         matches.append(
             (
                 left,
@@ -1076,6 +1074,34 @@ def _locate_qwen_cross_block_body_ref(
             )
         )
     return matches[0] if len(matches) == 1 else None
+
+
+def _qwen_cross_block_marker_offset(text: str, marker: str, before: str, after: str, quote: str) -> int:
+    default_offset = len(text)
+    if _marker_int(marker) is None or not before or not after or not quote:
+        return default_offset
+    stripped = normalize_ws(text)
+    if not stripped or stripped[-1] not in TERMINAL_PUNCTUATION:
+        return default_offset
+    if not stripped[:-1].endswith(before):
+        return default_offset
+    folded_before = _qwen_fold_bracket_width(before)
+    folded_after = _qwen_fold_bracket_width(after)
+    folded_quote = _qwen_fold_bracket_width(quote)
+    marker_is_between_contexts = any(
+        f"{before}{marker_text}{after}" in quote
+        or f"{folded_before}{marker_text}{folded_after}" in folded_quote
+        for marker_text in _qwen_marker_text_variants(marker)
+    )
+    if not marker_is_between_contexts:
+        return default_offset
+    for index in range(len(text) - 1, -1, -1):
+        if text[index].isspace():
+            continue
+        if text[index] in TERMINAL_PUNCTUATION:
+            return index
+        break
+    return default_offset
 
 
 def _qwen_marker_offset_in_text(text: str, marker: str, before_text: str, after_text: str, quote_text: str = "") -> Optional[int]:
