@@ -47,7 +47,7 @@ _FOOTNOTE_DEFS_PROMPT = (
     "near_text填写该脚注marker后面的开头文字。"
     "看不清或无法确定紧邻字符就省略该项。"
 )
-_PROMPT_VERSION = 3
+_PROMPT_VERSION = 5
 _VALID_MARKER_RE = re.compile(r"^(?:\d{1,3}|\*{1,3})$")
 _BODY_REF_BLOCK_TYPES = {"paragraph", "display_block", "blockquote", "caption", "epigraph_group"}
 _PARAGRAPH_CROP_PADDING_PDF = 12.0
@@ -59,10 +59,11 @@ class QwenMarkerLocatorConfig:
     artifact_dir: Path
     model: str = "qwen3.5:9b"
     api_url: str = "http://127.0.0.1:11434/api/chat"
-    dpi: int = 300
+    dpi: int = 200
     max_megapixels: float = 0.0
     body_prompt: str = _BODY_REFS_PROMPT
     footnote_prompt: str = _FOOTNOTE_DEFS_PROMPT
+    body_mode: str = "page"
     reuse_evidence: bool = False
     timeout_seconds: int = 180
     timing_log_path: Path | None = None
@@ -115,6 +116,7 @@ def run_qwen_marker_locator_repairs(blocks: List[Dict[str, Any]], config: QwenMa
             "started_at": run_started,
             "model": config.model,
             "dpi": config.dpi,
+            "body_mode": config.body_mode,
             "reuse_evidence": config.reuse_evidence,
             "source_pdf": str(config.source_pdf),
             "artifact_dir": str(config.artifact_dir),
@@ -198,8 +200,10 @@ def _collect_qwen_marker_evidence(
 
     cache = _read_existing_evidence(config.artifact_dir / "qwen_marker_evidence.json") if config.reuse_evidence else {}
     evidence: List[QwenMarkerPageEvidence] = []
-    geometry = PageGeometry.from_canonical_blocks(blocks)
-    body_blocks_by_page = _body_blocks_by_page(blocks)
+    use_block_body_refs = config.body_mode == "block"
+    geometry = PageGeometry.from_canonical_blocks(blocks) if use_block_body_refs else None
+    body_blocks_by_page = _body_blocks_by_page(blocks) if use_block_body_refs else {}
+    body_ref_source = "paragraph_crops" if use_block_body_refs else "full_page"
     footnote_pages = set() if footnote_pages is None else footnote_pages
     body_ref_pages = set(pages) if body_ref_pages is None else body_ref_pages
     expected_body_markers_by_page = expected_body_markers_by_page or {}
@@ -261,8 +265,8 @@ def _collect_qwen_marker_evidence(
             item = cache.get((page, image_path.name))
             cache_hit = item is not None
             raw_parts: Dict[str, Any] = dict(item.raw_json) if item is not None else {}
-            footnote_cached = item is not None and bool(item.footnote_defs)
-            body_cached = item is not None and bool(item.body_refs) and raw_parts.get("body_ref_source") == "paragraph_crops"
+            footnote_cached = item is not None and "footnote_defs" in raw_parts
+            body_cached = item is not None and raw_parts.get("body_ref_source") == body_ref_source
             if item is None or (page in footnote_pages and not footnote_cached) or (page in body_ref_pages and not body_cached):
                 if page in footnote_pages and not footnote_cached:
                     call_timer = time.perf_counter()
@@ -315,18 +319,21 @@ def _collect_qwen_marker_evidence(
                     call_timer = time.perf_counter()
                     call_started = _now_iso()
                     try:
-                        body_raw = _collect_paragraph_body_refs(
-                            pdf_page,
-                            page,
-                            body_blocks_by_page.get(page, []),
-                            geometry,
-                            config,
-                            markers,
-                        )
+                        if use_block_body_refs:
+                            body_raw = _collect_paragraph_body_refs(
+                                pdf_page,
+                                page,
+                                body_blocks_by_page.get(page, []),
+                                geometry,
+                                config,
+                                markers,
+                            )
+                        else:
+                            body_raw = _call_qwen_marker_locator(image_path, config, prompt=_body_prompt_for_markers(config.body_prompt, markers))
                     except Exception as exc:
                         model_calls.append(
                             {
-                                "kind": "paragraph_body_refs",
+                                "kind": "paragraph_body_refs" if use_block_body_refs else "body_refs",
                                 "started_at": call_started,
                                 "finished_at": _now_iso(),
                                 "duration_seconds": _duration(call_timer),
@@ -356,16 +363,16 @@ def _collect_qwen_marker_evidence(
                         raise
                     model_calls.append(
                         {
-                            "kind": "paragraph_body_refs",
+                            "kind": "paragraph_body_refs" if use_block_body_refs else "body_refs",
                             "started_at": call_started,
                             "finished_at": _now_iso(),
                             "duration_seconds": _duration(call_timer),
                             "markers_for_prompt": markers,
-                            "raw_item_count": len(body_raw),
+                            "raw_item_count": len(body_raw) if use_block_body_refs else (len(body_raw.get("body_refs") or []) if isinstance(body_raw, dict) else 0),
                         }
                     )
-                    raw_parts["body_refs"] = body_raw
-                    raw_parts["body_ref_source"] = "paragraph_crops"
+                    raw_parts["body_refs"] = body_raw if use_block_body_refs else (body_raw.get("body_refs") if isinstance(body_raw, dict) else [])
+                    raw_parts["body_ref_source"] = body_ref_source
                 item = QwenMarkerPageEvidence(
                     page=page,
                     image=str(image_path),

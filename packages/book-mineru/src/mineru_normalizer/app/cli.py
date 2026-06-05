@@ -42,8 +42,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--marker-locator-artifact-dir", help="Directory for rendered Qwen marker locator pages and evidence JSON; defaults next to the output file")
     p.add_argument("--marker-locator-model", default="qwen3.5:9b", help="Local Ollama visual model name for marker location")
     p.add_argument("--marker-locator-api-url", default="http://127.0.0.1:11434/api/chat", help="Local Ollama chat endpoint for marker location")
-    p.add_argument("--marker-locator-dpi", type=int, default=300, help="DPI for rendering Qwen marker locator full pages")
+    p.add_argument("--marker-locator-dpi", type=int, default=200, help="DPI for rendering Qwen marker locator full pages")
     p.add_argument("--marker-locator-max-megapixels", type=float, default=0.0, help="Maximum megapixels for one Qwen marker locator image; 0 disables the limit")
+    p.add_argument(
+        "--marker-locator-body-mode",
+        choices=["page", "block"],
+        default="page",
+        help="How Qwen should inspect body-side note refs: full page or individual body block crops",
+    )
     p.add_argument("--marker-locator-reuse-evidence", action="store_true", help="Reuse existing Qwen marker locator evidence JSON entries when the rendered image name matches")
     p.add_argument("--marker-locator-timing-log", help="JSONL timing log for each Qwen marker locator page and model call; defaults inside the artifact directory")
     p.add_argument("--glm-ocr-artifact-dir", help=argparse.SUPPRESS)

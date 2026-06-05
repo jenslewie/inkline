@@ -135,6 +135,7 @@ def build_canonical(
                     "enabled": marker_locator_enabled,
                     "repair_enabled": marker_locator_enabled,
                     "model": getattr(args, "marker_locator_model", "qwen3.5:9b"),
+                    "body_mode": getattr(args, "marker_locator_body_mode", "page"),
                     "pages": sorted({item.page for item in marker_locator_evidence}),
                     "evidence": [
                         {"page": item.page, "kind": item.kind}
@@ -174,8 +175,9 @@ def _qwen_marker_locator_config(args: argparse.Namespace) -> QwenMarkerLocatorCo
         artifact_dir=_qwen_marker_locator_artifact_dir(args),
         model=getattr(args, "marker_locator_model", "qwen3.5:9b"),
         api_url=getattr(args, "marker_locator_api_url", "http://127.0.0.1:11434/api/chat"),
-        dpi=int(getattr(args, "marker_locator_dpi", getattr(args, "glm_ocr_dpi", 300))),
+        dpi=int(getattr(args, "marker_locator_dpi", getattr(args, "glm_ocr_dpi", 200))),
         max_megapixels=float(getattr(args, "marker_locator_max_megapixels", getattr(args, "glm_ocr_max_megapixels", 0.0))),
+        body_mode=str(getattr(args, "marker_locator_body_mode", "page")),
         reuse_evidence=bool(getattr(args, "marker_locator_reuse_evidence", False) or getattr(args, "glm_ocr_reuse_evidence", False)),
         timing_log_path=_qwen_marker_locator_timing_log_path(args),
     )
