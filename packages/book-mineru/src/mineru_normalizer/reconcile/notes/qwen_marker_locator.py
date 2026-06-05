@@ -22,7 +22,6 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from ...analysis.page_geometry import PageGeometry
 from ...extraction.text import normalize_note_marker, normalize_ws
 from ..block_access import block_bbox, block_id, block_page, block_pages
-from .glm_ocr import _problem_page_plan
 from .keys import leading_note_marker
 
 _BODY_REFS_PROMPT = (
@@ -51,6 +50,12 @@ _PROMPT_VERSION = 5
 _VALID_MARKER_RE = re.compile(r"^(?:\d{1,3}|\*{1,3})$")
 _BODY_REF_BLOCK_TYPES = {"paragraph", "display_block", "blockquote", "caption", "epigraph_group"}
 _PARAGRAPH_CROP_PADDING_PDF = 12.0
+
+
+@dataclass(frozen=True)
+class _ProblemPagePlan:
+    footnote_pages: set[int]
+    body_ref_pages: set[int]
 
 
 @dataclass(frozen=True)
@@ -182,6 +187,21 @@ def run_qwen_marker_locator_repairs(
         },
     )
     return evidence
+
+
+def _problem_page_plan(blocks: List[Dict[str, Any]]) -> _ProblemPagePlan:
+    footnotes_by_page = _page_footnotes_by_page(blocks)
+    refs_by_page = _body_ref_markers_by_page(blocks)
+    footnote_pages: set[int] = set()
+    body_ref_pages: set[int] = set()
+    for page, footnotes in footnotes_by_page.items():
+        markers = [leading_note_marker(str(block.get("text") or ""), include_superscript=True) for block in footnotes]
+        if any(marker is None for marker in markers):
+            footnote_pages.add(page)
+        defs = {marker for marker in markers if marker}
+        if defs and not defs.issubset(refs_by_page.get(page, set())):
+            body_ref_pages.add(page)
+    return _ProblemPagePlan(footnote_pages=footnote_pages, body_ref_pages=body_ref_pages)
 
 
 def _body_pass_config(config: QwenMarkerLocatorConfig, body_mode: str) -> QwenMarkerLocatorConfig:
@@ -892,6 +912,27 @@ def _page_footnotes_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, List[Dict
         out.setdefault(page, []).append(block)
     for page_blocks in out.values():
         page_blocks.sort(key=lambda block: _footnote_sort_key(block))
+    return out
+
+
+def _body_ref_markers_by_page(blocks: Sequence[Dict[str, Any]]) -> Dict[int, set[str]]:
+    out: Dict[int, set[str]] = {}
+    for block in blocks:
+        if block.get("type") not in _BODY_REF_BLOCK_TYPES:
+            continue
+        fallback_pages = block_pages(block)
+        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+        for ref in attrs.get("note_refs") or []:
+            if not isinstance(ref, dict):
+                continue
+            marker = normalize_note_marker(ref.get("marker", ""))
+            if not marker:
+                continue
+            source_page = ref.get("source_page")
+            pages = [source_page] if isinstance(source_page, int) else fallback_pages
+            for page in pages:
+                if isinstance(page, int):
+                    out.setdefault(page, set()).add(marker)
     return out
 
 
