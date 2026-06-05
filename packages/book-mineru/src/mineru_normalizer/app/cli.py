@@ -58,6 +58,7 @@ def parse_args() -> argparse.Namespace:
         default="qwen",
         help="Missing note-ref recovery strategy: full legacy recovery or qwen-only visual evidence recovery",
     )
+    p.add_argument("--note-trace-log", help="Write a summary JSON of reconcile.notes function/method call counts for this normalization run")
     p.add_argument("--glm-ocr-artifact-dir", help=argparse.SUPPRESS)
     p.add_argument("--glm-ocr-model", default="glm-ocr:latest", help=argparse.SUPPRESS)
     p.add_argument("--glm-ocr-api-url", default="http://127.0.0.1:11434/api/generate", help=argparse.SUPPRESS)

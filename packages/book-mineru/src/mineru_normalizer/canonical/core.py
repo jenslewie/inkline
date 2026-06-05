@@ -46,6 +46,7 @@ from ..reconcile import (
     split_page_footnote_blocks,
 )
 from ..reconcile.notes.qwen_marker_locator import QwenMarkerLocatorConfig, run_qwen_marker_locator_repairs
+from ..reconcile.notes.trace import trace_note_calls
 
 
 def build_canonical(
@@ -85,22 +86,23 @@ def build_canonical(
     merge_cross_page_paragraphs(blocks, args.source_pdf, layout, allow_missing_pdf_text=getattr(args, "allow_missing_pdf_text", False))
     marker_locator_evidence = []
     marker_locator_enabled = bool(getattr(args, "marker_locator_repair", False) or getattr(args, "glm_ocr_repair", False))
-    if marker_locator_enabled:
-        marker_locator_evidence = run_qwen_marker_locator_repairs(blocks, _qwen_marker_locator_config(args))
-    note_cache = PdfPageCache(getattr(args, "source_pdf", None), {p: (layout.page_width, layout.page_height) for p in sorted(pages)}, allow_missing=True, render_zoom=3.0)
-    try:
-        recover_missing_note_refs(
-            blocks,
-            args.source_pdf,
-            layout,
-            model_json=getattr(args, "model", None),
-            pdf_cache=note_cache,
-            qwen_marker_pages=marker_locator_evidence,
-            recovery_mode=getattr(args, "note_recovery_mode", "full"),
-        )
-    finally:
-        note_cache.close()
-    resolve_note_links(blocks)
+    with trace_note_calls(getattr(args, "note_trace_log", None)):
+        if marker_locator_enabled:
+            marker_locator_evidence = run_qwen_marker_locator_repairs(blocks, _qwen_marker_locator_config(args))
+        note_cache = PdfPageCache(getattr(args, "source_pdf", None), {p: (layout.page_width, layout.page_height) for p in sorted(pages)}, allow_missing=True, render_zoom=3.0)
+        try:
+            recover_missing_note_refs(
+                blocks,
+                args.source_pdf,
+                layout,
+                model_json=getattr(args, "model", None),
+                pdf_cache=note_cache,
+                qwen_marker_pages=marker_locator_evidence,
+                recovery_mode=getattr(args, "note_recovery_mode", "full"),
+            )
+        finally:
+            note_cache.close()
+        resolve_note_links(blocks)
     reconcile_display_quotes(blocks, layout)
     reconcile_cjk_numbered_display_quotes(blocks, layout)
     reconcile_generic_display_quote_structures(blocks, layout)
@@ -146,6 +148,7 @@ def build_canonical(
                     "timing_log": str(_qwen_marker_locator_timing_log_path(args)) if marker_locator_enabled else None,
                 }
             },
+            "note_trace_log": str(getattr(args, "note_trace_log", "")) or None,
             "note_recovery_mode": str(getattr(args, "note_recovery_mode", "full")),
             "type_system": {
                 "block_types": block_types,

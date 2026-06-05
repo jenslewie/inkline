@@ -59,6 +59,7 @@ def normalize_mineru_outputs(
         marker_locator_reuse_evidence=False,
         marker_locator_timing_log=None,
         note_recovery_mode="qwen",
+        note_trace_log=None,
         glm_ocr_dpi=300,
         glm_ocr_max_megapixels=0,
     )
