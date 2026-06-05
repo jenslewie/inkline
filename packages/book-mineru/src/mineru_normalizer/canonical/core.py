@@ -96,6 +96,7 @@ def build_canonical(
             model_json=getattr(args, "model", None),
             pdf_cache=note_cache,
             qwen_marker_pages=marker_locator_evidence,
+            recovery_mode=getattr(args, "note_recovery_mode", "full"),
         )
     finally:
         note_cache.close()
@@ -145,6 +146,7 @@ def build_canonical(
                     "timing_log": str(_qwen_marker_locator_timing_log_path(args)) if marker_locator_enabled else None,
                 }
             },
+            "note_recovery_mode": str(getattr(args, "note_recovery_mode", "full")),
             "type_system": {
                 "block_types": block_types,
                 "content_forms": [],

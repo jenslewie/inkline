@@ -40,14 +40,24 @@ def recover_missing_note_refs(blocks: List[Dict[str, Any]], source_pdf: Any = No
     if not scope_defs and not page_defs and not book_defs and not page_symbol_defs:
         return
 
-    _recover_visible_digit_refs(blocks, context, scope_defs, page_defs, book_defs)
-    _recover_visible_symbol_page_refs(blocks, context, page_symbol_defs)
     model_pages = _kwargs.get("model_pages")
     model_json = _kwargs.get("model_json")
     if model_json is None:
         model_json = _kwargs.get("model")
     glm_ocr_pages = _kwargs.get("glm_ocr_pages")
     qwen_marker_pages = _kwargs.get("qwen_marker_pages") or _kwargs.get("marker_locator_pages")
+    recovery_mode = str(_kwargs.get("recovery_mode") or "full")
+    if recovery_mode == "qwen":
+        _recover_direct_page_footnote_qwen_refs(
+            blocks,
+            context,
+            page_defs,
+            page_symbol_defs,
+            qwen_marker_pages=qwen_marker_pages,
+        )
+        return
+    _recover_visible_digit_refs(blocks, context, scope_defs, page_defs, book_defs)
+    _recover_visible_symbol_page_refs(blocks, context, page_symbol_defs)
     _recover_direct_page_footnote_qwen_refs(
         blocks,
         context,

@@ -52,6 +52,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--marker-locator-reuse-evidence", action="store_true", help="Reuse existing Qwen marker locator evidence JSON entries when the rendered image name matches")
     p.add_argument("--marker-locator-timing-log", help="JSONL timing log for each Qwen marker locator page and model call; defaults inside the artifact directory")
+    p.add_argument(
+        "--note-recovery-mode",
+        choices=["full", "qwen"],
+        default="qwen",
+        help="Missing note-ref recovery strategy: full legacy recovery or qwen-only visual evidence recovery",
+    )
     p.add_argument("--glm-ocr-artifact-dir", help=argparse.SUPPRESS)
     p.add_argument("--glm-ocr-model", default="glm-ocr:latest", help=argparse.SUPPRESS)
     p.add_argument("--glm-ocr-api-url", default="http://127.0.0.1:11434/api/generate", help=argparse.SUPPRESS)
