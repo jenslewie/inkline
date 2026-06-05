@@ -13,11 +13,11 @@ import re
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from ...analysis.page_geometry import PageGeometry
 from ...extraction.text import normalize_note_marker, normalize_ws
@@ -60,10 +60,12 @@ class QwenMarkerLocatorConfig:
     model: str = "qwen3.5:9b"
     api_url: str = "http://127.0.0.1:11434/api/chat"
     dpi: int = 200
+    page_dpi: int = 300
+    block_dpi: int = 200
     max_megapixels: float = 0.0
     body_prompt: str = _BODY_REFS_PROMPT
     footnote_prompt: str = _FOOTNOTE_DEFS_PROMPT
-    body_mode: str = "page"
+    body_mode: str = "page_then_block"
     reuse_evidence: bool = False
     timeout_seconds: int = 180
     timing_log_path: Path | None = None
@@ -98,7 +100,12 @@ class QwenMarkerPageEvidence:
         }
 
 
-def run_qwen_marker_locator_repairs(blocks: List[Dict[str, Any]], config: QwenMarkerLocatorConfig) -> List[QwenMarkerPageEvidence]:
+def run_qwen_marker_locator_repairs(
+    blocks: List[Dict[str, Any]],
+    config: QwenMarkerLocatorConfig,
+    *,
+    missing_body_ref_pages_after_page: Callable[[List[QwenMarkerPageEvidence]], Sequence[int]] | None = None,
+) -> List[QwenMarkerPageEvidence]:
     """Collect Qwen marker evidence and apply footnote-definition marker fixes."""
 
     plan = _problem_page_plan(blocks)
@@ -116,6 +123,8 @@ def run_qwen_marker_locator_repairs(blocks: List[Dict[str, Any]], config: QwenMa
             "started_at": run_started,
             "model": config.model,
             "dpi": config.dpi,
+            "page_dpi": config.page_dpi,
+            "block_dpi": config.block_dpi,
             "body_mode": config.body_mode,
             "reuse_evidence": config.reuse_evidence,
             "source_pdf": str(config.source_pdf),
@@ -125,10 +134,11 @@ def run_qwen_marker_locator_repairs(blocks: List[Dict[str, Any]], config: QwenMa
             "body_ref_pages": sorted(plan.body_ref_pages),
         },
     )
+    initial_config = _body_pass_config(config, "page" if config.body_mode == "page_then_block" else config.body_mode)
     evidence = _collect_qwen_marker_evidence(
         blocks,
         sorted(pages),
-        config,
+        initial_config,
         pass_name="initial",
         footnote_pages=plan.footnote_pages,
         body_ref_pages=plan.body_ref_pages,
@@ -136,14 +146,22 @@ def run_qwen_marker_locator_repairs(blocks: List[Dict[str, Any]], config: QwenMa
     )
     apply_qwen_footnote_markers(blocks, evidence)
 
-    body_plan = _problem_page_plan(blocks)
-    missing_pages = sorted(set(body_plan.body_ref_pages) - set(plan.body_ref_pages))
+    if config.body_mode == "page_then_block":
+        missing_pages = (
+            sorted({int(page) for page in missing_body_ref_pages_after_page(evidence)})
+            if missing_body_ref_pages_after_page is not None
+            else []
+        )
+    else:
+        body_plan = _problem_page_plan(blocks)
+        missing_pages = sorted(set(body_plan.body_ref_pages) - set(plan.body_ref_pages))
     if missing_pages:
+        retry_config = _body_pass_config(config, "block" if config.body_mode == "page_then_block" else config.body_mode)
         evidence.extend(
             _collect_qwen_marker_evidence(
                 blocks,
                 missing_pages,
-                config,
+                retry_config,
                 pass_name="body_ref_retry",
                 footnote_pages=set(),
                 body_ref_pages=set(missing_pages),
@@ -164,6 +182,14 @@ def run_qwen_marker_locator_repairs(blocks: List[Dict[str, Any]], config: QwenMa
         },
     )
     return evidence
+
+
+def _body_pass_config(config: QwenMarkerLocatorConfig, body_mode: str) -> QwenMarkerLocatorConfig:
+    if body_mode == "page":
+        return replace(config, body_mode="page", dpi=config.page_dpi)
+    if body_mode == "block":
+        return replace(config, body_mode="block", dpi=config.block_dpi)
+    return config
 
 
 def apply_qwen_footnote_markers(blocks: List[Dict[str, Any]], evidence_pages: Sequence[QwenMarkerPageEvidence]) -> None:
