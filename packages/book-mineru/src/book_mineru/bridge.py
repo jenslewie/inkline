@@ -48,6 +48,8 @@ def normalize_mineru_outputs(
         title=title,
         language=language,
         marker_locator_repair=False,
+        glm_ocr_repair=False,
+        enable_glm_ocr=False,
         marker_locator_artifact_dir=None,
         marker_locator_model="qwen3.5:9b",
         marker_locator_api_url="http://127.0.0.1:11434/api/chat",
@@ -58,7 +60,10 @@ def normalize_mineru_outputs(
         marker_locator_body_mode="page_then_block",
         marker_locator_reuse_evidence=False,
         marker_locator_timing_log=None,
+        note_recovery_mode="qwen",
         note_trace_log=None,
+        glm_ocr_dpi=300,
+        glm_ocr_max_megapixels=0,
     )
     pages, page_sizes = load_inputs(args)
     canonical = build_canonical(pages, page_sizes, args)

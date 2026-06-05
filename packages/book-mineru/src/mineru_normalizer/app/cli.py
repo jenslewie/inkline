@@ -28,6 +28,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use local Qwen visual marker locator to repair targeted problem pages; MinerU remains the primary parser",
     )
+    p.add_argument(
+        "--glm-ocr-repair",
+        action="store_true",
+        help="Deprecated alias for --marker-locator-repair",
+    )
+    p.add_argument(
+        "--enable-glm-ocr",
+        action="store_true",
+        dest="glm_ocr_repair",
+        help=argparse.SUPPRESS,
+    )
     p.add_argument("--marker-locator-artifact-dir", help="Directory for rendered Qwen marker locator pages and evidence JSON; defaults next to the output file")
     p.add_argument("--marker-locator-model", default="qwen3.5:9b", help="Local Ollama visual model name for marker location")
     p.add_argument("--marker-locator-api-url", default="http://127.0.0.1:11434/api/chat", help="Local Ollama chat endpoint for marker location")
@@ -45,11 +56,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--marker-locator-timing-log", help="JSONL timing log for each Qwen marker locator page and model call; defaults inside the artifact directory")
     p.add_argument(
         "--note-recovery-mode",
-        choices=["qwen"],
+        choices=["full", "qwen"],
         default="qwen",
-        help="Missing note-ref recovery strategy; only qwen visual evidence recovery is supported",
+        help="Missing note-ref recovery strategy: full legacy recovery or qwen-only visual evidence recovery",
     )
     p.add_argument("--note-trace-log", help="Write a summary JSON of reconcile.notes function/method call counts for this normalization run")
+    p.add_argument("--glm-ocr-artifact-dir", help=argparse.SUPPRESS)
+    p.add_argument("--glm-ocr-model", default="glm-ocr:latest", help=argparse.SUPPRESS)
+    p.add_argument("--glm-ocr-api-url", default="http://127.0.0.1:11434/api/generate", help=argparse.SUPPRESS)
+    p.add_argument("--glm-ocr-dpi", type=int, default=300, help=argparse.SUPPRESS)
+    p.add_argument("--glm-ocr-max-megapixels", type=float, default=0.0, help=argparse.SUPPRESS)
+    p.add_argument("--glm-ocr-footnote-min-y", type=float, default=0.70, help=argparse.SUPPRESS)
+    p.add_argument("--glm-ocr-marker-band-width", type=float, default=0.18, help=argparse.SUPPRESS)
+    p.add_argument("--glm-ocr-reuse-evidence", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--glm-ocr-refresh-footnote-evidence", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--output", default="canonical.json", help="Output canonical JSON path")
     p.add_argument("--doc-id", default=None)
     p.add_argument("--title", default=None)

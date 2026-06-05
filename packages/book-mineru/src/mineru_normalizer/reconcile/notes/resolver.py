@@ -181,8 +181,16 @@ def _note_ref_source_rank(ref: Dict[str, Any]) -> int:
     source = str(ref.get("source") or "")
     if source in {"equation_inline", "equation_interline", "trailing_text"}:
         return 100
-    if source == "qwen_marker_locator":
+    if source in {"qwen_marker_locator", "glm_ocr"}:
         return 90
+    if source in {"secondary_page_sequence_gap", "secondary_page_missing_ref"}:
+        return 60
+    if source in {"recovered_text"}:
+        return 40
+    if source in {"page_single_marker_image"}:
+        return 30
+    if source in {"page_sequence_gap", "sequence_gap"}:
+        return 20
     return 50
 
 
