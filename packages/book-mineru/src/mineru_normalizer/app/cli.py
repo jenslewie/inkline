@@ -42,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--marker-locator-artifact-dir", help="Directory for rendered Qwen marker locator pages and evidence JSON; defaults next to the output file")
     p.add_argument("--marker-locator-model", default="qwen3.5:9b", help="Local Ollama visual model name for marker location")
     p.add_argument("--marker-locator-api-url", default="http://127.0.0.1:11434/api/chat", help="Local Ollama chat endpoint for marker location")
+    p.add_argument("--marker-locator-keep-alive", default="2h", help="Ollama keep_alive value for Qwen marker locator requests")
     p.add_argument("--marker-locator-dpi", type=int, default=None, help="Deprecated shorthand that sets both page and block DPI for Qwen marker location")
     p.add_argument("--marker-locator-page-dpi", type=int, default=300, help="DPI for Qwen full-page body-ref marker location")
     p.add_argument("--marker-locator-block-dpi", type=int, default=200, help="DPI for Qwen paragraph-block retry marker location")

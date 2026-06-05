@@ -53,6 +53,7 @@ def normalize_mineru_outputs(
         marker_locator_artifact_dir=None,
         marker_locator_model="qwen3.5:9b",
         marker_locator_api_url="http://127.0.0.1:11434/api/chat",
+        marker_locator_keep_alive="2h",
         marker_locator_dpi=None,
         marker_locator_page_dpi=300,
         marker_locator_block_dpi=200,

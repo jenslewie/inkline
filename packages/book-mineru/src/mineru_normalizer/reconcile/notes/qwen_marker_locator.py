@@ -68,6 +68,7 @@ class QwenMarkerLocatorConfig:
     body_mode: str = "page_then_block"
     reuse_evidence: bool = False
     timeout_seconds: int = 180
+    keep_alive: str = "2h"
     timing_log_path: Path | None = None
 
 
@@ -701,7 +702,7 @@ def _call_qwen_marker_locator(image_path: Path, config: QwenMarkerLocatorConfig,
         "format": "json",
         "think": False,
         "stream": False,
-        "keep_alive": "0s",
+        "keep_alive": config.keep_alive,
         "options": {"temperature": 0, "num_predict": 2048},
     }
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
