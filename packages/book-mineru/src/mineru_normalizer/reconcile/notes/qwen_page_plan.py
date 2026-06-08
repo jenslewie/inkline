@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 
 from ...extraction.text import normalize_note_marker, normalize_ws
 from ..block_access import block_bbox, block_page, block_pages
+from ...schema.models import CanonicalBlock
 from .marker_patterns import BODY_TYPES, _marker_int
 from .keys import leading_note_marker
 from .scopes import _EndnoteSectionStrategy, _NoteContext
@@ -23,7 +24,7 @@ class _ProblemPagePlan:
     body_candidate_block_ids: Set[int] = field(default_factory=set)
 
 
-def _problem_page_plan(blocks: List[Dict[str, Any]]) -> _ProblemPagePlan:
+def _problem_page_plan(blocks: List[CanonicalBlock]) -> _ProblemPagePlan:
     footnotes_by_page = _page_footnotes_by_page(blocks)
     footnote_pages: Set[int] = set()
     body_ref_pages: Set[int] = set()
@@ -50,8 +51,8 @@ def _problem_page_plan(blocks: List[Dict[str, Any]]) -> _ProblemPagePlan:
     )
 
 
-def _page_footnotes_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
-    out: Dict[int, List[Dict[str, Any]]] = {}
+def _page_footnotes_by_page(blocks: List[CanonicalBlock]) -> Dict[int, List[CanonicalBlock]]:
+    out: Dict[int, List[CanonicalBlock]] = {}
     for block in blocks:
         if block.get("type") != "footnote":
             continue
@@ -67,14 +68,14 @@ def _page_footnotes_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, List[Dict
     return out
 
 
-def _footnote_sort_key(block: Dict[str, Any]) -> tuple[float, float, str]:
+def _footnote_sort_key(block: CanonicalBlock) -> tuple[float, float, str]:
     bbox = block_bbox(block) or []
     y = float(bbox[1]) if len(bbox) >= 2 else 0.0
     x = float(bbox[0]) if len(bbox) >= 1 else 0.0
     return (y, x, str(block.get("id") or block.get("block_id") or ""))
 
 
-def _page_footnote_markers_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, List[str]]:
+def _page_footnote_markers_by_page(blocks: List[CanonicalBlock]) -> Dict[int, List[str]]:
     out: Dict[int, List[str]] = {}
     for page, page_blocks in _page_footnotes_by_page(blocks).items():
         markers: List[str] = []
@@ -88,8 +89,8 @@ def _page_footnote_markers_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, Li
     return out
 
 
-def _body_ref_items_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, List[tuple[int, Dict[str, Any], int]]]:
-    out: Dict[int, List[tuple[int, Dict[str, Any], int]]] = {}
+def _body_ref_items_by_page(blocks: List[CanonicalBlock]) -> Dict[int, List[tuple[int, CanonicalBlock, int]]]:
+    out: Dict[int, List[tuple[int, CanonicalBlock, int]]] = {}
     for block_index, block in enumerate(blocks):
         if block.get("type") not in BODY_TYPES:
             continue
@@ -112,10 +113,10 @@ def _body_ref_items_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, List[tupl
 
 
 def _anchored_body_candidate_block_ids(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     page: int,
     footnote_markers: Sequence[Optional[str]],
-    refs: Sequence[tuple[int, Dict[str, Any], int]],
+    refs: Sequence[tuple[int, CanonicalBlock, int]],
 ) -> Set[int]:
     defs = {marker_int for marker in footnote_markers if (marker_int := _marker_int(marker)) is not None}
     if len(defs) < 3 or not refs:
@@ -139,7 +140,7 @@ def _anchored_body_candidate_block_ids(
     return candidate_ids
 
 
-def _endnote_body_candidate_block_ids(blocks: List[Dict[str, Any]]) -> Set[int]:
+def _endnote_body_candidate_block_ids(blocks: List[CanonicalBlock]) -> Set[int]:
     context = _NoteContext(blocks)
     candidates: Set[int] = set()
     for scope_key, defs in _chapter_endnote_defs_by_scope(blocks, context).items():
@@ -152,7 +153,7 @@ def _endnote_body_candidate_block_ids(blocks: List[Dict[str, Any]]) -> Set[int]:
     return candidates
 
 
-def _chapter_endnote_defs_by_scope(blocks: List[Dict[str, Any]], context: _NoteContext) -> Dict[str, Set[int]]:
+def _chapter_endnote_defs_by_scope(blocks: List[CanonicalBlock], context: _NoteContext) -> Dict[str, Set[int]]:
     out: Dict[str, Set[int]] = {}
     for candidate in _EndnoteSectionStrategy("chapter_endnote", scope_required=True).collect(blocks, context):
         marker = _marker_int(candidate.marker)
@@ -161,7 +162,7 @@ def _chapter_endnote_defs_by_scope(blocks: List[Dict[str, Any]], context: _NoteC
     return out
 
 
-def _book_endnote_defs(blocks: List[Dict[str, Any]], context: _NoteContext) -> Set[int]:
+def _book_endnote_defs(blocks: List[CanonicalBlock], context: _NoteContext) -> Set[int]:
     out: Set[int] = set()
     for candidate in _EndnoteSectionStrategy("book_endnote", scope_required=False).collect(blocks, context):
         marker = _marker_int(candidate.marker)
@@ -171,11 +172,11 @@ def _book_endnote_defs(blocks: List[Dict[str, Any]], context: _NoteContext) -> S
 
 
 def _body_ref_items_for_scope(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     context: _NoteContext,
     scope_key: Optional[str],
-) -> List[tuple[int, Dict[str, Any], int]]:
-    out: List[tuple[int, Dict[str, Any], int]] = []
+) -> List[tuple[int, CanonicalBlock, int]]:
+    out: List[tuple[int, CanonicalBlock, int]] = []
     for block_index, block in enumerate(blocks):
         if block.get("type") not in BODY_TYPES:
             continue
@@ -193,9 +194,9 @@ def _body_ref_items_for_scope(
 
 
 def _anchored_scope_candidate_block_ids(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     context: _NoteContext,
-    refs: Sequence[tuple[int, Dict[str, Any], int]],
+    refs: Sequence[tuple[int, CanonicalBlock, int]],
     defs: Set[int],
     *,
     scope_key: Optional[str],
@@ -221,7 +222,7 @@ def _anchored_scope_candidate_block_ids(
     return candidate_ids
 
 
-def _closest_anchor_span(refs: Sequence[tuple[int, Dict[str, Any], int]], left_anchor: int, right_anchor: int) -> Optional[tuple[int, int]]:
+def _closest_anchor_span(refs: Sequence[tuple[int, CanonicalBlock, int]], left_anchor: int, right_anchor: int) -> Optional[tuple[int, int]]:
     spans: List[tuple[int, int]] = []
     left_indexes = [block_index for block_index, _block, marker in refs if marker == left_anchor]
     right_indexes = [block_index for block_index, _block, marker in refs if marker == right_anchor]
@@ -234,7 +235,7 @@ def _closest_anchor_span(refs: Sequence[tuple[int, Dict[str, Any], int]], left_a
     return min(spans, key=lambda span: span[1] - span[0])
 
 
-def _fallback_page_body_candidate_block_ids(blocks: List[Dict[str, Any]], page: int) -> Set[int]:
+def _fallback_page_body_candidate_block_ids(blocks: List[CanonicalBlock], page: int) -> Set[int]:
     return {
         id(block)
         for block in blocks
@@ -242,7 +243,7 @@ def _fallback_page_body_candidate_block_ids(blocks: List[Dict[str, Any]], page: 
     }
 
 
-def _is_body_ref_candidate_block(block: Dict[str, Any], page: int) -> bool:
+def _is_body_ref_candidate_block(block: CanonicalBlock, page: int) -> bool:
     if block.get("type") not in BODY_TYPES:
         return False
     if page not in block_pages(block):
@@ -254,7 +255,7 @@ def _is_body_ref_candidate_block(block: Dict[str, Any], page: int) -> bool:
     return block_bbox(block) is not None
 
 
-def _is_scope_body_ref_candidate_block(block: Dict[str, Any], context: _NoteContext, scope_key: Optional[str]) -> bool:
+def _is_scope_body_ref_candidate_block(block: CanonicalBlock, context: _NoteContext, scope_key: Optional[str]) -> bool:
     if block.get("type") not in BODY_TYPES:
         return False
     if scope_key is not None and context.scope_for(block) != scope_key:

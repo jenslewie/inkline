@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Sequence
 from ...analysis.page_geometry import PageGeometry
 from ...extraction.text import normalize_ws
 from ..block_access import block_id
+from ...schema.models import CanonicalBlock
 from . import qwen_api
 from . import qwen_page_plan
 from . import qwen_prompt
@@ -24,7 +25,7 @@ from . import qwen_types
 
 
 def _collect_qwen_marker_evidence(
-    blocks: Sequence[Dict[str, Any]],
+    blocks: Sequence[CanonicalBlock],
     pages: Sequence[int],
     config: qwen_types.QwenMarkerLocatorConfig,
     *,
@@ -238,7 +239,7 @@ def _collect_body_refs_for_page(
     config: qwen_types.QwenMarkerLocatorConfig,
     raw_parts: Dict[str, Any],
     use_block_body_refs: bool,
-    body_blocks_by_page: Dict[int, List[Dict[str, Any]]],
+    body_blocks_by_page: Dict[int, List[CanonicalBlock]],
     geometry: PageGeometry | None,
     expected_body_markers_by_page: Dict[int, List[str]],
     body_ref_source: str,
@@ -361,7 +362,7 @@ def _retry_missing_single_marker_body_refs(
 def _collect_paragraph_body_refs(
     pdf_page: Any,
     page: int,
-    blocks: Sequence[Dict[str, Any]],
+    blocks: Sequence[CanonicalBlock],
     geometry: PageGeometry,
     config: qwen_types.QwenMarkerLocatorConfig,
     markers: Sequence[str],
@@ -382,7 +383,7 @@ def _collect_paragraph_body_refs(
 def _collect_single_paragraph_body_refs(
     pdf_page: Any,
     page: int,
-    block: Dict[str, Any],
+    block: CanonicalBlock,
     bbox: List[float],
     geometry: PageGeometry,
     config: qwen_types.QwenMarkerLocatorConfig,
@@ -469,7 +470,7 @@ def _collect_single_paragraph_body_refs(
     return cleaned_refs
 
 
-def _page_footnote_markers_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, List[str]]:
+def _page_footnote_markers_by_page(blocks: List[CanonicalBlock]) -> Dict[int, List[str]]:
     return qwen_page_plan._page_footnote_markers_by_page(blocks)
 
 

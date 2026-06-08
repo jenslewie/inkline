@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from ...extraction.text import normalize_note_marker, normalize_ws
+from ...schema.models import CanonicalBlock
 from .keys import leading_note_marker
 from .marker_inline import (
     _InlineMarkerLocation,
@@ -36,7 +37,7 @@ from .scopes import _EndnoteSectionStrategy, _NoteContext
 
 
 def _recover_direct_page_footnote_qwen_refs(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     context: _NoteContext,
     page_defs: Dict[int, Set[int]],
     page_symbol_defs: Dict[int, Set[str]],
@@ -97,7 +98,7 @@ def _recover_direct_page_footnote_qwen_refs(
 
 
 def _collect_page_footnote_qwen_matches(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     context: _NoteContext,
     blocks_by_id: Dict[str, Dict[str, Any]],
     page: int,
@@ -105,7 +106,7 @@ def _collect_page_footnote_qwen_matches(
     existing: Set[str],
     evidence: Dict[str, Any],
 ) -> Tuple[
-    List[Tuple[Dict[str, Any], str, Dict[str, Any], _InlineMarkerLocation]],
+    List[Tuple[CanonicalBlock, str, Dict[str, Any], _InlineMarkerLocation]],
     Set[Tuple[int, int]],
     Set[Tuple[int, str, str, str]],
 ]:
@@ -115,7 +116,7 @@ def _collect_page_footnote_qwen_matches(
     (located_items, ambiguous_keys, ambiguous_anchor_keys) for the
     apply phase to write new note refs.
     """
-    located_items: List[Tuple[Dict[str, Any], str, Dict[str, Any], _InlineMarkerLocation]] = []
+    located_items: List[Tuple[CanonicalBlock, str, Dict[str, Any], _InlineMarkerLocation]] = []
     for item in evidence.get("body_refs") or []:
         if not isinstance(item, dict):
             continue
@@ -139,14 +140,14 @@ def _collect_page_footnote_qwen_matches(
 
 
 def _apply_page_footnote_qwen_matches(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     context: _NoteContext,
     blocks_by_id: Dict[str, Dict[str, Any]],
     block_index: Dict[int, int],
-    refs_by_page: Dict[int, List[Tuple[int, Dict[str, Any], int]]],
+    refs_by_page: Dict[int, List[Tuple[int, CanonicalBlock, int]]],
     existing: Set[str],
     page: int,
-    located_items: List[Tuple[Dict[str, Any], str, Dict[str, Any], _InlineMarkerLocation]],
+    located_items: List[Tuple[CanonicalBlock, str, Dict[str, Any], _InlineMarkerLocation]],
     ambiguous_keys: Set[Tuple[int, int]],
     ambiguous_anchor_keys: Set[Tuple[int, str, str, str]],
 ) -> None:
@@ -180,7 +181,7 @@ def _apply_page_footnote_qwen_matches(
 
 
 def _recover_direct_scoped_endnote_qwen_refs(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     context: _NoteContext,
     *,
     qwen_marker_pages: Any = None,
@@ -192,7 +193,7 @@ def _recover_direct_scoped_endnote_qwen_refs(
         return
     existing_by_scope = _existing_body_ref_markers_by_scope(blocks, context)
     block_index = {id(block): index for index, block in enumerate(blocks)}
-    located_items: List[Tuple[Dict[str, Any], str, int, Dict[str, Any], _InlineMarkerLocation, Optional[str]]] = []
+    located_items: List[Tuple[CanonicalBlock, str, int, Dict[str, Any], _InlineMarkerLocation, Optional[str]]] = []
     for evidence in _qwen_marker_page_items(qwen_marker_pages):
         page = evidence.get("page")
         if not isinstance(page, int):
@@ -248,7 +249,7 @@ def _recover_direct_scoped_endnote_qwen_refs(
 
 
 def _scoped_endnote_definition_markers(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     context: _NoteContext,
 ) -> Dict[Optional[str], Set[str]]:
     counts: Dict[Optional[str], Dict[str, int]] = {}
@@ -269,7 +270,7 @@ def _scoped_endnote_definition_markers(
 
 
 def _existing_body_ref_markers_by_scope(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     context: _NoteContext,
 ) -> Dict[Optional[str], Set[str]]:
     out: Dict[Optional[str], Set[str]] = {}
@@ -285,7 +286,7 @@ def _existing_body_ref_markers_by_scope(
 
 
 def _refine_existing_qwen_body_ref(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     context: _NoteContext,
     blocks_by_id: Dict[str, Dict[str, Any]],
     page: int,
@@ -301,7 +302,7 @@ def _refine_existing_qwen_body_ref(
 
 
 def _update_existing_qwen_ref_inline_location(
-    block: Dict[str, Any],
+    block: CanonicalBlock,
     marker: str,
     page: int,
     item: Dict[str, Any],
@@ -367,7 +368,7 @@ def _update_existing_qwen_ref_inline_location(
     return changed
 
 
-def _has_valid_existing_structured_inline_run(block: Dict[str, Any], ref: Dict[str, Any]) -> bool:
+def _has_valid_existing_structured_inline_run(block: CanonicalBlock, ref: Dict[str, Any]) -> bool:
     if str(ref.get("source") or "") not in {"equation_inline", "equation_interline", "trailing_text"}:
         return False
     runs = (block.get("attrs") or {}).get("inline_runs") or block.get("inline_runs")
@@ -400,7 +401,7 @@ def _structured_inline_runs_match_text(runs: Sequence[Any], text: str) -> bool:
     return reconstructed == text or normalize_ws(reconstructed) == normalize_ws(text)
 
 
-def _visible_raw_marker_inline_location(block: Dict[str, Any], ref: Dict[str, Any]) -> Optional[_InlineMarkerLocation]:
+def _visible_raw_marker_inline_location(block: CanonicalBlock, ref: Dict[str, Any]) -> Optional[_InlineMarkerLocation]:
     raw_marker = str(ref.get("raw_marker") or "")
     marker = normalize_note_marker(ref.get("marker", ""))
     text = str(block.get("text") or "")
@@ -434,7 +435,7 @@ def _visible_raw_marker_inline_location(block: Dict[str, Any], ref: Dict[str, An
     )
 
 
-def _user_verified_inline_location(block: Dict[str, Any], ref: Dict[str, Any]) -> Optional[_InlineMarkerLocation]:
+def _user_verified_inline_location(block: CanonicalBlock, ref: Dict[str, Any]) -> Optional[_InlineMarkerLocation]:
     evidence = ref.get("evidence") if isinstance(ref.get("evidence"), dict) else {}
     reason = str(evidence.get("manual_correction_reason") or "")
     if not reason.startswith("user_verified"):
@@ -460,7 +461,7 @@ def _user_verified_inline_location(block: Dict[str, Any], ref: Dict[str, Any]) -
 
 def _align_symbol_refs_from_qwen_footnote_context(
     blocks_by_id: Dict[str, Dict[str, Any]],
-    block: Dict[str, Any],
+    block: CanonicalBlock,
     page: int,
     item: Dict[str, Any],
     inline_location: _InlineMarkerLocation,
@@ -493,7 +494,7 @@ def _align_symbol_refs_from_qwen_footnote_context(
         _rebuild_inline_note_runs_from_exact_refs(block)
 
 
-def _qwen_after_text_matches_note_definition(after: str, note_block: Dict[str, Any]) -> bool:
+def _qwen_after_text_matches_note_definition(after: str, note_block: CanonicalBlock) -> bool:
     note_text = normalize_ws(str(note_block.get("text") or ""))
     if not note_text:
         return False
@@ -504,7 +505,7 @@ def _qwen_after_text_matches_note_definition(after: str, note_block: Dict[str, A
     return note_text.startswith(after) or _qwen_fold_bracket_width(note_text).startswith(_qwen_fold_bracket_width(after))
 
 
-def _split_same_offset_symbol_numeric_refs_around_terminal_punctuation(block: Dict[str, Any], page: int, offset: int) -> bool:
+def _split_same_offset_symbol_numeric_refs_around_terminal_punctuation(block: CanonicalBlock, page: int, offset: int) -> bool:
     text = str(block.get("text") or "")
     if offset < 0 or offset >= len(text) or text[offset] not in TERMINAL_PUNCTUATION:
         return False
@@ -531,7 +532,7 @@ def _split_same_offset_symbol_numeric_refs_around_terminal_punctuation(block: Di
 
 
 def _ambiguous_qwen_location_keys(
-    located_items: Sequence[Tuple[Dict[str, Any], str, Dict[str, Any], _InlineMarkerLocation]]
+    located_items: Sequence[Tuple[CanonicalBlock, str, Dict[str, Any], _InlineMarkerLocation]]
 ) -> Set[Tuple[int, int]]:
     markers_by_key: Dict[Tuple[int, int], Set[str]] = {}
     for target, marker, _item, inline_location in located_items:
@@ -540,7 +541,7 @@ def _ambiguous_qwen_location_keys(
 
 
 def _ambiguous_qwen_anchor_keys(
-    located_items: Sequence[Tuple[Dict[str, Any], str, Dict[str, Any], _InlineMarkerLocation]]
+    located_items: Sequence[Tuple[CanonicalBlock, str, Dict[str, Any], _InlineMarkerLocation]]
 ) -> Set[Tuple[int, str, str, str]]:
     markers_by_anchor: Dict[Tuple[int, str, str], Set[str]] = {}
     for target, marker, item, _inline_location in located_items:
@@ -554,7 +555,7 @@ def _ambiguous_qwen_anchor_keys(
     }
 
 
-def _qwen_anchor_key(target: Dict[str, Any], marker: str, item: Dict[str, Any]) -> Tuple[int, str, str, str]:
+def _qwen_anchor_key(target: CanonicalBlock, marker: str, item: Dict[str, Any]) -> Tuple[int, str, str, str]:
     return (
         id(target),
         marker,
@@ -563,7 +564,7 @@ def _qwen_anchor_key(target: Dict[str, Any], marker: str, item: Dict[str, Any]) 
     )
 
 
-def _strip_qwen_visible_marker(block: Dict[str, Any], inline_location: _InlineMarkerLocation) -> None:
+def _strip_qwen_visible_marker(block: CanonicalBlock, inline_location: _InlineMarkerLocation) -> None:
     marker_text = str(inline_location.evidence.get("qwen_visible_marker_text") or "")
     offset = inline_location.char_index
     if not marker_text:
@@ -575,10 +576,10 @@ def _strip_qwen_visible_marker(block: Dict[str, Any], inline_location: _InlineMa
 
 
 def _body_refs_by_source_page(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     context: _NoteContext,
-) -> Dict[int, List[Tuple[int, Dict[str, Any], int]]]:
-    refs_by_page: Dict[int, List[Tuple[int, Dict[str, Any], int]]] = {}
+) -> Dict[int, List[Tuple[int, CanonicalBlock, int]]]:
+    refs_by_page: Dict[int, List[Tuple[int, CanonicalBlock, int]]] = {}
     for block_index, block in enumerate(blocks):
         if block.get("type") not in BODY_TYPES:
             continue

@@ -3,9 +3,63 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NotRequired, Optional, TypedDict
 
 BBox = List[float]
+
+
+class CanonicalSource(TypedDict):
+    """TypedDict for the ``source`` field of a CanonicalBlock.
+
+    ``page`` and ``bbox`` are required keys but may be ``None`` at runtime
+    (e.g., for cross-page blocks with no single page).  ``pages`` is truly
+    optional — it only appears when a block spans multiple pages.
+    """
+    page: Optional[int]
+    bbox: Optional[BBox]
+    pages: NotRequired[List[int]]
+
+
+class CanonicalBlock(TypedDict, total=False):
+    """TypedDict for the canonical block dict produced by ``canonical_block()``.
+
+    All keys except those marked ``NotRequired`` in ``CanonicalSource`` are
+    always present when the block is created by ``canonical_block()``.  The
+    ``total=False`` setting allows downstream code to safely read optional
+    keys like ``level`` without triggering ``KeyError`` — matching the
+    runtime pattern where many blocks lack ``level``.
+
+    NOTE: ``Dict[str, Any]`` is still used for ``attrs`` and for parameters
+    that may hold API responses, evidence dicts, or inline run dicts — only
+    the top-level block structure gets a TypedDict.
+    """
+    block_id: str
+    type: str
+    text: str
+    source: CanonicalSource
+    attrs: Dict[str, Any]
+    level: int
+
+
+class NoteRefDict(TypedDict, total=False):
+    """TypedDict for a single note_refs item inside ``attrs``.
+
+    ``total=False`` because downstream consumers create refs with varying
+    subsets of keys (e.g., a minimal ref has only ``marker`` + ``source``).
+    """
+    marker: str
+    source: str
+    source_page: int
+    target_note_id: str
+    target_block_id: str
+    raw_marker: str
+    inline_position: str
+    inline_position_source: str
+    inline_position_confidence: str
+    inline_offset: int
+    confidence: str
+    recovery_reason: str
+    evidence: Dict[str, Any]
 
 @dataclass
 class NoteRef:
@@ -72,8 +126,8 @@ def canonical_block(
     attrs: Optional[Dict[str, Any]] = None,
     level: Optional[int] = None,
     source_pages: Optional[List[int]] = None,
-) -> Dict[str, Any]:
-    obj: Dict[str, Any] = {
+) -> CanonicalBlock:
+    obj: CanonicalBlock = {
         "block_id": block_id,
         "type": block_type,
         "text": text,

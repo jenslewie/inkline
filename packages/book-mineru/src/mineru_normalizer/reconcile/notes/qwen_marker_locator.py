@@ -28,6 +28,7 @@ from . import qwen_evidence
 from . import qwen_page_plan
 from . import qwen_prompt
 from . import qwen_types
+from ...schema.models import CanonicalBlock
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +54,7 @@ QwenMarkerPageEvidence = qwen_types.QwenMarkerPageEvidence
 # ---------------------------------------------------------------------------
 
 def run_qwen_marker_locator_repairs(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     config: qwen_types.QwenMarkerLocatorConfig,
     *,
     missing_body_ref_pages_after_page: Callable[[List[qwen_types.QwenMarkerPageEvidence]], Sequence[int]] | None = None,
@@ -104,7 +105,7 @@ def run_qwen_marker_locator_repairs(
 
 def _init_marker_locator_run(
     config: qwen_types.QwenMarkerLocatorConfig,
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     pages: set[int],
     plan: Any,
 ) -> tuple[str, float]:
@@ -136,7 +137,7 @@ def _init_marker_locator_run(
 
 def _missing_body_ref_pages(
     config: qwen_types.QwenMarkerLocatorConfig,
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     plan: Any,
     evidence: List[qwen_types.QwenMarkerPageEvidence],
     missing_body_ref_pages_after_page: Callable[[List[qwen_types.QwenMarkerPageEvidence]], Sequence[int]] | None,
@@ -182,7 +183,7 @@ def _body_pass_config(config: qwen_types.QwenMarkerLocatorConfig, body_mode: str
     return config
 
 
-def apply_qwen_footnote_markers(blocks: List[Dict[str, Any]], evidence_pages: Sequence[qwen_types.QwenMarkerPageEvidence]) -> None:
+def apply_qwen_footnote_markers(blocks: List[CanonicalBlock], evidence_pages: Sequence[qwen_types.QwenMarkerPageEvidence]) -> None:
     evidence_by_page = {item.page: item for item in evidence_pages}
     for page, page_blocks in qwen_page_plan._page_footnotes_by_page(blocks).items():
         evidence = evidence_by_page.get(page)

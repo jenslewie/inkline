@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from ...extraction.text import normalize_note_marker
 from ..common import _block_id, _leading_note_marker as _com_leading_note_marker, _note_ref_key
+from ...schema.models import CanonicalBlock
 from .scopes import (
     _EndnoteSectionStrategy,
     _NoteCandidate,
@@ -25,7 +26,7 @@ _EndnoteSectionStrategy = _EndnoteSectionStrategy
 class _PageFootnoteStrategy:
     name = "page_footnote"
 
-    def collect(self, blocks: List[Dict[str, Any]], context: _NoteContext) -> List[_NoteCandidate]:
+    def collect(self, blocks: List[CanonicalBlock], context: _NoteContext) -> List[_NoteCandidate]:
         out: List[_NoteCandidate] = []
         for block in blocks:
             if block.get("type") != "footnote":
@@ -48,7 +49,7 @@ class _PageFootnoteStrategy:
 
     def resolve(
         self,
-        ref_block: Dict[str, Any],
+        ref_block: CanonicalBlock,
         ref: Dict[str, Any],
         candidates: List[_NoteCandidate],
         context: _NoteContext,
@@ -65,7 +66,7 @@ class _PageFootnoteStrategy:
         return None
 
 
-def resolve_note_links(blocks: List[Dict[str, Any]]) -> None:
+def resolve_note_links(blocks: List[CanonicalBlock]) -> None:
     context = _NoteContext(blocks)
     strategies: List[_NoteResolutionStrategy] = [
         _PageFootnoteStrategy(),
@@ -78,7 +79,7 @@ def resolve_note_links(blocks: List[Dict[str, Any]]) -> None:
     if not candidates:
         return
 
-    by_id: Dict[str, Dict[str, Any]] = {_block_id(b): b for b in blocks if _block_id(b)}
+    by_id: Dict[str, CanonicalBlock] = {_block_id(b): b for b in blocks if _block_id(b)}
     _filter_invalid_note_refs(blocks)
     _annotate_note_definitions(candidates, by_id)
     _suppress_lower_confidence_duplicate_page_footnote_refs(blocks, by_id)
@@ -133,8 +134,8 @@ def resolve_note_links(blocks: List[Dict[str, Any]]) -> None:
 
 
 def _resolved_note_indexes(
-    blocks: List[Dict[str, Any]],
-    by_id: Dict[str, Dict[str, Any]],
+    blocks: List[CanonicalBlock],
+    by_id: Dict[str, CanonicalBlock],
 ) -> tuple[Dict[str, List[str]], Dict[str, set[str]]]:
     resolved_by_note: Dict[str, List[str]] = {}
     resolved_markers_by_note: Dict[str, set[str]] = {}
@@ -149,7 +150,7 @@ def _resolved_note_indexes(
     return resolved_by_note, resolved_markers_by_note
 
 
-def _suppress_lower_confidence_duplicate_page_footnote_refs(blocks: List[Dict[str, Any]], by_id: Dict[str, Dict[str, Any]]) -> None:
+def _suppress_lower_confidence_duplicate_page_footnote_refs(blocks: List[CanonicalBlock], by_id: Dict[str, CanonicalBlock]) -> None:
     refs_by_target: Dict[str, List[tuple[Dict[str, Any], Dict[str, Any]]]] = {}
     for block in blocks:
         if block.get("type") == "footnote":
@@ -194,7 +195,7 @@ def _note_ref_source_rank(ref: Dict[str, Any]) -> int:
     return 50
 
 
-def _remove_note_ref(block: Dict[str, Any], ref_to_remove: Dict[str, Any]) -> None:
+def _remove_note_ref(block: CanonicalBlock, ref_to_remove: Dict[str, Any]) -> None:
     attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
     refs = [ref for ref in attrs.get("note_refs") or [] if ref is not ref_to_remove]
     if refs:
@@ -214,7 +215,7 @@ def _remove_note_ref(block: Dict[str, Any], ref_to_remove: Dict[str, Any]) -> No
 
 
 def _record_resolved_note_ref(
-    block: Dict[str, Any],
+    block: CanonicalBlock,
     ref: Dict[str, Any],
     target_block_id: str,
     resolved_by_note: Dict[str, List[str]],
@@ -235,7 +236,7 @@ def _single_resolved_marker_for_note(block_id: str, resolved_markers_by_note: Di
     return next(iter(markers))
 
 
-def _annotate_note_definitions(candidates: List[_NoteCandidate], by_id: Dict[str, Dict[str, Any]]) -> None:
+def _annotate_note_definitions(candidates: List[_NoteCandidate], by_id: Dict[str, CanonicalBlock]) -> None:
     seen: set[str] = set()
     for candidate in candidates:
         if candidate.block_id in seen:
@@ -253,7 +254,7 @@ def _annotate_note_definitions(candidates: List[_NoteCandidate], by_id: Dict[str
             attrs.setdefault("note_scope", candidate.scope_key)
 
 
-def _filter_invalid_note_refs(blocks: List[Dict[str, Any]]) -> None:
+def _filter_invalid_note_refs(blocks: List[CanonicalBlock]) -> None:
     for block in blocks:
         attrs = block.get("attrs")
         if not isinstance(attrs, dict):
@@ -278,7 +279,7 @@ def _filter_invalid_note_refs(blocks: List[Dict[str, Any]]) -> None:
             attrs["suppressed_note_refs"] = suppressed
 
 
-def _sync_inline_note_refs(blocks: List[Dict[str, Any]]) -> None:
+def _sync_inline_note_refs(blocks: List[CanonicalBlock]) -> None:
     for block in blocks:
         attrs = block.get("attrs")
         if not isinstance(attrs, dict):
@@ -361,7 +362,7 @@ def _invalid_note_ref_marker(marker: Any) -> bool:
 
 def _first_resolution(
     strategies: Iterable[_NoteResolutionStrategy],
-    block: Dict[str, Any],
+    block: CanonicalBlock,
     ref: Dict[str, Any],
     candidates: List[_NoteCandidate],
     context: _NoteContext,
@@ -373,7 +374,7 @@ def _first_resolution(
     return None
 
 
-def _pages_for_ref(block: Dict[str, Any], ref: Dict[str, Any], context: _NoteContext) -> List[int]:
+def _pages_for_ref(block: CanonicalBlock, ref: Dict[str, Any], context: _NoteContext) -> List[int]:
     source_page = ref.get("source_page")
     if isinstance(source_page, int):
         return [source_page]
@@ -389,7 +390,7 @@ def _leading_note_marker(text: str) -> Optional[str]:
     return _com_leading_note_marker(text, include_superscript=True)
 
 
-def _refs_for_page(ref_block: Dict[str, Any], context: _NoteContext, marker: str) -> List[Dict[str, Any]]:
+def _refs_for_page(ref_block: CanonicalBlock, context: _NoteContext, marker: str) -> List[Dict[str, Any]]:
     refs = []
     for ref in ref_block.get("attrs", {}).get("note_refs") or []:
         if normalize_note_marker(ref.get("marker", "")) == marker:

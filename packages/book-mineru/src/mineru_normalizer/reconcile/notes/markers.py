@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ...analysis.pdf_page_metrics import PdfPageCache
 from ...extraction.text import normalize_note_marker
+from ...schema.models import CanonicalBlock
 from .keys import leading_note_marker
 from .marker_location import _locate_qwen_body_ref  # compatibility re-export
 from .marker_offsets import _qwen_marker_offset_in_text  # compatibility re-export
@@ -21,7 +22,7 @@ from .scopes import _EndnoteSectionStrategy, _NoteContext
 __all__ = ["recover_missing_note_refs"]
 
 
-def recover_missing_note_refs(blocks: List[Dict[str, Any]], source_pdf: Any = None, *_args: Any, pdf_cache: Optional[PdfPageCache] = None, **_kwargs: Any) -> None:
+def recover_missing_note_refs(blocks: List[CanonicalBlock], source_pdf: Any = None, *_args: Any, pdf_cache: Optional[PdfPageCache] = None, **_kwargs: Any) -> None:
     """Recover conservative inline note refs before final note linking.
 
     MinerU sometimes preserves note bodies but flattens body-side markers into
@@ -53,7 +54,7 @@ def recover_missing_note_refs(blocks: List[Dict[str, Any]], source_pdf: Any = No
 
 
 def _collect_note_definition_markers(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     context: _NoteContext,
 ) -> Tuple[Dict[str, Set[int]], Dict[int, Set[int]], Set[int]]:
     scope_defs: Dict[str, Set[int]] = {}
@@ -80,7 +81,7 @@ def _collect_note_definition_markers(
     return scope_defs, page_defs, book_defs
 
 
-def _collect_page_symbol_definition_markers(blocks: List[Dict[str, Any]], context: _NoteContext) -> Dict[int, Set[str]]:
+def _collect_page_symbol_definition_markers(blocks: List[CanonicalBlock], context: _NoteContext) -> Dict[int, Set[str]]:
     out: Dict[int, Set[str]] = {}
     for block in blocks:
         if block.get("type") != "footnote":

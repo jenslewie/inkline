@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Protocol
 
 from ...extraction.text import normalize_note_marker, normalize_ws
 from ...schema.patterns import PART_RE
+from ...schema.models import CanonicalBlock
 from ..common import _block_id, _chinese_to_int, _leading_note_marker as _com_leading_note_marker
 
 CHAPTER_HEADING_RE = re.compile(r"^\s*(?:第[一二三四五六七八九十百\d]+[章节]|[IVXLCDMivxlcdm]+|\d{1,2})[\s.．、:\n：]+")
@@ -33,12 +34,12 @@ class _NoteCandidate:
 class _NoteResolutionStrategy(Protocol):
     name: str
 
-    def collect(self, blocks: List[Dict[str, Any]], context: "_NoteContext") -> List[_NoteCandidate]:
+    def collect(self, blocks: List[CanonicalBlock], context: "_NoteContext") -> List[_NoteCandidate]:
         ...
 
     def resolve(
         self,
-        ref_block: Dict[str, Any],
+        ref_block: CanonicalBlock,
         ref: Dict[str, Any],
         candidates: List[_NoteCandidate],
         context: "_NoteContext",
@@ -47,14 +48,14 @@ class _NoteResolutionStrategy(Protocol):
 
 
 class _NoteContext:
-    def __init__(self, blocks: List[Dict[str, Any]]) -> None:
+    def __init__(self, blocks: List[CanonicalBlock]) -> None:
         self.block_pages = {_block_id(b): _pages_for_block(b) for b in blocks if _block_id(b)}
         self.block_scopes = _infer_block_scopes(blocks)
 
-    def pages_for(self, block: Dict[str, Any]) -> List[int]:
+    def pages_for(self, block: CanonicalBlock) -> List[int]:
         return self.block_pages.get(_block_id(block), _pages_for_block(block))
 
-    def scope_for(self, block: Dict[str, Any]) -> Optional[str]:
+    def scope_for(self, block: CanonicalBlock) -> Optional[str]:
         return self.block_scopes.get(_block_id(block))
 
 
@@ -82,7 +83,7 @@ class _EndnoteSectionStrategy:
         self.name = name
         self.scope_required = scope_required
 
-    def collect(self, blocks: List[Dict[str, Any]], context: _NoteContext) -> List[_NoteCandidate]:
+    def collect(self, blocks: List[CanonicalBlock], context: _NoteContext) -> List[_NoteCandidate]:
         out: List[_NoteCandidate] = []
         state = _NoteSectionState()
         for i, block in enumerate(blocks):
@@ -102,11 +103,11 @@ class _EndnoteSectionStrategy:
 
     def _handle_note_section_block(
         self,
-        block: Dict[str, Any],
+        block: CanonicalBlock,
         i: int,
         text: str,
         typ: str,
-        blocks: List[Dict[str, Any]],
+        blocks: List[CanonicalBlock],
         state: _NoteSectionState,
         out: List[_NoteCandidate],
     ) -> bool:
@@ -146,7 +147,7 @@ class _EndnoteSectionStrategy:
 
     def resolve(
         self,
-        ref_block: Dict[str, Any],
+        ref_block: CanonicalBlock,
         ref: Dict[str, Any],
         candidates: List[_NoteCandidate],
         context: _NoteContext,
@@ -168,7 +169,7 @@ def _leading_note_marker(text: str) -> Optional[str]:
     return _com_leading_note_marker(text, include_superscript=True)
 
 
-def _pages_for_block(block: Dict[str, Any]) -> List[int]:
+def _pages_for_block(block: CanonicalBlock) -> List[int]:
     source = block.get("source") or {}
     pages = source.get("pages")
     if isinstance(pages, list):
@@ -177,7 +178,7 @@ def _pages_for_block(block: Dict[str, Any]) -> List[int]:
     return [int(page)] if isinstance(page, int) else []
 
 
-def _is_note_section_heading(block: Dict[str, Any], blocks: List[Dict[str, Any]], index: int) -> bool:
+def _is_note_section_heading(block: CanonicalBlock, blocks: List[CanonicalBlock], index: int) -> bool:
     if block.get("type") != "heading":
         return False
     text = normalize_ws(block.get("text", ""))
@@ -211,7 +212,7 @@ def _looks_like_note_subsection(text: str, section_start_index: Optional[int], b
     return bool(NOTE_SUBSECTION_RE.match(text))
 
 
-def _heading_starts_note_subsection(blocks: List[Dict[str, Any]], index: int) -> bool:
+def _heading_starts_note_subsection(blocks: List[CanonicalBlock], index: int) -> bool:
     skipped_continuations = 0
     for nxt in blocks[index + 1:min(index + 8, len(blocks))]:
         typ = nxt.get("type")
@@ -229,7 +230,7 @@ def _heading_starts_note_subsection(blocks: List[Dict[str, Any]], index: int) ->
     return False
 
 
-def _heading_continues_note_section(blocks: List[Dict[str, Any]], index: int) -> bool:
+def _heading_continues_note_section(blocks: List[CanonicalBlock], index: int) -> bool:
     skipped_continuations = 0
     for j in range(index + 1, min(index + 12, len(blocks))):
         nxt = blocks[j]
@@ -250,7 +251,7 @@ def _heading_continues_note_section(blocks: List[Dict[str, Any]], index: int) ->
     return False
 
 
-def _block_starts_note_subsection(blocks: List[Dict[str, Any]], index: int) -> bool:
+def _block_starts_note_subsection(blocks: List[CanonicalBlock], index: int) -> bool:
     for nxt in blocks[index + 1:min(index + 8, len(blocks))]:
         typ = nxt.get("type")
         if typ == "heading":
@@ -352,7 +353,7 @@ def _roman_to_int(text: str) -> Optional[int]:
     return total if total > 0 else None
 
 
-def _infer_block_scopes(blocks: List[Dict[str, Any]]) -> Dict[str, str]:
+def _infer_block_scopes(blocks: List[CanonicalBlock]) -> Dict[str, str]:
     scopes: Dict[str, str] = {}
     current_scope: Optional[str] = None
     in_note_section = False
@@ -371,7 +372,7 @@ def _infer_block_scopes(blocks: List[Dict[str, Any]]) -> Dict[str, str]:
     return scopes
 
 
-def _looks_like_content_heading(block: Dict[str, Any]) -> bool:
+def _looks_like_content_heading(block: CanonicalBlock) -> bool:
     attrs = block.get("attrs") or {}
     text = normalize_ws(block.get("text", ""))
     if not text:

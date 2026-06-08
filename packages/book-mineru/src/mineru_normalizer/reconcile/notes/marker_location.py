@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ...extraction.text import normalize_note_marker, normalize_ws
+from ...schema.models import CanonicalBlock
 from .marker_inline import _InlineMarkerLocation, _note_refs
 from .marker_offsets import (
     _qwen_fold_bracket_width,
@@ -43,7 +44,7 @@ def _qwen_marker_page_items(qwen_marker_pages: Any) -> List[Dict[str, Any]]:
 
 
 def _locate_qwen_body_ref(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     context: _NoteContext,
     page: int,
     marker: str,
@@ -109,7 +110,7 @@ def _locate_qwen_body_ref(
     return _locate_qwen_cross_block_body_ref(blocks, context, page, marker, item, allow_existing=allow_existing)
 
 
-def _qwen_block_id(block: Dict[str, Any]) -> str:
+def _qwen_block_id(block: CanonicalBlock) -> str:
     return str(block.get("block_id") or block.get("id") or "")
 
 
@@ -144,7 +145,7 @@ def _qwen_matching_context_evidence(before: str, after: str, before_for_match: s
     return out
 
 
-def _existing_ref_marker_on_page(block: Dict[str, Any], marker: str, page: int, context: _NoteContext) -> bool:
+def _existing_ref_marker_on_page(block: CanonicalBlock, marker: str, page: int, context: _NoteContext) -> bool:
     for ref in _note_refs(block):
         if normalize_note_marker(ref.get("marker", "")) != marker:
             continue
@@ -166,7 +167,7 @@ def _existing_ref_marker_on_page(block: Dict[str, Any], marker: str, page: int, 
 
 
 def _locate_qwen_cross_block_body_ref(
-    blocks: List[Dict[str, Any]],
+    blocks: List[CanonicalBlock],
     context: _NoteContext,
     page: int,
     marker: str,

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from ...extraction.text import normalize_note_marker
+from ...schema.models import CanonicalBlock
 from .marker_patterns import _marker_int
 
 
@@ -18,7 +19,7 @@ class _InlineMarkerLocation:
 
 
 def _append_note_ref(
-    block: Dict[str, Any],
+    block: CanonicalBlock,
     marker: str,
     *,
     source: str,
@@ -57,7 +58,7 @@ def _append_note_ref(
         _insert_inline_note_run(block, ref, inline_location.char_index)
 
 
-def _rebuild_inline_note_runs_from_exact_refs(block: Dict[str, Any]) -> None:
+def _rebuild_inline_note_runs_from_exact_refs(block: CanonicalBlock) -> None:
     text = str(block.get("text") or "")
     attrs = block.setdefault("attrs", {})
     refs = [ref for ref in attrs.get("note_refs") or [] if isinstance(ref, dict)]
@@ -142,7 +143,7 @@ def _ref_requires_inline_run(ref: Dict[str, Any]) -> bool:
     return ref.get("inline_position") == "exact"
 
 
-def _insert_inline_note_run(block: Dict[str, Any], ref: Dict[str, Any], char_index: int) -> None:
+def _insert_inline_note_run(block: CanonicalBlock, ref: Dict[str, Any], char_index: int) -> None:
     text = str(block.get("text") or "")
     if char_index < 0 or char_index > len(text):
         return
@@ -258,16 +259,16 @@ def _fallback_raw_marker(ref: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _note_refs(block: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _note_refs(block: CanonicalBlock) -> List[Dict[str, Any]]:
     refs = (block.get("attrs") or {}).get("note_refs")
     return [ref for ref in refs if isinstance(ref, dict)] if isinstance(refs, list) else []
 
 
-def _existing_ref_markers(block: Dict[str, Any]) -> set[str]:
+def _existing_ref_markers(block: CanonicalBlock) -> set[str]:
     return {normalize_note_marker(ref.get("marker", "")) for ref in _note_refs(block)}
 
 
-def _last_page(block: Dict[str, Any]) -> Optional[int]:
+def _last_page(block: CanonicalBlock) -> Optional[int]:
     source = block.get("source") or {}
     pages = source.get("pages")
     if isinstance(pages, list) and pages:

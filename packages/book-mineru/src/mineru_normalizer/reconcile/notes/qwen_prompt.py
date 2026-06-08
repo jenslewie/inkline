@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from ...analysis.page_geometry import PageGeometry
 from ...extraction.text import normalize_note_marker, normalize_ws
 from ..block_access import block_bbox, block_id, block_page, block_pages
+from ...schema.models import CanonicalBlock
 from .keys import leading_note_marker
 from . import qwen_types
 
@@ -81,7 +82,7 @@ def _merge_body_ref_raw_items(base_refs: Sequence[Any], extra_refs: Any) -> List
     return merged
 
 
-def _paragraph_body_prompt_for_markers(markers: Sequence[str], block: Dict[str, Any]) -> str:
+def _paragraph_body_prompt_for_markers(markers: Sequence[str], block: CanonicalBlock) -> str:
     marker_list = ", ".join(dict.fromkeys([marker for marker in markers if marker]))
     block_label = block_id(block) or "unknown"
     return (
@@ -105,8 +106,8 @@ def _body_markers_for_prompt(footnote_defs: Sequence[Dict[str, Any]], expected_m
     return list(dict.fromkeys([marker for marker in [*markers, *expected_markers] if marker]))
 
 
-def _body_blocks_by_page(blocks: Sequence[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
-    out: Dict[int, List[Dict[str, Any]]] = {}
+def _body_blocks_by_page(blocks: Sequence[CanonicalBlock]) -> Dict[int, List[CanonicalBlock]]:
+    out: Dict[int, List[CanonicalBlock]] = {}
     for block in blocks:
         if block.get("type") not in qwen_types._BODY_REF_BLOCK_TYPES or not normalize_ws(str(block.get("text") or "")):
             continue
@@ -118,14 +119,14 @@ def _body_blocks_by_page(blocks: Sequence[Dict[str, Any]]) -> Dict[int, List[Dic
     return out
 
 
-def _body_block_sort_key(block: Dict[str, Any], page: int) -> tuple[float, float, str]:
+def _body_block_sort_key(block: CanonicalBlock, page: int) -> tuple[float, float, str]:
     bbox = _block_bbox_for_page(block, page) or []
     y = float(bbox[1]) if len(bbox) >= 2 else 0.0
     x = float(bbox[0]) if len(bbox) >= 1 else 0.0
     return (y, x, block_id(block))
 
 
-def _block_bbox_for_page(block: Dict[str, Any], page: int) -> Optional[List[float]]:
+def _block_bbox_for_page(block: CanonicalBlock, page: int) -> Optional[List[float]]:
     source = block.get("source") or {}
     boxes: List[List[float]] = []
     for span in source.get("spans") or []:
@@ -215,7 +216,7 @@ def _footnote_defs_match_blocks(defs: Sequence[Dict[str, Any]], blocks: Sequence
 
 
 def _apply_unique_near_text_matches(
-    page_blocks: Sequence[Dict[str, Any]],
+    page_blocks: Sequence[CanonicalBlock],
     defs: Sequence[Dict[str, Any]],
     page: int,
     evidence: qwen_types.QwenMarkerPageEvidence,
@@ -234,7 +235,7 @@ def _apply_unique_near_text_matches(
         used_blocks.add(index)
 
 
-def _footnote_def_matches_block(item: Dict[str, Any], block: Dict[str, Any]) -> bool:
+def _footnote_def_matches_block(item: Dict[str, Any], block: CanonicalBlock) -> bool:
     marker = str(item.get("marker") or "")
     existing = normalize_note_marker((block.get("attrs") or {}).get("note_marker", "")) or leading_note_marker(str(block.get("text") or ""), include_superscript=True)
     if existing and existing != marker:
@@ -246,7 +247,7 @@ def _footnote_def_matches_block(item: Dict[str, Any], block: Dict[str, Any]) -> 
     return _text_similarity(near_text, block_text) >= 0.18
 
 
-def _apply_qwen_footnote_marker(block: Dict[str, Any], marker: str, page: int, *, evidence: qwen_types.QwenMarkerPageEvidence) -> None:
+def _apply_qwen_footnote_marker(block: CanonicalBlock, marker: str, page: int, *, evidence: qwen_types.QwenMarkerPageEvidence) -> None:
     existing = leading_note_marker(str(block.get("text") or ""), include_superscript=True)
     if not existing:
         separator = "" if marker.startswith("*") else ". "
