@@ -8,114 +8,80 @@ side effect in the resolver.py version.
 
 from __future__ import annotations
 
-import copy
-
 import pytest
 
 # Import both implementations
 from mineru_normalizer.reconcile.notes.marker_inline import (
     _inline_note_run_from_ref as inline_run_from_marker_inline,
     _ref_requires_inline_run as requires_from_marker_inline,
-    _default_raw_marker,
-)
-from mineru_normalizer.reconcile.notes.resolver import (
-    _inline_note_run_from_ref as inline_run_from_resolver,
-    _ref_requires_inline_run as requires_from_resolver,
-    _fallback_raw_marker,
+    _fallback_raw_marker as fallback_from_marker_inline,
 )
 
 
 # ── _ref_requires_inline_run ──
 
-class TestRefRequiresInlineRunIdentical:
-    """Both implementations of _ref_requires_inline_run are identical."""
+class TestRefRequiresInlineRun:
+    """Test the merged _ref_requires_inline_run."""
 
     @pytest.mark.parametrize(
-        "ref",
+        "ref,expected",
         [
-            {"source": "equation_inline"},
-            {"source": "equation_interline"},
-            {"source": "trailing_text"},
-            {"source": "qwen_marker_locator"},
-            {"source": "page_sequence_gap"},
-            {"inline_position": "exact"},
-            {"inline_position": "approximate"},
-            {},
-            {"source": "recovered_text", "inline_position": "exact"},
+            ({"source": "equation_inline"}, True),
+            ({"source": "equation_interline"}, True),
+            ({"source": "trailing_text"}, True),
+            ({"source": "qwen_marker_locator"}, False),
+            ({"source": "page_sequence_gap"}, False),
+            ({"inline_position": "exact"}, True),
+            ({"inline_position": "approximate"}, False),
+            ({}, False),
+            ({"source": "recovered_text", "inline_position": "exact"}, True),
         ],
     )
-    def test_both_return_same_result(self, ref):
-        assert requires_from_marker_inline(ref) == requires_from_resolver(ref)
+    def test_returns_correct_result(self, ref, expected):
+        assert requires_from_marker_inline(ref) == expected
 
 
 # ── _inline_note_run_from_ref ──
 
 class TestInlineNoteRunFromRefOutput:
-    """Compare the output dicts from both implementations."""
+    """Test the merged _inline_note_run_from_ref output dicts."""
 
-    def test_simple_marker_ref_produces_same_keys(self):
+    def test_simple_marker_ref_produces_note_ref_with_raw_marker(self):
         ref = {"marker": "1", "source": "equation_inline", "confidence": "high"}
-        inline_result = inline_run_from_marker_inline(ref)
-        resolver_result = inline_run_from_resolver(ref)
-        # Both should produce a note_ref dict with type marker and raw_marker
-        assert inline_result["type"] == "note_ref"
-        assert resolver_result["type"] == "note_ref"
-        # Both should include the marker
-        assert inline_result["marker"] == "1"
-        assert resolver_result["marker"] == "1"
-        # Both should produce a raw_marker (equation_inline source)
-        assert "raw_marker" in inline_result
-        assert "raw_marker" in resolver_result
+        result = inline_run_from_marker_inline(ref)
+        assert result["type"] == "note_ref"
+        assert result["marker"] == "1"
+        assert "raw_marker" in result
 
-    def test_star_marker_no_raw_marker_in_input(self):
+    def test_star_marker_raw_marker(self):
         ref = {"marker": "*", "source": "page_sequence_gap"}
-        inline_result = inline_run_from_marker_inline(ref)
-        resolver_result = inline_run_from_resolver(ref)
-        # Both produce "*" for star markers — _fallback_raw_marker checks
-        # startswith("*") before checking source, so "*" is always returned
-        assert inline_result.get("raw_marker") == "*"
-        assert resolver_result.get("raw_marker") == "*"
+        result = inline_run_from_marker_inline(ref)
+        # _fallback_raw_marker returns "*" for star markers regardless of source
+        assert result.get("raw_marker") == "*"
 
     def test_equation_inline_source_raw_marker(self):
         ref = {"marker": "2", "source": "equation_inline"}
-        inline_result = inline_run_from_marker_inline(ref)
-        resolver_result = inline_run_from_resolver(ref)
-        # Both produce ^{2} for numeric markers from equation_inline
-        assert inline_result.get("raw_marker") == "^{2}"
-        assert resolver_result.get("raw_marker") == "^{2}"
+        result = inline_run_from_marker_inline(ref)
+        assert result.get("raw_marker") == "^{2}"
 
     def test_exact_inline_position_raw_marker(self):
         ref = {"marker": "3", "inline_position": "exact"}
-        inline_result = inline_run_from_marker_inline(ref)
-        resolver_result = inline_run_from_resolver(ref)
-        # marker_inline always produces ^{3} for numeric markers
-        assert inline_result.get("raw_marker") == "^{3}"
-        # resolver produces ^{3} when inline_position is "exact"
-        assert resolver_result.get("raw_marker") == "^{3}"
+        result = inline_run_from_marker_inline(ref)
+        assert result.get("raw_marker") == "^{3}"
 
-    def test_resolver_key_iteration_only_copies_existing_keys(self):
-        """Resolver's implementation copies only keys that exist in the ref."""
+    def test_key_iteration_only_copies_existing_keys(self):
+        """The merged implementation copies only keys that exist in the ref."""
         ref = {"marker": "1", "source": "equation_inline"}
-        resolver_result = inline_run_from_resolver(ref)
-        # resolver should NOT have keys that weren't in the original ref
-        assert "confidence" not in resolver_result
-        assert "inline_offset" not in resolver_result
-        # But it should have the keys that were in ref
-        assert "marker" in resolver_result
-        assert "source" in resolver_result
-
-    def test_marker_inline_dict_comprehension_copies_whitelist_keys(self):
-        """marker_inline copies all whitelist keys, even if absent from ref."""
-        ref = {"marker": "1", "source": "equation_inline"}
-        inline_result = inline_run_from_marker_inline(ref)
-        # marker_inline uses dict comprehension filtering by whitelist
-        # Keys not in ref won't appear in the comprehension result
-        # (because ref.items() won't include them)
-        assert "confidence" not in inline_result
-        assert "inline_offset" not in inline_result
+        result = inline_run_from_marker_inline(ref)
+        # Should NOT have keys that weren't in the original ref
+        assert "confidence" not in result
+        assert "inline_offset" not in result
+        # But should have the keys that were in ref
+        assert "marker" in result
+        assert "source" in result
 
     def test_all_keys_preserved_when_present(self):
-        """When all keys are present, both produce dicts with those keys."""
+        """When all keys are present, the result dict has those keys."""
         ref = {
             "marker": "1",
             "raw_marker": "^{1}",
@@ -133,9 +99,7 @@ class TestInlineNoteRunFromRefOutput:
             "inline_position_source": "qwen",
             "inline_position_confidence": "high",
         }
-        inline_result = inline_run_from_marker_inline(ref)
-        resolver_result = inline_run_from_resolver(ref)
-        # Both should preserve all these keys
+        result = inline_run_from_marker_inline(ref)
         for key in (
             "marker", "raw_marker", "source", "confidence",
             "inline_position", "inline_offset", "target_block_id",
@@ -143,89 +107,72 @@ class TestInlineNoteRunFromRefOutput:
             "position", "source_page", "recovery_reason",
             "inline_position_source", "inline_position_confidence",
         ):
-            assert inline_result.get(key) == resolver_result.get(key), f"Key {key} differs"
+            assert result.get(key) == ref.get(key), f"Key {key} differs"
 
 
-class TestResolverWriteBackSideEffect:
-    """Test the raw_marker write-back side effect in resolver.py's version.
+class TestInlineNoteRunWriteBackSideEffect:
+    """Test the raw_marker write-back side effect in the merged _inline_note_run_from_ref.
 
-    The resolver.py implementation writes back raw_marker to the original
-    ref dict via ref.setdefault("raw_marker", raw_marker). This side effect
-    is critical because resolver.py callers rely on raw_marker being
-    populated in the ref dict after calling _inline_note_run_from_ref.
+    The merged implementation (now in marker_inline.py) preserves the
+    resolver.py write-back side effect: ref.setdefault("raw_marker", raw_marker).
+    This side effect is critical because resolver.py callers rely on
+    raw_marker being populated in the ref dict after calling _inline_note_run_from_ref.
     """
 
-    def test_resolver_writes_back_raw_marker_to_ref(self):
+    def test_writes_back_raw_marker_to_ref(self):
         ref = {"marker": "1", "source": "equation_inline"}
-        result = inline_run_from_resolver(ref)
+        result = inline_run_from_marker_inline(ref)
         # The original ref dict should now have raw_marker
         assert "raw_marker" in ref
         assert ref["raw_marker"] == "^{1}"
         # The result should also have raw_marker
         assert result["raw_marker"] == "^{1}"
 
-    def test_resolver_does_not_overwrite_existing_raw_marker(self):
+    def test_does_not_overwrite_existing_raw_marker(self):
         ref = {"marker": "1", "source": "equation_inline", "raw_marker": "custom"}
-        result = inline_run_from_resolver(ref)
+        result = inline_run_from_marker_inline(ref)
         # ref.setdefault doesn't overwrite existing keys
         assert ref["raw_marker"] == "custom"
         # The result dict should keep the original raw_marker from the ref
         assert result["raw_marker"] == "custom"
 
-    def test_resolver_write_back_star_marker(self):
+    def test_write_back_star_marker(self):
         ref = {"marker": "*", "source": "equation_inline"}
-        result = inline_run_from_resolver(ref)
+        result = inline_run_from_marker_inline(ref)
         # _fallback_raw_marker returns "*" for star markers
         assert ref.get("raw_marker") == "*"
         assert result.get("raw_marker") == "*"
 
-    def test_resolver_no_write_back_for_non_equation_source_without_exact_position(self):
+    def test_no_write_back_for_non_equation_source_without_exact_position(self):
         ref = {"marker": "1", "source": "page_sequence_gap"}
-        result = inline_run_from_resolver(ref)
+        result = inline_run_from_marker_inline(ref)
         # _fallback_raw_marker returns None for non-equation, non-exact sources
         assert ref.get("raw_marker") is None
         assert result.get("raw_marker") is None
 
-    def test_marker_inline_does_not_write_back(self):
-        """marker_inline's implementation does NOT write back to the ref dict."""
-        ref = {"marker": "1", "source": "equation_inline"}
-        original_ref = copy.deepcopy(ref)
-        result = inline_run_from_marker_inline(ref)
-        # The original ref dict should be unchanged
-        assert ref == original_ref
-        # The result should still have raw_marker
-        assert result.get("raw_marker") == "^{1}"
 
+class TestFallbackRawMarker:
+    """Test the merged _fallback_raw_marker logic.
 
-class TestFallbackVsDefaultRawMarker:
-    """Compare the raw_marker fallback logic from both implementations.
-
-    _default_raw_marker (marker_inline) always produces ^{marker} for
-    numeric markers and returns the marker itself for star markers.
-
-    _fallback_raw_marker (resolver) is more selective: it only produces
-    ^{marker} when source is equation_inline/interline/trailing_text
-    or inline_position is "exact". Otherwise returns None.
+    After the merge, both marker_inline and resolver use the same
+    _fallback_raw_marker.  It returns "*" for star markers, "^{marker}"
+    only for equation sources or exact inline_position, and None otherwise.
     """
 
-    def test_star_marker_both_return_star(self):
-        assert _default_raw_marker("*") == "*"
-        # _fallback_raw_marker takes a ref dict, not just a marker string
-        assert _fallback_raw_marker({"marker": "*"}) == "*"
+    def test_star_marker_returns_star(self):
+        assert fallback_from_marker_inline({"marker": "*"}) == "*"
 
-    def test_numeric_marker_default_always_produces_caret(self):
-        assert _default_raw_marker("1") == "^{1}"
-        assert _default_raw_marker("42") == "^{42}"
+    def test_numeric_marker_equation_source_produces_caret(self):
+        assert fallback_from_marker_inline({"marker": "1", "source": "equation_inline"}) == "^{1}"
+        assert fallback_from_marker_inline({"marker": "42", "source": "trailing_text"}) == "^{42}"
 
-    def test_numeric_marker_fallback_requires_equation_source(self):
-        assert _fallback_raw_marker({"marker": "1", "source": "equation_inline"}) == "^{1}"
-        assert _fallback_raw_marker({"marker": "1", "source": "trailing_text"}) == "^{1}"
-        assert _fallback_raw_marker({"marker": "1", "source": "page_sequence_gap"}) is None
+    def test_numeric_marker_requires_equation_source_or_exact_position(self):
+        assert fallback_from_marker_inline({"marker": "1", "source": "equation_inline"}) == "^{1}"
+        assert fallback_from_marker_inline({"marker": "1", "source": "page_sequence_gap"}) is None
 
-    def test_numeric_marker_fallback_requires_exact_position(self):
-        assert _fallback_raw_marker({"marker": "1", "inline_position": "exact"}) == "^{1}"
-        assert _fallback_raw_marker({"marker": "1", "inline_position": "approximate"}) is None
+    def test_numeric_marker_exact_position_produces_caret(self):
+        assert fallback_from_marker_inline({"marker": "1", "inline_position": "exact"}) == "^{1}"
+        assert fallback_from_marker_inline({"marker": "1", "inline_position": "approximate"}) is None
 
-    def test_empty_marker_both_return_empty_or_none(self):
-        assert _default_raw_marker("") == ""
-        assert _fallback_raw_marker({"marker": ""}) is None
+    def test_empty_marker_returns_none(self):
+        assert fallback_from_marker_inline({"marker": ""}) is None

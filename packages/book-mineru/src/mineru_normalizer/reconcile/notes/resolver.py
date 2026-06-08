@@ -13,7 +13,7 @@ from .scopes import (
     _NoteResolutionStrategy,
     _pages_for_block,
 )
-from .marker_inline import _rebuild_inline_note_runs_from_exact_refs
+from .marker_inline import _fallback_raw_marker, _inline_note_run_from_ref, _rebuild_inline_note_runs_from_exact_refs, _ref_requires_inline_run
 
 __all__ = ["resolve_note_links"]
 
@@ -352,54 +352,6 @@ def _sync_inline_note_refs(blocks: List[Dict[str, Any]]) -> None:
             attrs["inline_runs"] = synced_runs
         else:
             attrs.pop("inline_runs", None)
-
-
-def _inline_note_run_from_ref(ref: Dict[str, Any]) -> Dict[str, Any]:
-    run = {"type": "note_ref"}
-    for key in (
-        "marker",
-        "position",
-        "source",
-        "source_page",
-        "raw_marker",
-        "target_block_id",
-        "target_note_id",
-        "note_strategy",
-        "resolution_confidence",
-        "confidence",
-        "recovery_reason",
-        "inline_position",
-        "inline_position_source",
-        "inline_position_confidence",
-        "inline_offset",
-    ):
-        if key in ref:
-            run[key] = ref[key]
-    if not run.get("raw_marker"):
-        raw_marker = _fallback_raw_marker(run)
-        if raw_marker:
-            run["raw_marker"] = raw_marker
-            ref.setdefault("raw_marker", raw_marker)
-    return run
-
-
-def _fallback_raw_marker(ref: Dict[str, Any]) -> Optional[str]:
-    marker = normalize_note_marker(ref.get("marker", ""))
-    if not marker:
-        return None
-    if marker.startswith("*"):
-        return marker
-    source = str(ref.get("source") or "")
-    if source in {"equation_inline", "equation_interline", "trailing_text"} or ref.get("inline_position") == "exact":
-        return f"^{{{marker}}}"
-    return None
-
-
-def _ref_requires_inline_run(ref: Dict[str, Any]) -> bool:
-    source = str(ref.get("source") or "")
-    if source in {"equation_inline", "equation_interline", "trailing_text"}:
-        return True
-    return ref.get("inline_position") == "exact"
 
 
 def _invalid_note_ref_marker(marker: Any) -> bool:

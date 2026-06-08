@@ -95,34 +95,44 @@ def _rebuild_inline_note_runs_from_exact_refs(block: Dict[str, Any]) -> None:
 
 
 def _inline_note_run_from_ref(ref: Dict[str, Any]) -> Dict[str, Any]:
-    note_run = {
-        key: value
-        for key, value in ref.items()
-        if key
-        in {
-            "marker",
-            "raw_marker",
-            "source",
-            "position",
-            "source_page",
-            "confidence",
-            "recovery_reason",
-            "inline_position",
-            "inline_position_source",
-            "inline_position_confidence",
-            "inline_offset",
-            "target_block_id",
-            "target_note_id",
-            "note_strategy",
-            "resolution_confidence",
-        }
-    }
-    if "raw_marker" not in note_run:
-        raw_marker = _default_raw_marker(note_run.get("marker"))
+    """Create an inline note_run dict from a note_ref dict.
+
+    Copies only keys that actually exist in *ref* (using the key-tuple
+    iteration pattern from the former resolver.py implementation — cleaner
+    than the old dict comprehension, which copied all keys including
+    irrelevant ones).  Applies ``_fallback_raw_marker`` for missing
+    ``raw_marker`` values (richer logic with superscript/equation handling).
+    **Preserves the write-back side effect**: ``ref.setdefault("raw_marker",
+    raw_marker)`` — resolver.py callers rely on ``raw_marker`` being
+    populated in the ref dict after this call.
+    """
+    run: Dict[str, Any] = {}
+    for key in (
+        "marker",
+        "position",
+        "source",
+        "source_page",
+        "raw_marker",
+        "confidence",
+        "recovery_reason",
+        "inline_position",
+        "inline_position_source",
+        "inline_position_confidence",
+        "inline_offset",
+        "target_block_id",
+        "target_note_id",
+        "note_strategy",
+        "resolution_confidence",
+    ):
+        if key in ref:
+            run[key] = ref[key]
+    if not run.get("raw_marker"):
+        raw_marker = _fallback_raw_marker(run)
         if raw_marker:
-            note_run["raw_marker"] = raw_marker
-    note_run["type"] = "note_ref"
-    return note_run
+            run["raw_marker"] = raw_marker
+            ref.setdefault("raw_marker", raw_marker)
+    run["type"] = "note_ref"
+    return run
 
 
 def _ref_requires_inline_run(ref: Dict[str, Any]) -> bool:
@@ -228,13 +238,24 @@ def _inline_marker_sort_value(marker: Any) -> int:
     return marker_int if marker_int is not None else 10**9
 
 
-def _default_raw_marker(marker: Any) -> str:
-    text = normalize_note_marker(marker)
-    if not text:
-        return ""
-    if text.startswith("*"):
-        return text
-    return f"^{{{text}}}"
+def _fallback_raw_marker(ref: Dict[str, Any]) -> Optional[str]:
+    """Determine the raw_marker for a note ref.
+
+    Returns the marker itself for star markers (``*``-family).  For numeric
+    markers, returns ``^{marker}`` only when the source is an equation type
+    (``equation_inline``, ``equation_interline``, ``trailing_text``) or
+    ``inline_position`` is ``"exact"``.  Otherwise returns ``None`` —
+    meaning no raw_marker should be emitted.
+    """
+    marker = normalize_note_marker(ref.get("marker", ""))
+    if not marker:
+        return None
+    if marker.startswith("*"):
+        return marker
+    source = str(ref.get("source") or "")
+    if source in {"equation_inline", "equation_interline", "trailing_text"} or ref.get("inline_position") == "exact":
+        return f"^{{{marker}}}"
+    return None
 
 
 def _note_refs(block: Dict[str, Any]) -> List[Dict[str, Any]]:
