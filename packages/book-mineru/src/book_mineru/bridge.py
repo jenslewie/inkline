@@ -212,11 +212,13 @@ def run_mineru_raw(
 def find_mineru_raw_files(raw_output_dir: str | Path) -> dict[str, Path]:
     root = Path(raw_output_dir)
     content_list_v2 = _single_latest(root, "*_content_list_v2.json")
+    content_list = _single_latest(root, "*_content_list.json", required=False)
     middle = _single_latest(root, "*_middle.json")
     model = _single_latest(root, "*_model.json", required=False)
     markdown = _single_latest(root, "*.md", required=False)
     return {
         "content_list_v2": content_list_v2,
+        "content_list": content_list,
         "middle": middle,
         "model": model,
         "markdown": markdown,

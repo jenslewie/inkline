@@ -13,13 +13,14 @@ def _build_display_attrs(
     blocks: Sequence[RawBlock],
     role: str,
 ) -> Tuple[Dict[str, Any], List[str]]:
+    inline_runs = merge_inline_runs(blocks)
+    note_refs = _note_refs_with_inline_offsets(merge_note_refs(blocks), inline_runs, "\n".join(raw_lines).strip())
     attrs = {
         "role": role,
         "quote_text": "\n".join(raw_lines).strip(),
-        "note_refs": merge_note_refs(blocks),
+        "note_refs": note_refs,
         "raw_types": [b.raw_type for b in blocks],
     }
-    inline_runs = merge_inline_runs(blocks)
     if any(run.get("type") == "note_ref" for run in inline_runs):
         attrs["inline_runs"] = inline_runs
     line_layouts = _line_layouts_for_display_blocks(blocks)
@@ -82,13 +83,13 @@ def make_epigraph_group(ids: IdFactory, groups: List[List[RawBlock]]) -> Dict[st
     for g in groups:
         all_blocks.extend(g)
         raw_lines = [block_text(b) for b in g if block_text(b)]
+        inline_runs = merge_inline_runs(g)
         item = {
             "text": "\n".join(raw_lines),
             "quote_text": "\n".join(raw_lines),
-            "note_refs": merge_note_refs(g),
+            "note_refs": _note_refs_with_inline_offsets(merge_note_refs(g), inline_runs, "\n".join(raw_lines)),
             "source": {"page": g[0].page, "bbox": union_bbox([b.bbox for b in g if b.bbox])},
         }
-        inline_runs = merge_inline_runs(g)
         if any(run.get("type") == "note_ref" for run in inline_runs):
             item["inline_runs"] = inline_runs
         items.append(item)
@@ -112,9 +113,9 @@ def make_paragraph(ids: IdFactory, b: RawBlock, block_type: str = "paragraph", e
     text, extra = strip_trailing_text_note(b.text)
     refs = b.note_refs + extra
     attrs = {"raw_type": b.raw_type}
-    if refs:
-        attrs["note_refs"] = [_note_ref_dict(r, b.page) for r in refs]
     inline_runs = merge_inline_runs([b], separator="")
+    if refs:
+        attrs["note_refs"] = _note_refs_with_inline_offsets([_note_ref_dict(r, b.page) for r in refs], inline_runs, text)
     if any(run.get("type") == "note_ref" for run in inline_runs):
         attrs["inline_runs"] = inline_runs
     if extra_attrs:
@@ -127,6 +128,56 @@ def _note_ref_dict(ref: NoteRef, page: int) -> Dict[str, Any]:
     if ref.raw_marker:
         out["raw_marker"] = ref.raw_marker
     return out
+
+
+def _note_refs_with_inline_offsets(refs: List[Dict[str, Any]], inline_runs: Sequence[Dict[str, Any]], text: str) -> List[Dict[str, Any]]:
+    refs = [dict(ref) for ref in refs]
+    if not refs or not any(run.get("type") == "note_ref" for run in inline_runs if isinstance(run, dict)):
+        return refs
+    buckets: Dict[Tuple[str, str, int | None, str], List[Dict[str, Any]]] = {}
+    for ref in refs:
+        buckets.setdefault(_note_ref_match_key(ref), []).append(ref)
+    raw_prefix = ""
+    for run in inline_runs:
+        if not isinstance(run, dict):
+            continue
+        if run.get("type") == "text":
+            raw_prefix += str(run.get("text") or "")
+            continue
+        if run.get("type") != "note_ref":
+            continue
+        matches = buckets.get(_note_ref_match_key(run)) or []
+        if not matches:
+            continue
+        offset = _inline_run_offset_in_canonical_text(raw_prefix, text)
+        if offset is None:
+            continue
+        ref = matches.pop(0)
+        ref.setdefault("inline_position", "exact")
+        ref.setdefault("inline_position_source", str(run.get("source") or ref.get("source") or "inline_runs"))
+        ref.setdefault("inline_position_confidence", "high")
+        ref.setdefault("inline_offset", offset)
+    return refs
+
+
+def _note_ref_match_key(ref: Dict[str, Any]) -> Tuple[str, str, int | None, str]:
+    page = ref.get("source_page")
+    source_page = page if isinstance(page, int) else None
+    return (
+        str(ref.get("marker") or ""),
+        str(ref.get("source") or ""),
+        source_page,
+        str(ref.get("raw_marker") or ""),
+    )
+
+
+def _inline_run_offset_in_canonical_text(raw_prefix: str, text: str) -> Optional[int]:
+    if text.startswith(raw_prefix):
+        return len(raw_prefix)
+    normalized_prefix = normalize_ws(raw_prefix)
+    if text.startswith(normalized_prefix):
+        return len(normalized_prefix)
+    return None
 
 
 def make_flush_right_terminal_block(ids: IdFactory, blocks: Sequence[RawBlock]) -> Dict[str, Any]:

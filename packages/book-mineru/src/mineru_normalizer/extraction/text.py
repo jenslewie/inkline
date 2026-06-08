@@ -154,7 +154,10 @@ def merge_note_refs(blocks: Sequence[RawBlock]) -> List[Dict[str, Any]]:
         key = (r.marker, r.position, r.source, page)
         if key not in seen:
             seen.add(key)
-            out.append({"marker": r.marker, "position": r.position, "source": r.source, "source_page": page})
+            item = {"marker": r.marker, "position": r.position, "source": r.source, "source_page": page}
+            if r.raw_marker:
+                item["raw_marker"] = r.raw_marker
+            out.append(item)
     return out
 
 
