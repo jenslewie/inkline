@@ -25,13 +25,18 @@ from ..block_access import block_bbox, block_id, block_page, block_pages
 from .glm_ocr import _problem_page_plan
 from .keys import leading_note_marker
 
+_PUNCTUATION_BOUNDARY_INSTRUCTION = (
+    "这里的标点包括中文和英文的句号、逗号、顿号、分号、冒号、问号、叹号，以及紧邻正文的右括号、右引号、书名号。"
+    "不要为了凑2到8个字符而跳过紧邻标点；标点如果紧贴marker，就必须出现在对应的before_text或after_text里。"
+)
 _BODY_REFS_PROMPT = (
     "/no_think\n"
     "只返回JSON，不要解释。只在脚注分隔横线以上的正文区域识别脚注引用marker，不要识别页底脚注定义。"
     "marker只允许数字或*,**,***。正文marker必须是小号上标或紧贴正文的脚注符号。"
     "before_text必须是marker左侧紧邻的2到8个原文字符，并以marker左边那个字符结尾；"
     "after_text必须是marker右侧紧邻的2到8个原文字符，并以marker右边那个字符开头。"
-    "如果marker右边紧邻句号、逗号等标点，after_text必须以该标点开头；如果marker左边紧邻标点，before_text必须以该标点结尾。"
+    "如果marker右边紧邻标点，after_text必须以该标点开头；如果marker左边紧邻标点，before_text必须以该标点结尾。"
+    + _PUNCTUATION_BOUNDARY_INSTRUCTION +
     "quote必须等于连续原文片段 before_text + marker + after_text，多个marker相邻时必须保留相对位置。"
     "格式:"
     "{\"body_refs\":[{\"marker\":\"\",\"before_text\":\"\",\"after_text\":\"\",\"quote\":\"\",\"confidence\":\"high|medium|low\"}]}。"
@@ -47,7 +52,7 @@ _FOOTNOTE_DEFS_PROMPT = (
     "near_text填写该脚注marker后面的开头文字。"
     "看不清或无法确定紧邻字符就省略该项。"
 )
-_PROMPT_VERSION = 5
+_PROMPT_VERSION = 6
 _VALID_MARKER_RE = re.compile(r"^(?:\d{1,3}|\*{1,3})$")
 _BODY_REF_BLOCK_TYPES = {"paragraph", "display_block", "blockquote", "caption", "epigraph_group"}
 _PARAGRAPH_CROP_PADDING_PDF = 12.0
@@ -345,6 +350,9 @@ def _collect_qwen_marker_evidence(
                     markers = _body_markers_for_prompt(marker_items, expected_body_markers_by_page.get(page, []))
                     call_timer = time.perf_counter()
                     call_started = _now_iso()
+                    call_finished: str | None = None
+                    call_duration: float | None = None
+                    retry_calls: List[Dict[str, Any]] = []
                     try:
                         if use_block_body_refs:
                             body_raw = _collect_paragraph_body_refs(
@@ -357,6 +365,15 @@ def _collect_qwen_marker_evidence(
                             )
                         else:
                             body_raw = _call_qwen_marker_locator(image_path, config, prompt=_body_prompt_for_markers(config.body_prompt, markers))
+                            call_finished = _now_iso()
+                            call_duration = _duration(call_timer)
+                            body_refs = body_raw.get("body_refs") if isinstance(body_raw, dict) else []
+                            body_refs, retry_calls = _retry_missing_single_marker_body_refs(
+                                image_path,
+                                config,
+                                markers,
+                                body_refs,
+                            )
                     except Exception as exc:
                         model_calls.append(
                             {
@@ -392,13 +409,14 @@ def _collect_qwen_marker_evidence(
                         {
                             "kind": "paragraph_body_refs" if use_block_body_refs else "body_refs",
                             "started_at": call_started,
-                            "finished_at": _now_iso(),
-                            "duration_seconds": _duration(call_timer),
+                            "finished_at": call_finished or _now_iso(),
+                            "duration_seconds": call_duration if call_duration is not None else _duration(call_timer),
                             "markers_for_prompt": markers,
                             "raw_item_count": len(body_raw) if use_block_body_refs else (len(body_raw.get("body_refs") or []) if isinstance(body_raw, dict) else 0),
                         }
                     )
-                    raw_parts["body_refs"] = body_raw if use_block_body_refs else (body_raw.get("body_refs") if isinstance(body_raw, dict) else [])
+                    model_calls.extend(retry_calls)
+                    raw_parts["body_refs"] = body_raw if use_block_body_refs else body_refs
                     raw_parts["body_ref_source"] = body_ref_source
                 item = QwenMarkerPageEvidence(
                     page=page,
@@ -454,13 +472,89 @@ def _body_prompt_for_markers(default_prompt: str, markers: Sequence[str]) -> str
         f"只返回JSON，不要解释。只在脚注分隔横线以上的正文区域定位这些脚注上标marker：{marker_list}。"
         "排除页底脚注列表，不要输出脚注定义行开头的marker。不要根据脚注意义推测，只看正文里真实印刷的小号上标或星号。"
         "请逐个marker查找，能确定就输出，不能确定就省略。"
-        "特别注意：如果某个marker印在句号/逗号等标点之后，before_text必须包含这个标点并以这个标点结尾，after_text从标点后的正文开始；"
+        "特别注意：如果某个marker印在标点之后，before_text必须包含这个标点并以这个标点结尾，after_text从标点后的正文开始；"
         "如果marker印在标点之前，after_text必须以这个标点开头。"
+        + _PUNCTUATION_BOUNDARY_INSTRUCTION +
         "输出格式:{\"body_refs\":[{\"marker\":\"\",\"before_text\":\"\",\"after_text\":\"\",\"quote\":\"\",\"confidence\":\"high|medium|low\"}]}。"
         "before_text和after_text都必须是紧邻marker的2到8个原文字符，不要输出超过8个字符的before_text或after_text。"
         "quote必须是before_text+marker+after_text的连续原文片段。"
         "多个marker相邻时，quote必须保留相对位置。"
     )
+
+
+def _single_marker_body_prompt(marker: str) -> str:
+    return (
+        "/no_think\n"
+        "只返回JSON，不要解释。只看脚注分隔横线以上的正文区域，排除页底脚注定义区。"
+        f"只定位正文脚注引用marker：{marker}。不要找其他marker。"
+        f"如果正文中找到 {marker}，输出一条；找不到返回空数组。"
+        "before_text是marker左侧紧邻2到8个原文字符，after_text是marker右侧紧邻2到8个原文字符，"
+        + _PUNCTUATION_BOUNDARY_INSTRUCTION +
+        f"quote=before_text+{marker}+after_text。不要输出整句或脚注定义。"
+        "输出格式:{\"body_refs\":[{\"marker\":\"\",\"before_text\":\"\",\"after_text\":\"\",\"quote\":\"\",\"confidence\":\"high|medium|low\"}]}。"
+    )
+
+
+def _retry_missing_single_marker_body_refs(
+    image_path: Path,
+    config: QwenMarkerLocatorConfig,
+    markers: Sequence[str],
+    body_refs: Any,
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    refs = list(body_refs) if isinstance(body_refs, list) else []
+    found_markers = {item.get("marker") for item in _clean_body_refs(refs)}
+    missing_markers = [
+        marker
+        for marker in dict.fromkeys(str(marker) for marker in markers if marker)
+        if marker not in found_markers
+    ]
+    model_calls: List[Dict[str, Any]] = []
+    for marker in missing_markers:
+        call_timer = time.perf_counter()
+        call_started = _now_iso()
+        single_raw = _call_qwen_marker_locator(image_path, config, prompt=_single_marker_body_prompt(marker))
+        single_refs = single_raw.get("body_refs") if isinstance(single_raw, dict) else []
+        refs = _merge_body_ref_raw_items(refs, single_refs)
+        model_calls.append(
+            {
+                "kind": "body_refs_single_marker_retry",
+                "marker": marker,
+                "started_at": call_started,
+                "finished_at": _now_iso(),
+                "duration_seconds": _duration(call_timer),
+                "raw_item_count": len(single_refs) if isinstance(single_refs, list) else 0,
+            }
+        )
+    return refs, model_calls
+
+
+def _merge_body_ref_raw_items(base_refs: Sequence[Any], extra_refs: Any) -> List[Dict[str, Any]]:
+    merged = [dict(item) for item in base_refs if isinstance(item, dict)]
+    seen = {
+        (
+            str(item.get("marker") or ""),
+            normalize_ws(str(item.get("before_text") or "")),
+            normalize_ws(str(item.get("after_text") or "")),
+            normalize_ws(str(item.get("quote") or "")),
+        )
+        for item in merged
+    }
+    if not isinstance(extra_refs, list):
+        return merged
+    for item in extra_refs:
+        if not isinstance(item, dict):
+            continue
+        key = (
+            str(item.get("marker") or ""),
+            normalize_ws(str(item.get("before_text") or "")),
+            normalize_ws(str(item.get("after_text") or "")),
+            normalize_ws(str(item.get("quote") or "")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(dict(item))
+    return merged
 
 
 def _paragraph_body_prompt_for_markers(markers: Sequence[str], block: Dict[str, Any]) -> str:
@@ -474,7 +568,8 @@ def _paragraph_body_prompt_for_markers(markers: Sequence[str], block: Dict[str, 
         "如果看不到任何marker，返回{\"body_refs\":[]}。"
         "before_text必须是marker左侧紧邻的2到8个原文字符，并以marker左边那个字符结尾；"
         "after_text必须是marker右侧紧邻的2到8个原文字符，并以marker右边那个字符开头。"
-        "如果marker右边紧邻句号、逗号等标点，after_text必须以该标点开头；如果marker左边紧邻标点，before_text必须以该标点结尾。"
+        "如果marker右边紧邻标点，after_text必须以该标点开头；如果marker左边紧邻标点，before_text必须以该标点结尾。"
+        + _PUNCTUATION_BOUNDARY_INSTRUCTION +
         "quote必须等于连续原文片段 before_text + marker + after_text，多个marker相邻时必须保留相对位置。"
         "输出格式:{\"body_refs\":[{\"marker\":\"\",\"before_text\":\"\",\"after_text\":\"\",\"quote\":\"\",\"confidence\":\"high|medium|low\"}]}。"
         "看不清或无法确定紧邻字符就省略该项。"
@@ -703,7 +798,13 @@ def _call_qwen_marker_locator(image_path: Path, config: QwenMarkerLocatorConfig,
         "think": False,
         "stream": False,
         "keep_alive": config.keep_alive,
-        "options": {"temperature": 0, "num_predict": 2048},
+        "options": {
+            "temperature": 0,
+            "presence_penalty": 0,
+            "frequency_penalty": 0,
+            "repeat_penalty": 1,
+            "num_predict": 2048,
+        },
     }
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(config.api_url, data=data, headers={"Content-Type": "application/json"}, method="POST")
