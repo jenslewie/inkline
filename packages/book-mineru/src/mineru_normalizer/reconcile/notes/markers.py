@@ -1,4 +1,4 @@
-"""Missing note reference recovery. Recovers missing inline note references by analyzing reference gaps and matching them against secondary evidence sources (model JSON markers, PDF text-layer markers, PDF image analysis). Main entry: recover_missing_note_refs()."""
+"""Missing note reference recovery. Recovers missing inline note references by analyzing note definition sequences and Qwen visual evidence. Main entry: recover_missing_note_refs()."""
 
 from __future__ import annotations
 
@@ -6,15 +6,8 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from ...analysis.pdf_page_metrics import PdfPageCache
 from ...extraction.text import normalize_note_marker, normalize_ws
-from .marker_evidence import (
-    _inline_location_from_secondary_evidence,
-    _locate_pdf_image_marker,
-    _secondary_evidence_between_anchors,
-    _secondary_markers_by_page,
-    _target_block_for_secondary_marker,
-)
-from .marker_inline import _InlineMarkerLocation, _append_note_ref, _existing_ref_markers, _note_refs, _rebuild_inline_note_runs_from_exact_refs
-from .marker_patterns import BODY_TYPES, TERMINAL_PUNCTUATION, _ends_with_terminal_or_quote, _marker_int, _visible_note_candidates
+from .marker_inline import _InlineMarkerLocation, _append_note_ref, _note_refs, _rebuild_inline_note_runs_from_exact_refs
+from .marker_patterns import BODY_TYPES, TERMINAL_PUNCTUATION, _marker_int, _visible_note_candidates
 from .keys import leading_note_marker
 from .resolver import _EndnoteSectionStrategy, _NoteContext, _PageFootnoteStrategy
 
@@ -29,9 +22,6 @@ def recover_missing_note_refs(blocks: List[Dict[str, Any]], source_pdf: Any = No
     This pass uses available note-definition sequences as guardrails and records
     recovered refs in ``attrs.note_refs`` so ``resolve_note_links`` can treat
     explicit, recovered, and inferred refs through the same path.
-
-    When a PdfPageCache is provided, PDF text-layer and rendered-image access
-    goes through the shared cache instead of opening the PDF separately.
     """
 
     context = _NoteContext(blocks)
@@ -40,29 +30,7 @@ def recover_missing_note_refs(blocks: List[Dict[str, Any]], source_pdf: Any = No
     if not scope_defs and not page_defs and not book_defs and not page_symbol_defs:
         return
 
-    model_pages = _kwargs.get("model_pages")
-    model_json = _kwargs.get("model_json")
-    if model_json is None:
-        model_json = _kwargs.get("model")
-    glm_ocr_pages = _kwargs.get("glm_ocr_pages")
     qwen_marker_pages = _kwargs.get("qwen_marker_pages") or _kwargs.get("marker_locator_pages")
-    recovery_mode = str(_kwargs.get("recovery_mode") or "full")
-    if recovery_mode == "qwen":
-        _recover_direct_page_footnote_qwen_refs(
-            blocks,
-            context,
-            page_defs,
-            page_symbol_defs,
-            qwen_marker_pages=qwen_marker_pages,
-        )
-        _recover_direct_scoped_endnote_qwen_refs(
-            blocks,
-            context,
-            qwen_marker_pages=qwen_marker_pages,
-        )
-        return
-    _recover_visible_digit_refs(blocks, context, scope_defs, page_defs, book_defs)
-    _recover_visible_symbol_page_refs(blocks, context, page_symbol_defs)
     _recover_direct_page_footnote_qwen_refs(
         blocks,
         context,
@@ -75,36 +43,6 @@ def recover_missing_note_refs(blocks: List[Dict[str, Any]], source_pdf: Any = No
         context,
         qwen_marker_pages=qwen_marker_pages,
     )
-    _recover_page_footnote_sequence_gaps(
-        blocks,
-        context,
-        page_defs,
-        source_pdf=source_pdf,
-        model_json=model_json,
-        model_pages=model_pages,
-        glm_ocr_pages=glm_ocr_pages,
-        pdf_cache=pdf_cache,
-    )
-    _recover_direct_page_footnote_glm_refs(
-        blocks,
-        context,
-        page_defs,
-        glm_ocr_pages=glm_ocr_pages,
-    )
-    _recover_single_unanchored_page_footnote_image_refs(
-        blocks,
-        context,
-        page_defs,
-        source_pdf=source_pdf,
-        pdf_cache=pdf_cache,
-    )
-    _recover_scoped_endnote_sequence_gaps(
-        blocks,
-        context,
-        scope_defs,
-        glm_ocr_pages=glm_ocr_pages,
-    )
-    _infer_single_sequence_gaps(blocks, context, scope_defs)
 
 
 def _collect_note_definition_markers(
@@ -151,398 +89,26 @@ def _collect_page_symbol_definition_markers(blocks: List[Dict[str, Any]], contex
     return out
 
 
-def _recover_visible_digit_refs(
+def _body_refs_by_source_page(
     blocks: List[Dict[str, Any]],
     context: _NoteContext,
-    scope_defs: Dict[str, Set[int]],
-    page_defs: Dict[int, Set[int]],
-    book_defs: Set[int],
-) -> None:
-    for block in blocks:
-        if block.get("type") not in BODY_TYPES:
-            continue
-        text = str(block.get("text") or "")
-        if not text:
-            continue
-        existing = _existing_ref_markers(block)
-        for raw_marker, marker, reason in _visible_note_candidates(text):
-            marker_int = _marker_int(marker)
-            if marker_int is None or marker in existing:
-                continue
-            if not _marker_has_definition(block, context, marker_int, scope_defs, page_defs, book_defs):
-                continue
-            _append_note_ref(
-                block,
-                marker,
-                source="recovered_text",
-                confidence="candidate",
-                recovery_reason=reason,
-                raw_marker=raw_marker,
-            )
-            existing.add(marker)
-
-
-def _recover_visible_symbol_page_refs(
-    blocks: List[Dict[str, Any]],
-    context: _NoteContext,
-    page_symbol_defs: Dict[int, Set[str]],
-) -> None:
-    if not page_symbol_defs:
-        return
-    for block in blocks:
-        if block.get("type") not in BODY_TYPES:
-            continue
-        text = str(block.get("text") or "")
-        if not text:
-            continue
-        existing = _existing_ref_markers(block)
-        for page in context.pages_for(block):
-            for marker in sorted(page_symbol_defs.get(page, set()), key=lambda value: (len(value), value)):
-                if marker in existing:
-                    continue
-                offsets = _visible_symbol_offsets(text, marker)
-                if len(offsets) != 1:
-                    continue
-                offset = offsets[0]
-                block["text"] = text[:offset] + text[offset + len(marker) :]
-                _append_note_ref(
-                    block,
-                    marker,
-                    source="recovered_text",
-                    confidence="candidate",
-                    recovery_reason="visible_symbol_page_footnote_marker",
-                    raw_marker=marker,
-                    source_page=page,
-                    inline_location=_InlineMarkerLocation(
-                        char_index=offset,
-                        source="canonical_text",
-                        confidence="candidate",
-                        evidence={"visible_marker": marker, "visible_marker_offset": offset, "visible_marker_stripped": True},
-                    ),
-                )
-                existing.add(marker)
-                text = str(block.get("text") or "")
-
-
-def _visible_symbol_offsets(text: str, marker: str) -> List[int]:
-    out: List[int] = []
-    start = 0
-    while True:
-        index = text.find(marker, start)
-        if index < 0:
-            return out
-        before = text[index - 1] if index > 0 else ""
-        after_index = index + len(marker)
-        after = text[after_index] if after_index < len(text) else ""
-        if before not in {"*", "\uff0a"} and after not in {"*", "\uff0a"}:
-            out.append(index)
-        start = index + max(1, len(marker))
-
-
-def _infer_single_sequence_gaps(
-    blocks: List[Dict[str, Any]],
-    context: _NoteContext,
-    scope_defs: Dict[str, Set[int]],
-) -> None:
-    if not scope_defs:
-        return
-    refs_by_scope: Dict[str, List[Tuple[int, Dict[str, Any], int]]] = {}
+) -> Dict[int, List[Tuple[int, Dict[str, Any], int]]]:
+    refs_by_page: Dict[int, List[Tuple[int, Dict[str, Any], int]]] = {}
     for block_index, block in enumerate(blocks):
         if block.get("type") not in BODY_TYPES:
             continue
-        scope = context.scope_for(block)
-        if not scope or scope not in scope_defs:
-            continue
+        fallback_pages = context.pages_for(block)
         for ref in _note_refs(block):
             marker = _marker_int(ref.get("marker"))
             if marker is None:
                 continue
-            refs_by_scope.setdefault(scope, []).append((block_index, block, marker))
-
-    for scope, refs in refs_by_scope.items():
-        defs = scope_defs.get(scope) or set()
-        refs.sort(key=lambda item: item[0])
-        index = 0
-        while index + 1 < len(refs):
-            left_index, _left_block, left_marker = refs[index]
-            right_index, _right_block, right_marker = refs[index + 1]
-            missing = left_marker + 1
-            if right_marker - left_marker != 2 or missing not in defs:
-                index += 1
-                continue
-            target = _target_block_for_gap(blocks, left_index, right_index)
-            if target is None:
-                index += 1
-                continue
-            marker_text = str(missing)
-            if marker_text in _existing_ref_markers(target):
-                index += 1
-                continue
-            _append_note_ref(
-                target,
-                marker_text,
-                source="sequence_gap",
-                confidence="inferred",
-                recovery_reason="monotonic_note_sequence_gap",
-                raw_marker="",
-            )
-            refs.insert(index + 1, (blocks.index(target), target, missing))
-            index += 1
-
-
-def _recover_page_footnote_sequence_gaps(
-    blocks: List[Dict[str, Any]],
-    context: _NoteContext,
-    page_defs: Dict[int, Set[int]],
-    *,
-    source_pdf: Any = None,
-    model_json: Any = None,
-    model_pages: Any = None,
-    glm_ocr_pages: Any = None,
-    pdf_cache: Optional[PdfPageCache] = None,
-) -> None:
-    """Recover page-footnote markers only when a local sequence gap is anchored.
-
-    This handles the common page-footnote case ``1, 2, 4`` in body refs with
-    ``1, 2, 3, 4`` in page footnote definitions. The missing marker is added
-    when a secondary page source also shows that marker between the already
-    observed neighboring anchors. If the scanned PDF/model source has no marker
-    text, it falls back to the canonical body interval only when the block-to-
-    marker mapping is still unambiguous.
-    """
-
-    if not page_defs:
-        return
-    refs_by_page = _body_refs_by_source_page(blocks, context)
-    gaps_by_page = _anchored_page_gaps(page_defs, refs_by_page)
-    if not gaps_by_page:
-        return
-
-    markers_by_page = _secondary_markers_by_page(
-        gaps_by_page.keys(),
-        source_pdf=source_pdf,
-        model_json=model_json,
-        model_pages=model_pages,
-        glm_ocr_pages=glm_ocr_pages,
-        pdf_cache=pdf_cache,
-    )
-
-    block_index = {id(block): index for index, block in enumerate(blocks)}
-    for page, gaps in sorted(gaps_by_page.items()):
-        secondary = markers_by_page.get(page) or []
-        for left_anchor, right_anchor, missing_markers in _group_page_gaps(gaps):
-            recovered: Set[int] = set()
-            for missing in missing_markers:
-                evidence = _secondary_evidence_between_anchors(secondary, missing, left_anchor, right_anchor)
-                if evidence is None:
-                    continue
-                target = _target_block_for_secondary_marker(blocks, context, page, evidence)
-                if target is None:
-                    continue
-                inline_location = _inline_location_from_secondary_evidence(target, evidence)
-                if _append_recovered_page_gap_ref(
-                    target,
-                    page,
-                    missing,
-                    source="secondary_page_sequence_gap",
-                    confidence="anchored",
-                    recovery_reason="page_footnote_marker_between_anchored_refs",
-                    evidence={
-                        "secondary_source": evidence.source,
-                        "secondary_item_index": evidence.item_index,
-                        "secondary_marker_index": evidence.char_index,
-                        "anchor_markers": [str(left_anchor), str(right_anchor)],
-                    },
-                    inline_location=inline_location,
-                ):
-                    refs_by_page.setdefault(page, []).append((block_index[id(target)], target, missing))
-                    refs_by_page[page].sort(key=lambda item: (item[0], item[2]))
-                    recovered.add(missing)
-
-            remaining = [missing for missing in missing_markers if missing not in recovered]
-            if not remaining:
-                continue
-            inferred_targets = _targets_for_page_gap_group(blocks, context, refs_by_page.get(page, []), page, left_anchor, right_anchor, remaining)
-            for missing, target in inferred_targets:
-                inline_location = _locate_pdf_image_marker(target, missing, source_pdf=source_pdf, pdf_cache=pdf_cache)
-                if _append_recovered_page_gap_ref(
-                    target,
-                    page,
-                    missing,
-                    source="page_sequence_gap",
-                    confidence="inferred",
-                    recovery_reason="page_footnote_sequence_gap_between_anchors",
-                    evidence={"anchor_markers": [str(left_anchor), str(right_anchor)]},
-                    inline_location=inline_location,
-                ):
-                    refs_by_page.setdefault(page, []).append((block_index[id(target)], target, missing))
-                    refs_by_page[page].sort(key=lambda item: (item[0], item[2]))
-
-
-def _append_recovered_page_gap_ref(
-    target: Dict[str, Any],
-    page: int,
-    marker: int,
-    *,
-    source: str,
-    confidence: str,
-    recovery_reason: str,
-    evidence: Dict[str, Any],
-    inline_location: Optional[_InlineMarkerLocation] = None,
-) -> bool:
-    marker_text = str(marker)
-    if marker_text in _existing_ref_markers(target):
-        return False
-    _append_note_ref(
-        target,
-        marker_text,
-        source=source,
-        confidence=confidence,
-        recovery_reason=recovery_reason,
-        raw_marker=f"^{{{marker_text}}}" if inline_location else "",
-        source_page=page,
-        evidence={**evidence, **(inline_location.evidence if inline_location else {})},
-        inline_location=inline_location,
-    )
-    return True
-
-
-def _recover_scoped_endnote_sequence_gaps(
-    blocks: List[Dict[str, Any]],
-    context: _NoteContext,
-    scope_defs: Dict[str, Set[int]],
-    *,
-    glm_ocr_pages: Any = None,
-) -> None:
-    if not scope_defs or not glm_ocr_pages:
-        return
-    refs_by_scope: Dict[str, List[Tuple[int, Dict[str, Any], int]]] = {}
-    for block_index, block in enumerate(blocks):
-        if block.get("type") not in BODY_TYPES:
-            continue
-        scope = context.scope_for(block)
-        if not scope or scope not in scope_defs:
-            continue
-        for ref in _note_refs(block):
-            marker = _marker_int(ref.get("marker"))
-            if marker is not None:
-                refs_by_scope.setdefault(scope, []).append((block_index, block, marker))
-    for refs in refs_by_scope.values():
+            source_page = ref.get("source_page")
+            pages = [source_page] if isinstance(source_page, int) else fallback_pages
+            for page in pages:
+                refs_by_page.setdefault(page, []).append((block_index, block, marker))
+    for refs in refs_by_page.values():
         refs.sort(key=lambda item: (item[0], item[2]))
-
-    candidate_pages = _candidate_pages_for_scoped_gaps(blocks, context, scope_defs, refs_by_scope)
-    if not candidate_pages:
-        return
-    markers_by_page = _secondary_markers_by_page(candidate_pages, glm_ocr_pages=glm_ocr_pages)
-    if not markers_by_page:
-        return
-
-    block_index = {id(block): index for index, block in enumerate(blocks)}
-    for scope, refs in sorted(refs_by_scope.items()):
-        defs = scope_defs.get(scope) or set()
-        ref_markers = {marker for _idx, _block, marker in refs}
-        for missing in sorted(defs - ref_markers):
-            left_anchor = max((marker for marker in defs if marker < missing and marker in ref_markers), default=None)
-            right_anchor = min((marker for marker in defs if marker > missing and marker in ref_markers), default=None)
-            if left_anchor is None or right_anchor is None:
-                continue
-            anchor_span = _closest_anchor_span(refs, left_anchor, right_anchor)
-            if anchor_span is None:
-                continue
-            left_index, right_index = anchor_span
-            pages = {
-                page
-                for block in blocks[left_index + 1:right_index]
-                if block.get("type") in BODY_TYPES and context.scope_for(block) == scope
-                for page in context.pages_for(block)
-            }
-            matches = [
-                marker
-                for page in pages
-                for marker in markers_by_page.get(page, [])
-                if marker.marker == missing and marker.source == "glm_ocr_body"
-            ]
-            if len(matches) != 1:
-                continue
-            evidence = matches[0]
-            target = _target_block_for_secondary_marker(blocks, context, evidence.page, evidence)
-            if target is None:
-                continue
-            inline_location = _inline_location_from_secondary_evidence(target, evidence)
-            marker_text = str(missing)
-            if marker_text in _existing_ref_markers(target):
-                continue
-            _append_note_ref(
-                target,
-                marker_text,
-                source="secondary_scope_sequence_gap",
-                confidence="anchored",
-                recovery_reason="chapter_endnote_marker_between_anchored_refs",
-                raw_marker=f"^{{{marker_text}}}" if inline_location else "",
-                source_page=evidence.page,
-                evidence={
-                    "secondary_source": evidence.source,
-                    "secondary_item_index": evidence.item_index,
-                    "secondary_marker_index": evidence.char_index,
-                    "anchor_markers": [str(left_anchor), str(right_anchor)],
-                    "note_scope": scope,
-                },
-                inline_location=inline_location,
-            )
-            refs.append((block_index[id(target)], target, missing))
-            refs.sort(key=lambda item: (item[0], item[2]))
-            ref_markers.add(missing)
-
-
-def _recover_direct_page_footnote_glm_refs(
-    blocks: List[Dict[str, Any]],
-    context: _NoteContext,
-    page_defs: Dict[int, Set[int]],
-    *,
-    glm_ocr_pages: Any = None,
-) -> None:
-    if not page_defs or not glm_ocr_pages:
-        return
-    refs_by_page = _body_refs_by_source_page(blocks, context)
-    missing_by_page: Dict[int, Set[int]] = {}
-    for page, defs in page_defs.items():
-        ref_markers = {marker for _idx, _block, marker in refs_by_page.get(page, [])}
-        missing = set(defs - ref_markers)
-        if missing:
-            missing_by_page[page] = missing
-    if not missing_by_page:
-        return
-    markers_by_page = _secondary_markers_by_page(missing_by_page.keys(), glm_ocr_pages=glm_ocr_pages)
-    for page, missing_markers in sorted(missing_by_page.items()):
-        for missing in sorted(missing_markers):
-            matches = [
-                marker
-                for marker in markers_by_page.get(page, [])
-                if marker.marker == missing and marker.source == "glm_ocr_body"
-            ]
-            if len(matches) != 1:
-                continue
-            evidence = matches[0]
-            target = _target_block_for_secondary_marker(blocks, context, page, evidence)
-            if target is None:
-                continue
-            inline_location = _inline_location_from_secondary_evidence(target, evidence)
-            if _append_recovered_page_gap_ref(
-                target,
-                page,
-                missing,
-                source="secondary_page_missing_ref",
-                confidence="candidate",
-                recovery_reason="page_footnote_marker_seen_in_glm_ocr_body",
-                evidence={
-                    "secondary_source": evidence.source,
-                    "secondary_item_index": evidence.item_index,
-                    "secondary_marker_index": evidence.char_index,
-                },
-                inline_location=inline_location,
-            ):
-                refs_by_page.setdefault(page, []).append((blocks.index(target), target, missing))
-                refs_by_page[page].sort(key=lambda item: (item[0], item[2]))
+    return refs_by_page
 
 
 def _recover_direct_page_footnote_qwen_refs(
@@ -1629,23 +1195,6 @@ def _qwen_filter_before_only_offsets(text: str, marker: str, after: str, quote: 
     return [offset for offset in offsets if not (0 <= offset < len(text) and text[offset] in TERMINAL_PUNCTUATION)]
 
 
-def _qwen_reject_numeric_cross_block_terminal_mismatch(text: str, marker: str, before: str, after: str, quote: str) -> bool:
-    if _marker_int(marker) is None or not before or not after or not quote:
-        return False
-    stripped = normalize_ws(text)
-    if not stripped or stripped[-1] not in TERMINAL_PUNCTUATION:
-        return False
-    if not stripped[:-1].endswith(before):
-        return False
-    folded_before = _qwen_fold_bracket_width(before)
-    folded_after = _qwen_fold_bracket_width(after)
-    folded_quote = _qwen_fold_bracket_width(quote)
-    for marker_text in _qwen_marker_text_variants(marker):
-        if f"{before}{marker_text}{after}" in quote or f"{folded_before}{marker_text}{folded_after}" in folded_quote:
-            return True
-    return False
-
-
 def _qwen_offset_after_short_omitted_fragment(text: str, marker: str, before: str, quote: str, after_index: int) -> Optional[int]:
     before = normalize_ws(before)
     if not marker.startswith("*") or not before or not quote or after_index <= 0:
@@ -1739,240 +1288,9 @@ def _text_ends_with_normalized_ignoring_trailing_punctuation(text: str, suffix: 
     return normalized.endswith(normalize_ws(suffix))
 
 
-def _recover_single_unanchored_page_footnote_image_refs(
-    blocks: List[Dict[str, Any]],
-    context: _NoteContext,
-    page_defs: Dict[int, Set[int]],
-    *,
-    source_pdf: Any = None,
-    pdf_cache: Optional[PdfPageCache] = None,
-) -> None:
-    if not page_defs or not source_pdf:
-        return
-    refs_by_page = _body_refs_by_source_page(blocks, context)
-    for page, defs in sorted(page_defs.items()):
-        ref_markers = {marker for _idx, _block, marker in refs_by_page.get(page, [])}
-        missing = sorted(defs - ref_markers)
-        if len(missing) != 1:
-            continue
-        marker = missing[0]
-        if not _page_footnote_marker_starts_on_page(blocks, context, page, marker):
-            continue
-        candidates = [
-            block
-            for block in blocks
-            if block.get("type") in BODY_TYPES
-            and page in context.pages_for(block)
-            and str(marker) not in _existing_ref_markers(block)
-            and normalize_ws(str(block.get("text") or ""))
-        ]
-        located: List[Tuple[float, int, Dict[str, Any], _InlineMarkerLocation]] = []
-        for block in candidates:
-            inline_location = _locate_pdf_image_marker(block, marker, source_pdf=source_pdf, pdf_cache=pdf_cache)
-            if inline_location is None:
-                continue
-            score = float(inline_location.evidence.get("pdf_image_score") or 0.0)
-            located.append((score, blocks.index(block), block, inline_location))
-        if not located:
-            continue
-        located.sort(key=lambda item: (-item[0], item[1]))
-        top_score, _top_index, target, inline_location = located[0]
-        next_score = located[1][0] if len(located) > 1 else 0.0
-        if top_score < 4.0 or next_score >= top_score:
-            continue
-        if _append_recovered_page_gap_ref(
-            target,
-            page,
-            marker,
-            source="page_single_marker_image",
-            confidence="candidate",
-            recovery_reason="single_page_footnote_marker_seen_in_pdf_image",
-            evidence={"pdf_image_score": top_score, "competing_pdf_image_score": next_score},
-            inline_location=inline_location,
-        ):
-            refs_by_page.setdefault(page, []).append((blocks.index(target), target, marker))
-            refs_by_page[page].sort(key=lambda item: (item[0], item[2]))
 
 
-def _page_footnote_marker_starts_on_page(
-    blocks: List[Dict[str, Any]],
-    context: _NoteContext,
-    page: int,
-    marker: int,
-) -> bool:
-    marker_text = str(marker)
-    for block in blocks:
-        if block.get("type") != "footnote":
-            continue
-        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
-        if attrs.get("role") != "page_footnote":
-            continue
-        block_marker = normalize_note_marker(attrs.get("note_marker", "")) or (leading_note_marker(str(block.get("text") or ""), include_superscript=True) or "")
-        if block_marker != marker_text:
-            continue
-        block_pages = context.pages_for(block)
-        if block_pages and block_pages[0] == page:
-            return True
-    return False
 
 
-def _candidate_pages_for_scoped_gaps(
-    blocks: List[Dict[str, Any]],
-    context: _NoteContext,
-    scope_defs: Dict[str, Set[int]],
-    refs_by_scope: Dict[str, List[Tuple[int, Dict[str, Any], int]]],
-) -> Set[int]:
-    pages: Set[int] = set()
-    for scope, defs in scope_defs.items():
-        refs = refs_by_scope.get(scope) or []
-        ref_markers = {marker for _idx, _block, marker in refs}
-        for missing in sorted(defs - ref_markers):
-            left_anchor = max((marker for marker in defs if marker < missing and marker in ref_markers), default=None)
-            right_anchor = min((marker for marker in defs if marker > missing and marker in ref_markers), default=None)
-            if left_anchor is None or right_anchor is None:
-                continue
-            anchor_span = _closest_anchor_span(refs, left_anchor, right_anchor)
-            if anchor_span is None:
-                continue
-            left_index, right_index = anchor_span
-            for block in blocks[left_index + 1:right_index]:
-                if block.get("type") not in BODY_TYPES or context.scope_for(block) != scope:
-                    continue
-                if _note_refs(block) or not normalize_ws(str(block.get("text") or "")):
-                    continue
-                pages.update(context.pages_for(block))
-    return pages
 
 
-def _body_refs_by_source_page(
-    blocks: List[Dict[str, Any]],
-    context: _NoteContext,
-) -> Dict[int, List[Tuple[int, Dict[str, Any], int]]]:
-    refs_by_page: Dict[int, List[Tuple[int, Dict[str, Any], int]]] = {}
-    for block_index, block in enumerate(blocks):
-        if block.get("type") not in BODY_TYPES:
-            continue
-        fallback_pages = context.pages_for(block)
-        for ref in _note_refs(block):
-            marker = _marker_int(ref.get("marker"))
-            if marker is None:
-                continue
-            source_page = ref.get("source_page")
-            pages = [source_page] if isinstance(source_page, int) else fallback_pages
-            for page in pages:
-                refs_by_page.setdefault(page, []).append((block_index, block, marker))
-    for refs in refs_by_page.values():
-        refs.sort(key=lambda item: (item[0], item[2]))
-    return refs_by_page
-
-
-def _anchored_page_gaps(
-    page_defs: Dict[int, Set[int]],
-    refs_by_page: Dict[int, List[Tuple[int, Dict[str, Any], int]]],
-) -> Dict[int, List[Tuple[int, int, int]]]:
-    gaps_by_page: Dict[int, List[Tuple[int, int, int]]] = {}
-    for page, defs in page_defs.items():
-        if len(defs) < 3:
-            continue
-        ref_markers = {marker for _idx, _block, marker in refs_by_page.get(page, [])}
-        for missing in sorted(defs - ref_markers):
-            left = max((marker for marker in defs if marker < missing and marker in ref_markers), default=None)
-            right = min((marker for marker in defs if marker > missing and marker in ref_markers), default=None)
-            if left is None or right is None:
-                continue
-            gaps_by_page.setdefault(page, []).append((missing, left, right))
-    return gaps_by_page
-
-
-def _group_page_gaps(gaps: List[Tuple[int, int, int]]) -> List[Tuple[int, int, List[int]]]:
-    grouped: Dict[Tuple[int, int], List[int]] = {}
-    for missing, left_anchor, right_anchor in gaps:
-        grouped.setdefault((left_anchor, right_anchor), []).append(missing)
-    return [
-        (left_anchor, right_anchor, sorted(missing_markers))
-        for (left_anchor, right_anchor), missing_markers in sorted(grouped.items())
-    ]
-
-
-def _targets_for_page_gap_group(
-    blocks: List[Dict[str, Any]],
-    context: _NoteContext,
-    refs: List[Tuple[int, Dict[str, Any], int]],
-    page: int,
-    left_anchor: int,
-    right_anchor: int,
-    missing_markers: List[int],
-) -> List[Tuple[int, Dict[str, Any]]]:
-    anchor_span = _closest_anchor_span(refs, left_anchor, right_anchor)
-    if anchor_span is None:
-        return []
-    left_index, right_index = anchor_span
-    if right_index - left_index < 2:
-        return []
-    candidates = [
-        block
-        for block in blocks[left_index + 1:right_index]
-        if block.get("type") in BODY_TYPES
-        and page in context.pages_for(block)
-        and not _note_refs(block)
-        and normalize_ws(str(block.get("text") or ""))
-    ]
-    if not candidates:
-        return []
-    if len(candidates) == 1:
-        return [(missing, candidates[0]) for missing in missing_markers]
-    if len(candidates) == len(missing_markers):
-        return list(zip(missing_markers, candidates))
-    return []
-
-
-def _closest_anchor_span(
-    refs: List[Tuple[int, Dict[str, Any], int]],
-    left_anchor: int,
-    right_anchor: int,
-) -> Optional[Tuple[int, int]]:
-    spans: List[Tuple[int, int]] = []
-    left_indexes = [block_index for block_index, _block, marker in refs if marker == left_anchor]
-    right_indexes = [block_index for block_index, _block, marker in refs if marker == right_anchor]
-    for left_index in left_indexes:
-        for right_index in right_indexes:
-            if left_index < right_index:
-                spans.append((left_index, right_index))
-    if not spans:
-        return None
-    return min(spans, key=lambda span: span[1] - span[0])
-
-
-def _target_block_for_gap(
-    blocks: List[Dict[str, Any]],
-    left_index: int,
-    right_index: int,
-) -> Optional[Dict[str, Any]]:
-    if right_index - left_index < 2:
-        return None
-    for block in reversed(blocks[left_index + 1:right_index]):
-        if block.get("type") not in BODY_TYPES:
-            continue
-        if _note_refs(block):
-            continue
-        text = normalize_ws(str(block.get("text") or ""))
-        if _ends_with_terminal_or_quote(text):
-            return block
-    return None
-
-
-def _marker_has_definition(
-    block: Dict[str, Any],
-    context: _NoteContext,
-    marker: int,
-    scope_defs: Dict[str, Set[int]],
-    page_defs: Dict[int, Set[int]],
-    book_defs: Set[int],
-) -> bool:
-    scope = context.scope_for(block)
-    if scope and marker in scope_defs.get(scope, set()):
-        return True
-    for page in context.pages_for(block):
-        if marker in page_defs.get(page, set()):
-            return True
-    return not scope_defs and marker in book_defs

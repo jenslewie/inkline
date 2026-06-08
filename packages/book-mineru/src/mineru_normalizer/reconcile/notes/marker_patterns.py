@@ -1,8 +1,7 @@
-"""Note marker regex patterns and candidates. Defines SECONDARY_MARKER_RE for detecting note markers in model/PDF text, along with visible note candidate enumeration, marker integer extraction, and punctuation boundary definitions."""
+"""Note marker candidate enumeration and integer extraction. Provides visible note candidate detection, marker integer parsing, and punctuation boundary definitions used by the Qwen recovery pipeline."""
 
 from __future__ import annotations
 
-import re
 from typing import Any, List, Optional, Tuple
 
 from ...extraction.text import normalize_note_marker, normalize_ws
@@ -15,11 +14,6 @@ SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
 FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９", "0123456789")
 MAX_NOTE_MARKER_DIGITS = 3
 BODY_TYPES = {"paragraph", "display_block", "blockquote", "caption", "epigraph_group"}
-SECONDARY_MARKER_RE = re.compile(
-    r"\\\(\s*\^\{(?P<latex>[^}]+)\}\s*\\\)|"
-    r"\$\^\{(?P<dollar>[^}]+)\}\$|"
-    r"\^\{(?P<brace>[^}]+)\}"
-)
 
 DISQUALIFY_NEXT_PREFIXES = (
     "%",
@@ -62,13 +56,6 @@ DISQUALIFY_NEXT_PREFIXES = (
 )
 
 
-def _first_match_group(match: re.Match[str]) -> str:
-    for group in match.groups():
-        if group:
-            return group
-    return ""
-
-
 def _marker_int(value: Any) -> Optional[int]:
     try:
         return int(normalize_note_marker(str(value or "")))
@@ -103,26 +90,6 @@ def _visible_note_candidates(text: str) -> List[Tuple[str, str, str]]:
             out.append((raw, marker, reason))
         index = end
     return out
-
-
-def _strip_secondary_marker_markup(text: str) -> str:
-    return normalize_ws(SECONDARY_MARKER_RE.sub("", text))
-
-
-def _candidate_marker_offsets(text: str) -> List[int]:
-    offsets: List[int] = []
-    index = 0
-    while index < len(text):
-        if text[index] not in TERMINAL_PUNCTUATION:
-            index += 1
-            continue
-        end = index + 1
-        while end < len(text) and text[end] in CLOSING_PUNCTUATION:
-            end += 1
-        if not _next_text_disqualifies_marker(text[end:]):
-            offsets.append(end)
-        index = end
-    return offsets
 
 
 def _is_candidate_marker(text: str, start: int, end: int, raw_marker: str) -> bool:
@@ -206,8 +173,3 @@ def _latex_marker_at(text: str, start: int) -> Optional[Tuple[int, str]]:
     return None
 
 
-def _ends_with_terminal_or_quote(text: str) -> bool:
-    stripped = text.strip()
-    while stripped and stripped[-1] in CLOSING_PUNCTUATION | QUOTE_BOUNDARY_PUNCTUATION:
-        stripped = stripped[:-1].rstrip()
-    return bool(stripped and stripped[-1] in TERMINAL_PUNCTUATION)

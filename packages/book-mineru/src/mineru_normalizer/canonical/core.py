@@ -87,7 +87,7 @@ def build_canonical(
     merge_continuation_footnotes(blocks)
     merge_cross_page_paragraphs(blocks, args.source_pdf, layout, allow_missing_pdf_text=getattr(args, "allow_missing_pdf_text", False))
     marker_locator_evidence = []
-    marker_locator_enabled = bool(getattr(args, "marker_locator_repair", False) or getattr(args, "glm_ocr_repair", False))
+    marker_locator_enabled = bool(getattr(args, "marker_locator_repair", False))
     with trace_note_calls(getattr(args, "note_trace_log", None)):
         note_cache = PdfPageCache(getattr(args, "source_pdf", None), {p: (layout.page_width, layout.page_height) for p in sorted(pages)}, allow_missing=True, render_zoom=3.0)
         try:
@@ -162,7 +162,7 @@ def build_canonical(
                 }
             },
             "note_trace_log": str(getattr(args, "note_trace_log", "")) or None,
-            "note_recovery_mode": str(getattr(args, "note_recovery_mode", "full")),
+            "note_recovery_mode": str(getattr(args, "note_recovery_mode", "qwen")),
             "type_system": {
                 "block_types": block_types,
                 "content_forms": [],
@@ -209,7 +209,7 @@ def _recover_and_resolve_note_refs(
         model_json=getattr(args, "model", None),
         pdf_cache=note_cache,
         qwen_marker_pages=qwen_marker_pages,
-        recovery_mode=getattr(args, "note_recovery_mode", "full"),
+        recovery_mode=getattr(args, "note_recovery_mode", "qwen"),
     )
     _clear_note_referenced_by(blocks)
     resolve_note_links(blocks)
@@ -315,9 +315,9 @@ def _qwen_marker_locator_config(args: argparse.Namespace) -> QwenMarkerLocatorCo
         dpi=_marker_locator_page_dpi(args),
         page_dpi=_marker_locator_page_dpi(args),
         block_dpi=_marker_locator_block_dpi(args),
-        max_megapixels=float(getattr(args, "marker_locator_max_megapixels", getattr(args, "glm_ocr_max_megapixels", 0.0))),
+        max_megapixels=float(getattr(args, "marker_locator_max_megapixels", 0.0)),
         body_mode=str(getattr(args, "marker_locator_body_mode", "page_then_block")),
-        reuse_evidence=bool(getattr(args, "marker_locator_reuse_evidence", False) or getattr(args, "glm_ocr_reuse_evidence", False)),
+        reuse_evidence=bool(getattr(args, "marker_locator_reuse_evidence", False)),
         timing_log_path=_qwen_marker_locator_timing_log_path(args),
     )
 
@@ -329,7 +329,7 @@ def _marker_locator_page_dpi(args: argparse.Namespace) -> int:
     legacy = getattr(args, "marker_locator_dpi", None)
     if legacy is not None:
         return int(legacy)
-    return int(getattr(args, "glm_ocr_dpi", 300) or 300)
+    return 300
 
 
 def _marker_locator_block_dpi(args: argparse.Namespace) -> int:
@@ -343,7 +343,7 @@ def _marker_locator_block_dpi(args: argparse.Namespace) -> int:
 
 
 def _qwen_marker_locator_artifact_dir(args: argparse.Namespace) -> Path:
-    configured = getattr(args, "marker_locator_artifact_dir", None) or getattr(args, "glm_ocr_artifact_dir", None)
+    configured = getattr(args, "marker_locator_artifact_dir", None)
     if configured:
         return Path(configured)
     output = Path(getattr(args, "output", "canonical.json"))
