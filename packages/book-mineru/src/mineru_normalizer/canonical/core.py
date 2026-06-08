@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..analysis.note_gap_report import build_note_ref_gap_report
+from ..extraction.text import normalize_note_marker
 from ..analysis.layout import infer_layout_stats
 from ..analysis.pdf_page_metrics import PdfPageCache
 from ..analysis.text_style import TextStyleAnalyzer
@@ -190,7 +191,7 @@ def _recover_note_refs_and_missing_pages(
         note_cache,
         qwen_marker_pages=qwen_marker_pages,
     )
-    return _missing_body_ref_pages(blocks)
+    return _missing_or_unreliable_body_ref_pages(blocks, qwen_marker_pages=qwen_marker_pages)
 
 
 def _recover_and_resolve_note_refs(
@@ -222,6 +223,68 @@ def _missing_body_ref_pages(blocks: List[Dict[str, Any]]) -> List[int]:
         if isinstance(page, int):
             pages.add(page)
     return sorted(pages)
+
+
+def _missing_or_unreliable_body_ref_pages(blocks: List[Dict[str, Any]], *, qwen_marker_pages: List[Any] | None = None) -> List[int]:
+    pages = set(_missing_body_ref_pages(blocks))
+    qwen_markers_by_page = _qwen_body_ref_markers_by_page(qwen_marker_pages or [])
+    refs_by_note_id: Dict[str, List[Tuple[Dict[str, Any], Dict[str, Any]]]] = {}
+    for block in blocks:
+        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+        for ref in attrs.get("note_refs") or []:
+            if not isinstance(ref, dict):
+                continue
+            note_id = str(ref.get("target_note_id") or "")
+            if note_id:
+                refs_by_note_id.setdefault(note_id, []).append((block, ref))
+
+    for block in blocks:
+        if block.get("type") != "footnote":
+            continue
+        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+        note_id = str(attrs.get("note_id") or "")
+        marker = normalize_note_marker(attrs.get("note_marker", ""))
+        if not note_id or not marker:
+            continue
+        page = (block.get("source") if isinstance(block.get("source"), dict) else {}).get("page")
+        if not isinstance(page, int) or marker not in qwen_markers_by_page.get(page, set()):
+            continue
+        refs = refs_by_note_id.get(note_id) or []
+        if refs and any(_has_reliable_inline_ref(ref_block, ref) for ref_block, ref in refs):
+            continue
+        pages.add(page)
+    return sorted(pages)
+
+
+def _has_reliable_inline_ref(block: Dict[str, Any], ref: Dict[str, Any]) -> bool:
+    if ref.get("inline_position") != "exact":
+        return False
+    offset = ref.get("inline_offset")
+    if not isinstance(offset, int):
+        return False
+    return 0 <= offset <= len(str(block.get("text") or ""))
+
+
+def _qwen_body_ref_markers_by_page(qwen_marker_pages: List[Any]) -> Dict[int, set[str]]:
+    out: Dict[int, set[str]] = {}
+    for item in qwen_marker_pages:
+        if hasattr(item, "to_json"):
+            item = item.to_json()
+        if not isinstance(item, dict):
+            continue
+        page = item.get("page")
+        if not isinstance(page, int):
+            continue
+        refs = item.get("body_refs") or []
+        if not isinstance(refs, list):
+            continue
+        for ref in refs:
+            if not isinstance(ref, dict):
+                continue
+            marker = normalize_note_marker(str(ref.get("marker") or "").replace("＊", "*"))
+            if marker:
+                out.setdefault(page, set()).add(marker)
+    return out
 
 
 def _clear_note_referenced_by(blocks: List[Dict[str, Any]]) -> None:

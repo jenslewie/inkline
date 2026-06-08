@@ -159,7 +159,7 @@ def _problem_page_plan(blocks: List[Dict[str, Any]]) -> _ProblemPagePlan:
     return _ProblemPagePlan(
         footnote_pages=footnote_pages,
         body_ref_pages=body_ref_pages,
-        body_candidate_block_ids=set(),
+        body_candidate_block_ids=body_candidate_block_ids,
     )
 
 
