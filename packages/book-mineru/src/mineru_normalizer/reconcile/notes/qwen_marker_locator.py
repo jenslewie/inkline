@@ -64,6 +64,51 @@ def run_qwen_marker_locator_repairs(
     pages = set(plan.footnote_pages) | set(plan.body_ref_pages)
     if not pages:
         return []
+
+    # Init run: create artifact dir, start timing, log run_start
+    run_started, run_timer = _init_marker_locator_run(config, blocks, pages, plan)
+
+    # Initial evidence pass (page DPI or single block pass)
+    initial_config = _body_pass_config(config, "page" if config.body_mode == "page_then_block" else config.body_mode)
+    evidence = qwen_evidence._collect_qwen_marker_evidence(
+        blocks,
+        sorted(pages),
+        initial_config,
+        pass_name="initial",
+        footnote_pages=plan.footnote_pages,
+        body_ref_pages=plan.body_ref_pages,
+        expected_body_markers_by_page=qwen_evidence._page_footnote_markers_by_page(blocks),
+    )
+    apply_qwen_footnote_markers(blocks, evidence)
+
+    # Retry pass for pages still missing body refs
+    missing_pages = _missing_body_ref_pages(config, blocks, plan, evidence, missing_body_ref_pages_after_page)
+    if missing_pages:
+        retry_config = _body_pass_config(config, "block" if config.body_mode == "page_then_block" else config.body_mode)
+        evidence.extend(
+            qwen_evidence._collect_qwen_marker_evidence(
+                blocks,
+                missing_pages,
+                retry_config,
+                pass_name="body_ref_retry",
+                footnote_pages=set(),
+                body_ref_pages=set(missing_pages),
+                expected_body_markers_by_page=qwen_evidence._page_footnote_markers_by_page(blocks),
+            )
+        )
+
+    # Write evidence and log run_end
+    _finish_marker_locator_run(config, evidence, run_started, run_timer)
+    return evidence
+
+
+def _init_marker_locator_run(
+    config: qwen_types.QwenMarkerLocatorConfig,
+    blocks: List[Dict[str, Any]],
+    pages: set[int],
+    plan: Any,
+) -> tuple[str, float]:
+    """Create artifact dir, reset timing log, and emit run_start event."""
     config.artifact_dir.mkdir(parents=True, exist_ok=True)
     qwen_evidence._reset_timing_log(config)
     run_started = qwen_evidence._now_iso()
@@ -86,40 +131,34 @@ def run_qwen_marker_locator_repairs(
             "body_ref_pages": sorted(plan.body_ref_pages),
         },
     )
-    initial_config = _body_pass_config(config, "page" if config.body_mode == "page_then_block" else config.body_mode)
-    evidence = qwen_evidence._collect_qwen_marker_evidence(
-        blocks,
-        sorted(pages),
-        initial_config,
-        pass_name="initial",
-        footnote_pages=plan.footnote_pages,
-        body_ref_pages=plan.body_ref_pages,
-        expected_body_markers_by_page=qwen_evidence._page_footnote_markers_by_page(blocks),
-    )
-    apply_qwen_footnote_markers(blocks, evidence)
+    return run_started, run_timer
 
+
+def _missing_body_ref_pages(
+    config: qwen_types.QwenMarkerLocatorConfig,
+    blocks: List[Dict[str, Any]],
+    plan: Any,
+    evidence: List[qwen_types.QwenMarkerPageEvidence],
+    missing_body_ref_pages_after_page: Callable[[List[qwen_types.QwenMarkerPageEvidence]], Sequence[int]] | None,
+) -> List[int]:
+    """Determine which pages need a retry pass for body refs."""
     if config.body_mode == "page_then_block":
-        missing_pages = (
+        return (
             sorted({int(page) for page in missing_body_ref_pages_after_page(evidence)})
             if missing_body_ref_pages_after_page is not None
             else []
         )
-    else:
-        body_plan = qwen_page_plan._problem_page_plan(blocks)
-        missing_pages = sorted(set(body_plan.body_ref_pages) - set(plan.body_ref_pages))
-    if missing_pages:
-        retry_config = _body_pass_config(config, "block" if config.body_mode == "page_then_block" else config.body_mode)
-        evidence.extend(
-            qwen_evidence._collect_qwen_marker_evidence(
-                blocks,
-                missing_pages,
-                retry_config,
-                pass_name="body_ref_retry",
-                footnote_pages=set(),
-                body_ref_pages=set(missing_pages),
-                expected_body_markers_by_page=qwen_evidence._page_footnote_markers_by_page(blocks),
-            )
-        )
+    body_plan = qwen_page_plan._problem_page_plan(blocks)
+    return sorted(set(body_plan.body_ref_pages) - set(plan.body_ref_pages))
+
+
+def _finish_marker_locator_run(
+    config: qwen_types.QwenMarkerLocatorConfig,
+    evidence: List[qwen_types.QwenMarkerPageEvidence],
+    run_started: str,
+    run_timer: float,
+) -> None:
+    """Write evidence JSON and emit run_end timing event."""
     qwen_evidence._write_evidence(config.artifact_dir / "qwen_marker_evidence.json", evidence)
     qwen_evidence._write_timing_event(
         config,
@@ -133,7 +172,6 @@ def run_qwen_marker_locator_repairs(
             "evidence_path": str(config.artifact_dir / "qwen_marker_evidence.json"),
         },
     )
-    return evidence
 
 
 def _body_pass_config(config: qwen_types.QwenMarkerLocatorConfig, body_mode: str) -> qwen_types.QwenMarkerLocatorConfig:

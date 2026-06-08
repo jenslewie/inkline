@@ -45,6 +45,8 @@ def _recover_direct_page_footnote_qwen_refs(
 ) -> None:
     if not qwen_marker_pages:
         return
+
+    # Build index structures: existing markers, definition markers, block lookups
     refs_by_page = _body_refs_by_source_page(blocks, context)
     existing_by_page: Dict[int, Set[str]] = {}
     for page, refs in refs_by_page.items():
@@ -70,8 +72,9 @@ def _recover_direct_page_footnote_qwen_refs(
     if not defs_by_page:
         return
 
-    block_index = {id(block): index for index, block in enumerate(blocks)}
+    block_index: Dict[int, int] = {id(block): index for index, block in enumerate(blocks)}
     blocks_by_id = {str(block.get("block_id")): block for block in blocks if block.get("block_id")}
+
     for evidence in _qwen_marker_page_items(qwen_marker_pages):
         page = evidence.get("page")
         if not isinstance(page, int):
@@ -80,52 +83,100 @@ def _recover_direct_page_footnote_qwen_refs(
         if not page_defs_text:
             continue
         existing = existing_by_page.setdefault(page, set())
-        located_items: List[Tuple[Dict[str, Any], str, Dict[str, Any], _InlineMarkerLocation]] = []
-        for item in evidence.get("body_refs") or []:
-            if not isinstance(item, dict):
-                continue
-            marker = normalize_note_marker(str(item.get("marker") or "").replace("＊", "*"))
-            if not marker or marker not in page_defs_text or marker in existing:
-                if marker and marker in page_defs_text and marker in existing:
-                    _refine_existing_qwen_body_ref(blocks, context, blocks_by_id, page, marker, item)
-                continue
-            located = _locate_qwen_body_ref(blocks, context, page, marker, item)
-            if located is None:
-                continue
-            target, inline_location = located
-            if _existing_ref_marker_on_page(target, marker, page, context):
-                _update_existing_qwen_ref_inline_location(target, marker, page, item, inline_location)
-                _align_symbol_refs_from_qwen_footnote_context(blocks_by_id, target, page, item, inline_location)
-                continue
-            located_items.append((target, marker, item, inline_location))
-        ambiguous_keys = _ambiguous_qwen_location_keys(located_items)
-        ambiguous_anchor_keys = _ambiguous_qwen_anchor_keys(located_items)
-        for target, marker, item, inline_location in located_items:
-            if (id(target), inline_location.char_index) in ambiguous_keys or _qwen_anchor_key(target, marker, item) in ambiguous_anchor_keys:
-                continue
-            _strip_qwen_visible_marker(target, inline_location)
-            _append_note_ref(
-                target,
-                marker,
-                source="qwen_marker_locator",
-                confidence=str(item.get("confidence") or "candidate"),
-                recovery_reason="page_footnote_marker_seen_in_qwen_visual_evidence",
-                raw_marker=marker if marker.startswith("*") else f"^{{{marker}}}",
-                source_page=page,
-                evidence={
-                    "qwen_before_text": str(item.get("before_text") or ""),
-                    "qwen_after_text": str(item.get("after_text") or ""),
-                    "qwen_quote": str(item.get("quote") or ""),
-                    **inline_location.evidence,
-                },
-                inline_location=inline_location,
-            )
-            existing.add(marker)
-            marker_int = _marker_int(marker)
-            if marker_int is not None:
-                refs_by_page.setdefault(page, []).append((block_index[id(target)], target, marker_int))
-                refs_by_page[page].sort(key=lambda value: (value[0], value[2]))
+
+        # Match phase: locate body refs, refine existing refs, collect new-match candidates
+        located_items, ambiguous_keys, ambiguous_anchor_keys = _collect_page_footnote_qwen_matches(
+            blocks, context, blocks_by_id, page, page_defs_text, existing, evidence,
+        )
+
+        # Apply phase: write non-ambiguous new note refs
+        _apply_page_footnote_qwen_matches(
+            blocks, context, blocks_by_id, block_index, refs_by_page, existing, page,
+            located_items, ambiguous_keys, ambiguous_anchor_keys,
+        )
+
+
+def _collect_page_footnote_qwen_matches(
+    blocks: List[Dict[str, Any]],
+    context: _NoteContext,
+    blocks_by_id: Dict[str, Dict[str, Any]],
+    page: int,
+    page_defs_text: Set[str],
+    existing: Set[str],
+    evidence: Dict[str, Any],
+) -> Tuple[
+    List[Tuple[Dict[str, Any], str, Dict[str, Any], _InlineMarkerLocation]],
+    Set[Tuple[int, int]],
+    Set[Tuple[int, str, str, str]],
+]:
+    """Locate Qwen body refs for a page's footnote markers and compute ambiguity.
+
+    Refines existing refs where a marker is already present. Returns
+    (located_items, ambiguous_keys, ambiguous_anchor_keys) for the
+    apply phase to write new note refs.
+    """
+    located_items: List[Tuple[Dict[str, Any], str, Dict[str, Any], _InlineMarkerLocation]] = []
+    for item in evidence.get("body_refs") or []:
+        if not isinstance(item, dict):
+            continue
+        marker = normalize_note_marker(str(item.get("marker") or "").replace("＊", "*"))
+        if not marker or marker not in page_defs_text or marker in existing:
+            if marker and marker in page_defs_text and marker in existing:
+                _refine_existing_qwen_body_ref(blocks, context, blocks_by_id, page, marker, item)
+            continue
+        located = _locate_qwen_body_ref(blocks, context, page, marker, item)
+        if located is None:
+            continue
+        target, inline_location = located
+        if _existing_ref_marker_on_page(target, marker, page, context):
+            _update_existing_qwen_ref_inline_location(target, marker, page, item, inline_location)
             _align_symbol_refs_from_qwen_footnote_context(blocks_by_id, target, page, item, inline_location)
+            continue
+        located_items.append((target, marker, item, inline_location))
+    ambiguous_keys = _ambiguous_qwen_location_keys(located_items)
+    ambiguous_anchor_keys = _ambiguous_qwen_anchor_keys(located_items)
+    return located_items, ambiguous_keys, ambiguous_anchor_keys
+
+
+def _apply_page_footnote_qwen_matches(
+    blocks: List[Dict[str, Any]],
+    context: _NoteContext,
+    blocks_by_id: Dict[str, Dict[str, Any]],
+    block_index: Dict[int, int],
+    refs_by_page: Dict[int, List[Tuple[int, Dict[str, Any], int]]],
+    existing: Set[str],
+    page: int,
+    located_items: List[Tuple[Dict[str, Any], str, Dict[str, Any], _InlineMarkerLocation]],
+    ambiguous_keys: Set[Tuple[int, int]],
+    ambiguous_anchor_keys: Set[Tuple[int, str, str, str]],
+) -> None:
+    """Apply non-ambiguous Qwen page footnote marker matches as new note refs."""
+    for target, marker, item, inline_location in located_items:
+        if (id(target), inline_location.char_index) in ambiguous_keys or _qwen_anchor_key(target, marker, item) in ambiguous_anchor_keys:
+            continue
+        _strip_qwen_visible_marker(target, inline_location)
+        _append_note_ref(
+            target,
+            marker,
+            source="qwen_marker_locator",
+            confidence=str(item.get("confidence") or "candidate"),
+            recovery_reason="page_footnote_marker_seen_in_qwen_visual_evidence",
+            raw_marker=marker if marker.startswith("*") else f"^{{{marker}}}",
+            source_page=page,
+            evidence={
+                "qwen_before_text": str(item.get("before_text") or ""),
+                "qwen_after_text": str(item.get("after_text") or ""),
+                "qwen_quote": str(item.get("quote") or ""),
+                **inline_location.evidence,
+            },
+            inline_location=inline_location,
+        )
+        existing.add(marker)
+        marker_int = _marker_int(marker)
+        if marker_int is not None:
+            refs_by_page.setdefault(page, []).append((block_index[id(target)], target, marker_int))
+            refs_by_page[page].sort(key=lambda value: (value[0], value[2]))
+        _align_symbol_refs_from_qwen_footnote_context(blocks_by_id, target, page, item, inline_location)
 
 
 def _recover_direct_scoped_endnote_qwen_refs(

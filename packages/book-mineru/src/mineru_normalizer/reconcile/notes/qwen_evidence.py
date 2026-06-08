@@ -77,11 +77,9 @@ def _collect_qwen_marker_evidence(
                 continue
             page_started = _now_iso()
             page_timer = time.perf_counter()
-            render_duration = 0.0
-            model_calls: List[Dict[str, Any]] = []
+            render_timer = time.perf_counter()
             pdf_page = doc[page - 1]
             image_path = config.artifact_dir / f"page_{page:04d}_{config.dpi}dpi_qwen_full_page.png"
-            render_timer = time.perf_counter()
             try:
                 qwen_prompt._render_full_page(pdf_page, image_path, config)
             except Exception as exc:
@@ -102,130 +100,33 @@ def _collect_qwen_marker_evidence(
                 )
                 raise
             render_duration = _duration(render_timer)
-            item = cache.get((page, image_path.name))
-            cache_hit = item is not None
-            raw_parts: Dict[str, Any] = dict(item.raw_json) if item is not None else {}
-            footnote_cached = item is not None and "footnote_defs" in raw_parts
-            body_cached = item is not None and raw_parts.get("body_ref_source") == body_ref_source
-            if item is None or (page in footnote_pages and not footnote_cached) or (page in body_ref_pages and not body_cached):
+
+            # Check cache and determine what needs fresh API calls
+            cached_item = cache.get((page, image_path.name))
+            cache_hit = cached_item is not None
+            raw_parts: Dict[str, Any] = dict(cached_item.raw_json) if cached_item is not None else {}
+            footnote_cached = cached_item is not None and "footnote_defs" in raw_parts
+            body_cached = cached_item is not None and raw_parts.get("body_ref_source") == body_ref_source
+            model_calls: List[Dict[str, Any]] = []
+
+            if cached_item is None or (page in footnote_pages and not footnote_cached) or (page in body_ref_pages and not body_cached):
+                # Footnote defs pass
                 if page in footnote_pages and not footnote_cached:
-                    call_timer = time.perf_counter()
-                    call_started = _now_iso()
-                    try:
-                        footnote_raw = qwen_api._call_qwen_marker_locator(image_path, config, prompt=config.footnote_prompt)
-                    except Exception as exc:
-                        model_calls.append(
-                            {
-                                "kind": "footnote_defs",
-                                "started_at": call_started,
-                                "finished_at": _now_iso(),
-                                "duration_seconds": _duration(call_timer),
-                                "error_type": type(exc).__name__,
-                                "error": str(exc),
-                            }
-                        )
-                        _write_timing_event(
-                            config,
-                            {
-                                "event": "page_error",
-                                "pass": pass_name,
-                                "page": page,
-                                "stage": "footnote_defs",
-                                "started_at": page_started,
-                                "finished_at": _now_iso(),
-                                "duration_seconds": _duration(page_timer),
-                                "render_seconds": render_duration,
-                                "cache_hit": cache_hit,
-                                "image": str(image_path),
-                                "model_calls": model_calls,
-                                "error_type": type(exc).__name__,
-                                "error": str(exc),
-                            },
-                        )
-                        raise
-                    model_calls.append(
-                        {
-                            "kind": "footnote_defs",
-                            "started_at": call_started,
-                            "finished_at": _now_iso(),
-                            "duration_seconds": _duration(call_timer),
-                            "raw_item_count": len(footnote_raw.get("footnote_defs") or []) if isinstance(footnote_raw, dict) else 0,
-                        }
+                    raw_parts, model_calls = _collect_footnote_defs_for_page(
+                        image_path, config, raw_parts, pass_name, page,
+                        page_started, page_timer, render_duration, cache_hit, model_calls,
                     )
-                    raw_parts["footnote_defs"] = footnote_raw.get("footnote_defs") if isinstance(footnote_raw, dict) else []
+
+                # Body refs pass
                 if page in body_ref_pages and not body_cached:
-                    marker_items = qwen_api._clean_footnote_defs(raw_parts.get("footnote_defs"))
-                    markers = qwen_prompt._body_markers_for_prompt(marker_items, expected_body_markers_by_page.get(page, []))
-                    call_timer = time.perf_counter()
-                    call_started = _now_iso()
-                    call_finished: str | None = None
-                    call_duration: float | None = None
-                    retry_calls: List[Dict[str, Any]] = []
-                    try:
-                        if use_block_body_refs:
-                            body_raw = _collect_paragraph_body_refs(
-                                pdf_page,
-                                page,
-                                body_blocks_by_page.get(page, []),
-                                geometry,
-                                config,
-                                markers,
-                            )
-                        else:
-                            body_raw = qwen_api._call_qwen_marker_locator(image_path, config, prompt=qwen_prompt._body_prompt_for_markers(config.body_prompt, markers))
-                            call_finished = _now_iso()
-                            call_duration = _duration(call_timer)
-                            body_refs = body_raw.get("body_refs") if isinstance(body_raw, dict) else []
-                            body_refs, retry_calls = _retry_missing_single_marker_body_refs(
-                                image_path,
-                                config,
-                                markers,
-                                body_refs,
-                            )
-                    except Exception as exc:
-                        model_calls.append(
-                            {
-                                "kind": "paragraph_body_refs" if use_block_body_refs else "body_refs",
-                                "started_at": call_started,
-                                "finished_at": _now_iso(),
-                                "duration_seconds": _duration(call_timer),
-                                "markers_for_prompt": markers,
-                                "error_type": type(exc).__name__,
-                                "error": str(exc),
-                            }
-                        )
-                        _write_timing_event(
-                            config,
-                            {
-                                "event": "page_error",
-                                "pass": pass_name,
-                                "page": page,
-                                "stage": "body_refs",
-                                "started_at": page_started,
-                                "finished_at": _now_iso(),
-                                "duration_seconds": _duration(page_timer),
-                                "render_seconds": render_duration,
-                                "cache_hit": cache_hit,
-                                "image": str(image_path),
-                                "model_calls": model_calls,
-                                "error_type": type(exc).__name__,
-                                "error": str(exc),
-                            },
-                        )
-                        raise
-                    model_calls.append(
-                        {
-                            "kind": "paragraph_body_refs" if use_block_body_refs else "body_refs",
-                            "started_at": call_started,
-                            "finished_at": call_finished or _now_iso(),
-                            "duration_seconds": call_duration if call_duration is not None else _duration(call_timer),
-                            "markers_for_prompt": markers,
-                            "raw_item_count": len(body_raw) if use_block_body_refs else (len(body_raw.get("body_refs") or []) if isinstance(body_raw, dict) else 0),
-                        }
+                    raw_parts, model_calls = _collect_body_refs_for_page(
+                        image_path, pdf_page, page, config, raw_parts,
+                        use_block_body_refs, body_blocks_by_page, geometry,
+                        expected_body_markers_by_page, body_ref_source,
+                        pass_name, page_started, page_timer, render_duration, cache_hit, model_calls,
                     )
-                    model_calls.extend(retry_calls)
-                    raw_parts["body_refs"] = body_raw if use_block_body_refs else body_refs
-                    raw_parts["body_ref_source"] = body_ref_source
+
+                # Build evidence item from collected raw data
                 item = qwen_types.QwenMarkerPageEvidence(
                     page=page,
                     image=str(image_path),
@@ -268,6 +169,160 @@ def _collect_qwen_marker_evidence(
         },
     )
     return evidence
+
+
+def _collect_footnote_defs_for_page(
+    image_path: Path,
+    config: qwen_types.QwenMarkerLocatorConfig,
+    raw_parts: Dict[str, Any],
+    pass_name: str,
+    page: int,
+    page_started: str,
+    page_timer: float,
+    render_duration: float,
+    cache_hit: bool,
+    model_calls: List[Dict[str, Any]],
+) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """Call Qwen for footnote definitions on a single page; update raw_parts and model_calls."""
+    call_timer = time.perf_counter()
+    call_started = _now_iso()
+    try:
+        footnote_raw = qwen_api._call_qwen_marker_locator(image_path, config, prompt=config.footnote_prompt)
+    except Exception as exc:
+        model_calls.append(
+            {
+                "kind": "footnote_defs",
+                "started_at": call_started,
+                "finished_at": _now_iso(),
+                "duration_seconds": _duration(call_timer),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            }
+        )
+        _write_timing_event(
+            config,
+            {
+                "event": "page_error",
+                "pass": pass_name,
+                "page": page,
+                "stage": "footnote_defs",
+                "started_at": page_started,
+                "finished_at": _now_iso(),
+                "duration_seconds": _duration(page_timer),
+                "render_seconds": render_duration,
+                "cache_hit": cache_hit,
+                "image": str(image_path),
+                "model_calls": model_calls,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        raise
+    model_calls.append(
+        {
+            "kind": "footnote_defs",
+            "started_at": call_started,
+            "finished_at": _now_iso(),
+            "duration_seconds": _duration(call_timer),
+            "raw_item_count": len(footnote_raw.get("footnote_defs") or []) if isinstance(footnote_raw, dict) else 0,
+        }
+    )
+    raw_parts["footnote_defs"] = footnote_raw.get("footnote_defs") if isinstance(footnote_raw, dict) else []
+    return raw_parts, model_calls
+
+
+def _collect_body_refs_for_page(
+    image_path: Path,
+    pdf_page: Any,
+    page: int,
+    config: qwen_types.QwenMarkerLocatorConfig,
+    raw_parts: Dict[str, Any],
+    use_block_body_refs: bool,
+    body_blocks_by_page: Dict[int, List[Dict[str, Any]]],
+    geometry: PageGeometry | None,
+    expected_body_markers_by_page: Dict[int, List[str]],
+    body_ref_source: str,
+    pass_name: str,
+    page_started: str,
+    page_timer: float,
+    render_duration: float,
+    cache_hit: bool,
+    model_calls: List[Dict[str, Any]],
+) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """Call Qwen for body refs on a single page (full-page or paragraph crops); update raw_parts and model_calls."""
+    marker_items = qwen_api._clean_footnote_defs(raw_parts.get("footnote_defs"))
+    markers = qwen_prompt._body_markers_for_prompt(marker_items, expected_body_markers_by_page.get(page, []))
+    call_timer = time.perf_counter()
+    call_started = _now_iso()
+    call_finished: str | None = None
+    call_duration: float | None = None
+    retry_calls: List[Dict[str, Any]] = []
+    try:
+        if use_block_body_refs:
+            body_raw = _collect_paragraph_body_refs(
+                pdf_page,
+                page,
+                body_blocks_by_page.get(page, []),
+                geometry,
+                config,
+                markers,
+            )
+        else:
+            body_raw = qwen_api._call_qwen_marker_locator(image_path, config, prompt=qwen_prompt._body_prompt_for_markers(config.body_prompt, markers))
+            call_finished = _now_iso()
+            call_duration = _duration(call_timer)
+            body_refs = body_raw.get("body_refs") if isinstance(body_raw, dict) else []
+            body_refs, retry_calls = _retry_missing_single_marker_body_refs(
+                image_path,
+                config,
+                markers,
+                body_refs,
+            )
+    except Exception as exc:
+        model_calls.append(
+            {
+                "kind": "paragraph_body_refs" if use_block_body_refs else "body_refs",
+                "started_at": call_started,
+                "finished_at": _now_iso(),
+                "duration_seconds": _duration(call_timer),
+                "markers_for_prompt": markers,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            }
+        )
+        _write_timing_event(
+            config,
+            {
+                "event": "page_error",
+                "pass": pass_name,
+                "page": page,
+                "stage": "body_refs",
+                "started_at": page_started,
+                "finished_at": _now_iso(),
+                "duration_seconds": _duration(page_timer),
+                "render_seconds": render_duration,
+                "cache_hit": cache_hit,
+                "image": str(image_path),
+                "model_calls": model_calls,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        raise
+    model_calls.append(
+        {
+            "kind": "paragraph_body_refs" if use_block_body_refs else "body_refs",
+            "started_at": call_started,
+            "finished_at": call_finished or _now_iso(),
+            "duration_seconds": call_duration if call_duration is not None else _duration(call_timer),
+            "markers_for_prompt": markers,
+            "raw_item_count": len(body_raw) if use_block_body_refs else (len(body_raw.get("body_refs") or []) if isinstance(body_raw, dict) else 0),
+        }
+    )
+    model_calls.extend(retry_calls)
+    raw_parts["body_refs"] = body_raw if use_block_body_refs else body_refs
+    raw_parts["body_ref_source"] = body_ref_source
+    return raw_parts, model_calls
 
 
 def _retry_missing_single_marker_body_refs(
@@ -319,70 +374,58 @@ def _collect_paragraph_body_refs(
         bbox = qwen_prompt._block_bbox_for_page(block, page)
         if bbox is None:
             continue
-        block_label = qwen_prompt._safe_filename_part(block_id(block) or "block")
-        image_path = config.artifact_dir / f"page_{page:04d}_{block_label}_{config.dpi}dpi_qwen_body_block.png"
-        block_started = _now_iso()
-        block_timer = time.perf_counter()
-        render_timer = time.perf_counter()
-        try:
-            crop_bbox_pdf = qwen_prompt._render_block_crop(pdf_page, image_path, page, bbox, geometry, config)
-        except Exception as exc:
-            _write_timing_event(
-                config,
-                {
-                    "event": "paragraph_body_block_error",
-                    "page": page,
-                    "block_id": block_id(block),
-                    "stage": "render",
-                    "started_at": block_started,
-                    "finished_at": _now_iso(),
-                    "duration_seconds": _duration(block_timer),
-                    "render_seconds": _duration(render_timer),
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
-                },
-            )
-            raise
-        render_seconds = _duration(render_timer)
-        model_timer = time.perf_counter()
-        model_started = _now_iso()
-        try:
-            raw = qwen_api._call_qwen_marker_locator(image_path, config, prompt=qwen_prompt._paragraph_body_prompt_for_markers(markers, block))
-        except Exception as exc:
-            _write_timing_event(
-                config,
-                {
-                    "event": "paragraph_body_block_error",
-                    "page": page,
-                    "block_id": block_id(block),
-                    "stage": "model",
-                    "started_at": block_started,
-                    "model_started_at": model_started,
-                    "finished_at": _now_iso(),
-                    "duration_seconds": _duration(block_timer),
-                    "render_seconds": render_seconds,
-                    "model_seconds": _duration(model_timer),
-                    "image": str(image_path),
-                    "crop_bbox_pdf": crop_bbox_pdf,
-                    "markers_for_prompt": markers,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
-                },
-            )
-            raise
-        cleaned_refs = qwen_api._clean_body_refs(raw.get("body_refs") if isinstance(raw, dict) else [])
-        for ref in cleaned_refs:
-            ref["block_id"] = block_id(block)
-            ref["body_ref_source"] = "paragraph_crop"
-            ref["crop_image"] = str(image_path)
-            ref["crop_bbox_pdf"] = crop_bbox_pdf
-            out.append(ref)
+        refs = _collect_single_paragraph_body_refs(pdf_page, page, block, bbox, geometry, config, markers)
+        out.extend(refs)
+    return out
+
+
+def _collect_single_paragraph_body_refs(
+    pdf_page: Any,
+    page: int,
+    block: Dict[str, Any],
+    bbox: List[float],
+    geometry: PageGeometry,
+    config: qwen_types.QwenMarkerLocatorConfig,
+    markers: List[str],
+) -> List[Dict[str, Any]]:
+    """Render one paragraph crop, call Qwen, and return annotated body refs."""
+    block_label = qwen_prompt._safe_filename_part(block_id(block) or "block")
+    image_path = config.artifact_dir / f"page_{page:04d}_{block_label}_{config.dpi}dpi_qwen_body_block.png"
+    block_started = _now_iso()
+    block_timer = time.perf_counter()
+    render_timer = time.perf_counter()
+    try:
+        crop_bbox_pdf = qwen_prompt._render_block_crop(pdf_page, image_path, page, bbox, geometry, config)
+    except Exception as exc:
         _write_timing_event(
             config,
             {
-                "event": "paragraph_body_block_end",
+                "event": "paragraph_body_block_error",
                 "page": page,
                 "block_id": block_id(block),
+                "stage": "render",
+                "started_at": block_started,
+                "finished_at": _now_iso(),
+                "duration_seconds": _duration(block_timer),
+                "render_seconds": _duration(render_timer),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        raise
+    render_seconds = _duration(render_timer)
+    model_timer = time.perf_counter()
+    model_started = _now_iso()
+    try:
+        raw = qwen_api._call_qwen_marker_locator(image_path, config, prompt=qwen_prompt._paragraph_body_prompt_for_markers(markers, block))
+    except Exception as exc:
+        _write_timing_event(
+            config,
+            {
+                "event": "paragraph_body_block_error",
+                "page": page,
+                "block_id": block_id(block),
+                "stage": "model",
                 "started_at": block_started,
                 "model_started_at": model_started,
                 "finished_at": _now_iso(),
@@ -390,14 +433,40 @@ def _collect_paragraph_body_refs(
                 "render_seconds": render_seconds,
                 "model_seconds": _duration(model_timer),
                 "image": str(image_path),
-                "image_bytes": image_path.stat().st_size if image_path.exists() else None,
                 "crop_bbox_pdf": crop_bbox_pdf,
                 "markers_for_prompt": markers,
-                "raw_item_count": len(raw.get("body_refs") or []) if isinstance(raw, dict) else 0,
-                "body_ref_count": len(cleaned_refs),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
             },
         )
-    return out
+        raise
+    cleaned_refs = qwen_api._clean_body_refs(raw.get("body_refs") if isinstance(raw, dict) else [])
+    for ref in cleaned_refs:
+        ref["block_id"] = block_id(block)
+        ref["body_ref_source"] = "paragraph_crop"
+        ref["crop_image"] = str(image_path)
+        ref["crop_bbox_pdf"] = crop_bbox_pdf
+    _write_timing_event(
+        config,
+        {
+            "event": "paragraph_body_block_end",
+            "page": page,
+            "block_id": block_id(block),
+            "started_at": block_started,
+            "model_started_at": model_started,
+            "finished_at": _now_iso(),
+            "duration_seconds": _duration(block_timer),
+            "render_seconds": render_seconds,
+            "model_seconds": _duration(model_timer),
+            "image": str(image_path),
+            "image_bytes": image_path.stat().st_size if image_path.exists() else None,
+            "crop_bbox_pdf": crop_bbox_pdf,
+            "markers_for_prompt": markers,
+            "raw_item_count": len(raw.get("body_refs") or []) if isinstance(raw, dict) else 0,
+            "body_ref_count": len(cleaned_refs),
+        },
+    )
+    return cleaned_refs
 
 
 def _page_footnote_markers_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, List[str]]:
