@@ -55,6 +55,11 @@ def recover_missing_note_refs(blocks: List[Dict[str, Any]], source_pdf: Any = No
             page_symbol_defs,
             qwen_marker_pages=qwen_marker_pages,
         )
+        _recover_direct_scoped_endnote_qwen_refs(
+            blocks,
+            context,
+            qwen_marker_pages=qwen_marker_pages,
+        )
         return
     _recover_visible_digit_refs(blocks, context, scope_defs, page_defs, book_defs)
     _recover_visible_symbol_page_refs(blocks, context, page_symbol_defs)
@@ -63,6 +68,11 @@ def recover_missing_note_refs(blocks: List[Dict[str, Any]], source_pdf: Any = No
         context,
         page_defs,
         page_symbol_defs,
+        qwen_marker_pages=qwen_marker_pages,
+    )
+    _recover_direct_scoped_endnote_qwen_refs(
+        blocks,
+        context,
         qwen_marker_pages=qwen_marker_pages,
     )
     _recover_page_footnote_sequence_gaps(
@@ -628,6 +638,111 @@ def _recover_direct_page_footnote_qwen_refs(
             _align_symbol_refs_from_qwen_footnote_context(blocks_by_id, target, page, item, inline_location)
 
 
+def _recover_direct_scoped_endnote_qwen_refs(
+    blocks: List[Dict[str, Any]],
+    context: _NoteContext,
+    *,
+    qwen_marker_pages: Any = None,
+) -> None:
+    if not qwen_marker_pages:
+        return
+    defs_by_scope = _scoped_endnote_definition_markers(blocks, context)
+    if not defs_by_scope:
+        return
+    existing_by_scope = _existing_body_ref_markers_by_scope(blocks, context)
+    block_index = {id(block): index for index, block in enumerate(blocks)}
+    located_items: List[Tuple[Dict[str, Any], str, int, Dict[str, Any], _InlineMarkerLocation, Optional[str]]] = []
+    for evidence in _qwen_marker_page_items(qwen_marker_pages):
+        page = evidence.get("page")
+        if not isinstance(page, int):
+            continue
+        for item in evidence.get("body_refs") or []:
+            if not isinstance(item, dict):
+                continue
+            marker = normalize_note_marker(str(item.get("marker") or "").replace("＊", "*"))
+            if not marker:
+                continue
+            located = _locate_qwen_body_ref(blocks, context, page, marker, item)
+            if located is None:
+                continue
+            target, inline_location = located
+            scope = context.scope_for(target)
+            if marker not in defs_by_scope.get(scope, set()):
+                continue
+            if marker in existing_by_scope.get(scope, set()):
+                continue
+            located_items.append((target, marker, page, item, inline_location, scope))
+
+    ambiguous_keys = _ambiguous_qwen_location_keys(
+        [(target, marker, item, inline_location) for target, marker, _page, item, inline_location, _scope in located_items]
+    )
+    ambiguous_anchor_keys = _ambiguous_qwen_anchor_keys(
+        [(target, marker, item, inline_location) for target, marker, _page, item, inline_location, _scope in located_items]
+    )
+    for target, marker, page, item, inline_location, scope in located_items:
+        if (id(target), inline_location.char_index) in ambiguous_keys or _qwen_anchor_key(target, marker, item) in ambiguous_anchor_keys:
+            continue
+        if marker in existing_by_scope.get(scope, set()):
+            continue
+        _strip_qwen_visible_marker(target, inline_location)
+        _append_note_ref(
+            target,
+            marker,
+            source="qwen_marker_locator",
+            confidence=str(item.get("confidence") or "candidate"),
+            recovery_reason="chapter_endnote_marker_seen_in_qwen_visual_evidence",
+            raw_marker=marker if marker.startswith("*") else f"^{{{marker}}}",
+            source_page=page,
+            evidence={
+                "qwen_before_text": str(item.get("before_text") or ""),
+                "qwen_after_text": str(item.get("after_text") or ""),
+                "qwen_quote": str(item.get("quote") or ""),
+                **inline_location.evidence,
+            },
+            inline_location=inline_location,
+        )
+        existing_by_scope.setdefault(scope, set()).add(marker)
+        if id(target) in block_index:
+            _rebuild_inline_note_runs_from_exact_refs(target)
+
+
+def _scoped_endnote_definition_markers(
+    blocks: List[Dict[str, Any]],
+    context: _NoteContext,
+) -> Dict[Optional[str], Set[str]]:
+    counts: Dict[Optional[str], Dict[str, int]] = {}
+    for candidate in _EndnoteSectionStrategy("chapter_endnote", scope_required=True).collect(blocks, context):
+        marker = normalize_note_marker(candidate.marker or "")
+        if marker and candidate.scope_key:
+            scope_counts = counts.setdefault(candidate.scope_key, {})
+            scope_counts[marker] = scope_counts.get(marker, 0) + 1
+    for candidate in _EndnoteSectionStrategy("book_endnote", scope_required=False).collect(blocks, context):
+        marker = normalize_note_marker(candidate.marker or "")
+        if marker:
+            book_counts = counts.setdefault(None, {})
+            book_counts[marker] = book_counts.get(marker, 0) + 1
+    return {
+        scope: {marker for marker, count in marker_counts.items() if count == 1}
+        for scope, marker_counts in counts.items()
+    }
+
+
+def _existing_body_ref_markers_by_scope(
+    blocks: List[Dict[str, Any]],
+    context: _NoteContext,
+) -> Dict[Optional[str], Set[str]]:
+    out: Dict[Optional[str], Set[str]] = {}
+    for block in blocks:
+        if block.get("type") not in BODY_TYPES:
+            continue
+        scope = context.scope_for(block)
+        for ref in _note_refs(block):
+            marker = normalize_note_marker(ref.get("marker", ""))
+            if marker:
+                out.setdefault(scope, set()).add(marker)
+    return out
+
+
 def _refine_existing_qwen_body_ref(
     blocks: List[Dict[str, Any]],
     context: _NoteContext,
@@ -654,6 +769,8 @@ def _update_existing_qwen_ref_inline_location(
     changed = False
     for ref in _note_refs(block):
         if normalize_note_marker(ref.get("marker", "")) != marker or ref.get("source_page") != page:
+            continue
+        if _has_valid_existing_structured_inline_run(block, ref):
             continue
         if (
             ref.get("inline_position") == "exact"
@@ -707,6 +824,39 @@ def _update_existing_qwen_ref_inline_location(
     if changed:
         _rebuild_inline_note_runs_from_exact_refs(block)
     return changed
+
+
+def _has_valid_existing_structured_inline_run(block: Dict[str, Any], ref: Dict[str, Any]) -> bool:
+    if str(ref.get("source") or "") not in {"equation_inline", "equation_interline", "trailing_text"}:
+        return False
+    runs = (block.get("attrs") or {}).get("inline_runs") or block.get("inline_runs")
+    if not isinstance(runs, list):
+        return False
+    if not _structured_inline_runs_match_text(runs, str(block.get("text") or "")):
+        return False
+    marker = normalize_note_marker(ref.get("marker", ""))
+    source_page = ref.get("source_page")
+    target_note_id = ref.get("target_note_id")
+    for run in runs:
+        if not isinstance(run, dict) or run.get("type") != "note_ref":
+            continue
+        if normalize_note_marker(run.get("marker", "")) != marker:
+            continue
+        if run.get("source") != ref.get("source") or run.get("source_page") != source_page:
+            continue
+        if target_note_id and run.get("target_note_id") != target_note_id:
+            continue
+        return True
+    return False
+
+
+def _structured_inline_runs_match_text(runs: Sequence[Any], text: str) -> bool:
+    reconstructed = "".join(
+        str(run.get("text") or "")
+        for run in runs
+        if isinstance(run, dict) and run.get("type") == "text"
+    )
+    return reconstructed == text or normalize_ws(reconstructed) == normalize_ws(text)
 
 
 def _visible_raw_marker_inline_location(block: Dict[str, Any], ref: Dict[str, Any]) -> Optional[_InlineMarkerLocation]:

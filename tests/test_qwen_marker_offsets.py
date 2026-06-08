@@ -1,5 +1,11 @@
-from mineru_normalizer.reconcile.notes.markers import _locate_qwen_body_ref, _qwen_marker_offset_in_text
-from mineru_normalizer.reconcile.notes.resolver import _NoteContext
+from mineru_normalizer.reconcile.notes.markers import (
+    _locate_qwen_body_ref,
+    _qwen_marker_offset_in_text,
+    _update_existing_qwen_ref_inline_location,
+    recover_missing_note_refs,
+)
+from mineru_normalizer.reconcile.notes.marker_inline import _InlineMarkerLocation
+from mineru_normalizer.reconcile.notes.resolver import _NoteContext, resolve_note_links
 
 
 def test_qwen_symbol_marker_before_omitted_comma() -> None:
@@ -18,6 +24,115 @@ def test_qwen_symbol_marker_before_omitted_comma() -> None:
     )
 
     assert offset == text.index("，以及其他死语言写成")
+
+
+def test_qwen_does_not_override_existing_equation_inline_run() -> None:
+    block = {
+        "block_id": "b000080",
+        "type": "paragraph",
+        "text": "用来助焊以及鞣革的硇砂 是某些商路上的最重要的货物。",
+        "source": {"page": 21},
+        "attrs": {
+            "note_refs": [
+                {
+                    "marker": "*",
+                    "source": "equation_inline",
+                    "source_page": 21,
+                    "raw_marker": "^{*}",
+                    "target_note_id": "note_b000087",
+                }
+            ],
+            "inline_runs": [
+                {"type": "text", "text": "用来助焊以及鞣革的硇砂  "},
+                {
+                    "type": "note_ref",
+                    "marker": "*",
+                    "source": "equation_inline",
+                    "source_page": 21,
+                    "target_note_id": "note_b000087",
+                },
+                {"type": "text", "text": " 是某些商路上的最重要的货物。"},
+            ],
+        },
+    }
+
+    changed = _update_existing_qwen_ref_inline_location(
+        block,
+        "*",
+        21,
+        {
+            "marker": "*",
+            "before_text": "助焊以及鞣革的",
+            "after_text": "是某些商路上的",
+            "quote": "助焊以及鞣革的*是某些商路上的",
+            "confidence": "high",
+        },
+        _InlineMarkerLocation(
+            char_index=10,
+            source="qwen_marker_locator",
+            confidence="high",
+            evidence={"inline_position_source": "qwen_marker_locator"},
+        ),
+    )
+
+    assert changed is False
+    ref = block["attrs"]["note_refs"][0]
+    assert "inline_position_source" not in ref
+    assert block["attrs"]["inline_runs"][0]["text"].endswith("硇砂  ")
+
+
+def test_qwen_overrides_invalid_existing_equation_inline_run() -> None:
+    block = {
+        "block_id": "b1",
+        "type": "paragraph",
+        "text": "正确正文。",
+        "source": {"page": 1},
+        "attrs": {
+            "note_refs": [
+                {
+                    "marker": "*",
+                    "source": "equation_inline",
+                    "source_page": 1,
+                    "raw_marker": "^{*}",
+                    "target_note_id": "note_1",
+                }
+            ],
+            "inline_runs": [
+                {"type": "text", "text": "错误正文"},
+                {
+                    "type": "note_ref",
+                    "marker": "*",
+                    "source": "equation_inline",
+                    "source_page": 1,
+                    "target_note_id": "note_1",
+                },
+            ],
+        },
+    }
+
+    changed = _update_existing_qwen_ref_inline_location(
+        block,
+        "*",
+        1,
+        {
+            "marker": "*",
+            "before_text": "正确",
+            "after_text": "正文",
+            "quote": "正确*正文",
+            "confidence": "high",
+        },
+        _InlineMarkerLocation(
+            char_index=2,
+            source="qwen_marker_locator",
+            confidence="high",
+            evidence={"inline_position_source": "qwen_marker_locator"},
+        ),
+    )
+
+    assert changed is True
+    ref = block["attrs"]["note_refs"][0]
+    assert ref["inline_position_source"] == "qwen_marker_locator"
+    assert ref["inline_offset"] == 2
 
 
 def test_qwen_symbol_marker_before_omitted_comma_with_normalized_spacing() -> None:
@@ -202,3 +317,72 @@ def test_qwen_body_ref_strips_neighbor_symbol_marker_from_matching_context() -> 
     assert block["block_id"] == "b000102"
     assert inline_location.char_index == blocks[0]["text"].index("今天的")
     assert inline_location.evidence["qwen_matching_before_text"] == "西省。"
+
+
+def test_qwen_recovers_scoped_chapter_endnote_ref() -> None:
+    blocks = [
+        {
+            "block_id": "b_chapter",
+            "type": "heading",
+            "text": "1 第一章",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_body",
+            "type": "paragraph",
+            "text": "正文左侧内容右侧继续。",
+            "source": {"page": 2, "bbox": [100, 100, 500, 140]},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_notes",
+            "type": "heading",
+            "text": "注释",
+            "source": {"page": 10},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_note_1",
+            "type": "list_item",
+            "text": "1. 第一条注释。",
+            "source": {"page": 10},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_note_2",
+            "type": "list_item",
+            "text": "2. 第二条注释。",
+            "source": {"page": 10},
+            "attrs": {},
+        },
+    ]
+
+    recover_missing_note_refs(
+        blocks,
+        qwen_marker_pages={
+            "pages": [
+                {
+                    "page": 2,
+                    "body_refs": [
+                        {
+                            "marker": "1",
+                            "before_text": "正文左侧",
+                            "after_text": "内容右侧",
+                            "quote": "正文左侧1内容右侧",
+                            "confidence": "high",
+                        }
+                    ],
+                }
+            ]
+        },
+        recovery_mode="qwen",
+    )
+    resolve_note_links(blocks)
+
+    refs = blocks[1]["attrs"]["note_refs"]
+    assert len(refs) == 1
+    assert refs[0]["source"] == "qwen_marker_locator"
+    assert refs[0]["target_block_id"] == "b_note_1"
+    assert refs[0]["note_strategy"] == "chapter_endnote"
+    assert refs[0]["inline_position"] == "exact"

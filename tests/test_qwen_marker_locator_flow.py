@@ -1,7 +1,11 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from mineru_normalizer.canonical.core import _marker_locator_block_dpi, _marker_locator_page_dpi
+from mineru_normalizer.canonical.core import (
+    _marker_locator_block_dpi,
+    _marker_locator_page_dpi,
+    _missing_or_unreliable_body_ref_pages,
+)
 from mineru_normalizer.reconcile.notes import qwen_marker_locator
 from mineru_normalizer.reconcile.notes.qwen_marker_locator import (
     QwenMarkerLocatorConfig,
@@ -88,3 +92,137 @@ def test_page_then_block_retries_missing_pages_with_block_dpi(monkeypatch, tmp_p
             "expected_body_markers_by_page": {},
         },
     ]
+
+
+def test_missing_pages_include_resolved_refs_without_reliable_inline_position() -> None:
+    blocks = [
+        {
+            "block_id": "b_body",
+            "type": "paragraph",
+            "text": "正文里有一个脚注引用位置。",
+            "source": {"page": 76},
+            "attrs": {
+                "note_refs": [
+                    {
+                        "marker": "1",
+                        "source": "equation_inline",
+                        "source_page": 76,
+                        "target_note_id": "note_1",
+                    }
+                ]
+            },
+        },
+        {
+            "block_id": "b_note",
+            "type": "footnote",
+            "text": "1 脚注内容",
+            "source": {"page": 76},
+            "attrs": {"note_id": "note_1", "note_marker": "1"},
+        },
+    ]
+
+    assert _missing_or_unreliable_body_ref_pages(blocks) == []
+
+    evidence = [
+        QwenMarkerPageEvidence(
+            page=76,
+            image="page_76.png",
+            crop_bbox_pdf=[],
+            dpi=150,
+            raw_json={},
+            body_refs=[{"marker": "1"}],
+        )
+    ]
+
+    assert _missing_or_unreliable_body_ref_pages(blocks, qwen_marker_pages=evidence) == [76]
+
+    blocks[0]["attrs"]["note_refs"][0].update(
+        {
+            "inline_position": "exact",
+            "inline_position_source": "qwen_marker_locator",
+            "inline_offset": 9,
+        }
+    )
+
+    assert _missing_or_unreliable_body_ref_pages(blocks, qwen_marker_pages=evidence) == []
+
+
+def test_single_marker_retry_merges_missing_marker(monkeypatch, tmp_path: Path) -> None:
+    prompts = []
+
+    def fake_call(_image_path, _config, *, prompt):
+        prompts.append(prompt)
+        return {
+            "body_refs": [
+                {
+                    "marker": "2",
+                    "before_text": "左侧文字",
+                    "after_text": "右侧文字",
+                    "quote": "左侧文字2右侧文字",
+                    "confidence": "high",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(qwen_marker_locator, "_call_qwen_marker_locator", fake_call)
+    config = QwenMarkerLocatorConfig(
+        source_pdf=tmp_path / "source.pdf",
+        artifact_dir=tmp_path / "qwen",
+    )
+
+    refs, model_calls = qwen_marker_locator._retry_missing_single_marker_body_refs(
+        tmp_path / "page.png",
+        config,
+        ["1", "2"],
+        [
+            {
+                "marker": "1",
+                "before_text": "已有左",
+                "after_text": "已有右",
+                "quote": "已有左1已有右",
+                "confidence": "high",
+            }
+        ],
+    )
+
+    assert [ref["marker"] for ref in refs] == ["1", "2"]
+    assert len(prompts) == 1
+    assert "marker：2" in prompts[0]
+    assert model_calls[0]["kind"] == "body_refs_single_marker_retry"
+    assert model_calls[0]["marker"] == "2"
+
+
+def test_problem_page_plan_keeps_scoped_endnote_body_candidates() -> None:
+    blocks = [
+        {"block_id": "b_chapter", "type": "heading", "text": "1 第一章", "source": {"page": 1}, "attrs": {}},
+        {
+            "block_id": "b_ref_1",
+            "type": "paragraph",
+            "text": "已有引用一。",
+            "source": {"page": 2, "bbox": [10, 10, 100, 30]},
+            "attrs": {"note_refs": [{"marker": "1"}]},
+        },
+        {
+            "block_id": "b_missing",
+            "type": "paragraph",
+            "text": "这里应有第二条引用。",
+            "source": {"page": 2, "bbox": [10, 40, 100, 60]},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_ref_3",
+            "type": "paragraph",
+            "text": "已有引用三。",
+            "source": {"page": 2, "bbox": [10, 70, 100, 90]},
+            "attrs": {"note_refs": [{"marker": "3"}]},
+        },
+        {"block_id": "b_notes", "type": "heading", "text": "注释", "source": {"page": 10}, "attrs": {}},
+        {"block_id": "b_note_1", "type": "list_item", "text": "1. 第一条注释。", "source": {"page": 10}, "attrs": {}},
+        {"block_id": "b_note_2", "type": "list_item", "text": "2. 第二条注释。", "source": {"page": 10}, "attrs": {}},
+        {"block_id": "b_note_3", "type": "list_item", "text": "3. 第三条注释。", "source": {"page": 10}, "attrs": {}},
+    ]
+
+    plan = qwen_marker_locator._problem_page_plan(blocks)
+
+    assert 2 in plan.body_ref_pages
+    assert id(blocks[2]) in plan.body_candidate_block_ids
