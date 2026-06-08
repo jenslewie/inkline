@@ -1,8 +1,7 @@
-"""Note page and body-reference candidate helpers for the Qwen marker locator.
+"""Problem-page planning and body-reference candidate selection for the Qwen marker locator.
 
-The GLM-OCR engine has been removed; the remaining helpers in this module
-compute problem-page plans and body-reference candidate blocks that the
-Qwen marker locator uses to decide which pages to inspect.
+Computes which pages need footnote-definition and body-reference inspection,
+and identifies candidate blocks that might contain missing note references.
 """
 
 from __future__ import annotations
@@ -10,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Set
 
-from ...extraction.text import normalize_ws
+from ...extraction.text import normalize_note_marker, normalize_ws
 from ..block_access import block_bbox, block_page, block_pages
 from .marker_patterns import BODY_TYPES, _marker_int
 from .keys import leading_note_marker
@@ -72,7 +71,21 @@ def _footnote_sort_key(block: Dict[str, Any]) -> tuple[float, float, str]:
     bbox = block_bbox(block) or []
     y = float(bbox[1]) if len(bbox) >= 2 else 0.0
     x = float(bbox[0]) if len(bbox) >= 1 else 0.0
-    return (y, x, str(block.get("id") or ""))
+    return (y, x, str(block.get("id") or block.get("block_id") or ""))
+
+
+def _page_footnote_markers_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, List[str]]:
+    out: Dict[int, List[str]] = {}
+    for page, page_blocks in _page_footnotes_by_page(blocks).items():
+        markers: List[str] = []
+        for block in page_blocks:
+            attrs = block.get("attrs") or {}
+            marker = normalize_note_marker(attrs.get("note_marker", "")) or (leading_note_marker(str(block.get("text") or ""), include_superscript=True) or "")
+            if marker:
+                markers.append(marker)
+        if markers:
+            out[page] = markers
+    return out
 
 
 def _body_ref_items_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, List[tuple[int, Dict[str, Any], int]]]:

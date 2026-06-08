@@ -7,6 +7,13 @@ from mineru_normalizer.canonical.core import (
     _missing_or_unreliable_body_ref_pages,
 )
 from mineru_normalizer.reconcile.notes import qwen_marker_locator
+from mineru_normalizer.reconcile.notes.qwen_evidence import (
+    _collect_qwen_marker_evidence,
+    _page_footnote_markers_by_page,
+    _retry_missing_single_marker_body_refs,
+)
+from mineru_normalizer.reconcile.notes.qwen_api import _call_qwen_marker_locator
+from mineru_normalizer.reconcile.notes.qwen_page_plan import _problem_page_plan
 from mineru_normalizer.reconcile.notes.qwen_marker_locator import (
     QwenMarkerLocatorConfig,
     QwenMarkerPageEvidence,
@@ -55,8 +62,9 @@ def test_page_then_block_retries_missing_pages_with_block_dpi(monkeypatch, tmp_p
             for page in pages
         ]
 
-    monkeypatch.setattr(qwen_marker_locator, "_problem_page_plan", fake_problem_page_plan)
-    monkeypatch.setattr(qwen_marker_locator, "_collect_qwen_marker_evidence", fake_collect)
+    # Patch at the definition module (monkeypatch principle)
+    monkeypatch.setattr("mineru_normalizer.reconcile.notes.qwen_page_plan._problem_page_plan", fake_problem_page_plan)
+    monkeypatch.setattr("mineru_normalizer.reconcile.notes.qwen_evidence._collect_qwen_marker_evidence", fake_collect)
 
     config = QwenMarkerLocatorConfig(
         source_pdf=tmp_path / "source.pdf",
@@ -164,13 +172,14 @@ def test_single_marker_retry_merges_missing_marker(monkeypatch, tmp_path: Path) 
             ]
         }
 
-    monkeypatch.setattr(qwen_marker_locator, "_call_qwen_marker_locator", fake_call)
+    # Patch at the definition module (monkeypatch principle)
+    monkeypatch.setattr("mineru_normalizer.reconcile.notes.qwen_api._call_qwen_marker_locator", fake_call)
     config = QwenMarkerLocatorConfig(
         source_pdf=tmp_path / "source.pdf",
         artifact_dir=tmp_path / "qwen",
     )
 
-    refs, model_calls = qwen_marker_locator._retry_missing_single_marker_body_refs(
+    refs, model_calls = _retry_missing_single_marker_body_refs(
         tmp_path / "page.png",
         config,
         ["1", "2"],
@@ -222,7 +231,7 @@ def test_problem_page_plan_keeps_scoped_endnote_body_candidates() -> None:
         {"block_id": "b_note_3", "type": "list_item", "text": "3. 第三条注释。", "source": {"page": 10}, "attrs": {}},
     ]
 
-    plan = qwen_marker_locator._problem_page_plan(blocks)
+    plan = _problem_page_plan(blocks)
 
     assert 2 in plan.body_ref_pages
     assert id(blocks[2]) in plan.body_candidate_block_ids
