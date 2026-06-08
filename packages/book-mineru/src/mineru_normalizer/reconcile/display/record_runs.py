@@ -5,11 +5,10 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
-from ..common import (
-    FLOAT_LIKE_TYPES, QUOTE_TYPES, _block_page, _block_pages,
-    _is_near_page_bottom, _is_near_page_top,
-    _page_coord_heights, _prev_text_non_float,
-)
+from ..constants import FLOAT_LIKE_TYPES, QUOTE_TYPES
+from ..block_access import block_page as _block_page, block_pages as _block_pages
+from ..layout_helpers import _is_near_page_bottom, _is_near_page_top, _page_coord_heights
+from ..block_nav import _prev_text_non_float
 from .helpers import is_era_month_header, looks_like_record_display_text, merge_quote_run
 
 

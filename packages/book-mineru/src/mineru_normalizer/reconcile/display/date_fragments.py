@@ -7,11 +7,12 @@ from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
 from ..cjk import _is_cjk_numbered_item_block
-from ..common import (
-    QUOTE_TYPES, _bbox, _block_page,
+from ..constants import QUOTE_TYPES
+from ..block_access import block_bbox as _bbox, block_page as _block_page
+from ..block_merge import _merge_block_pair
+from ..layout_helpers import (
     _canonical_quote_layout, _ends_with_terminal,
-    _is_near_page_bottom, _is_near_page_top, _merge_block_pair,
-    _page_coord_heights,
+    _is_near_page_bottom, _is_near_page_top, _page_coord_heights,
 )
 
 

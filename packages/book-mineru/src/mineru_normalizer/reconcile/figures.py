@@ -7,7 +7,9 @@ from typing import Any, Dict, List, Optional, Protocol
 
 from ..canonical.builders import union_bbox
 from ..schema.models import BBox
-from .common import _DEFAULT_PAGE_HEIGHT, _bbox, _block_page, _page_coord_heights, _page_coord_widths
+from .constants import _DEFAULT_PAGE_HEIGHT
+from .block_access import block_bbox as _bbox, block_page as _block_page
+from .layout_helpers import _page_coord_heights, _page_coord_widths
 
 __all__ = ["reconcile_figure_captions"]
 

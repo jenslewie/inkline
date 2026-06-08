@@ -6,7 +6,8 @@ from typing import Dict, List
 
 from ...canonical.builders import union_bbox
 from ...extraction.text import normalize_ws
-from ..common import _bbox, _block_page, _leading_note_marker
+from ..block_access import block_bbox as _bbox, block_page as _block_page
+from ..notes.keys import leading_note_marker as _leading_note_marker
 
 _FN_CONT_Y_GAP_MIN = -5.0
 _FN_CONT_Y_GAP_MAX = 45.0

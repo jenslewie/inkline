@@ -7,7 +7,9 @@ from typing import Dict, List, Optional
 
 from ...schema.models import BBox
 from ...extraction.text import normalize_ws
-from ..common import _DEFAULT_PAGE_HEIGHT, _NEAR_PAGE_BOTTOM_RATIO, _bbox, _block_page, _leading_note_marker
+from ..constants import _DEFAULT_PAGE_HEIGHT, _NEAR_PAGE_BOTTOM_RATIO
+from ..block_access import block_bbox as _bbox, block_page as _block_page
+from ..notes.keys import leading_note_marker as _leading_note_marker
 
 _PAGE_HEIGHT_HINT_BBOX_W = 650
 _PAGE_HEIGHT_HINT_BBOX_H = 750

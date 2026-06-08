@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional
 
 from ...extraction.text import normalize_note_marker
-from ..common import _block_id, _leading_note_marker as _com_leading_note_marker, _note_ref_key
+from ..block_access import block_id as _block_id
+from ..notes.keys import leading_note_marker as _com_leading_note_marker, note_ref_key as _note_ref_key
 from ...schema.models import CanonicalBlock
 from .scopes import (
     _EndnoteSectionStrategy,

@@ -6,7 +6,9 @@ from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
 from ...schema.patterns import ATTR_RE
-from ..common import FLOAT_LIKE_TYPES, _bbox, _block_page, _canonical_quote_layout
+from ..constants import FLOAT_LIKE_TYPES
+from ..block_access import block_bbox as _bbox, block_page as _block_page
+from ..layout_helpers import _canonical_quote_layout
 from .helpers import _is_era_month_header, _is_lunar_day_entry, _merge_quote_run, _prev_text_non_float
 
 def _reconcile_attribution_display_quotes(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:

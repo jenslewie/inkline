@@ -6,11 +6,11 @@ import re
 from typing import Any, Dict, List, Optional
 
 from ..analysis.layout import LayoutStats
-from .common import (
-    QUOTE_TYPES, _bbox, _block_page, _block_pages, _chinese_to_int,
-    _merge_block_pair, _next_text_non_float_idx, _prev_text_non_float,
-    _prev_text_non_float_idx, _refresh_canonical_quote_attrs,
-)
+from .constants import QUOTE_TYPES
+from .block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
+from .block_merge import _merge_block_pair, _refresh_canonical_quote_attrs
+from .block_nav import _prev_text_non_float, _prev_text_non_float_idx, _next_text_non_float_idx
+from .notes.keys import chinese_to_int as _chinese_to_int
 
 def _cjk_list_marker_rank(text: str) -> Optional[int]:
     m = re.match(r"^\s*([一二三四五六七八九十百]+)、", text or "")

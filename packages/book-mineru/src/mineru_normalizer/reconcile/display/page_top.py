@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
-from ..common import FLOAT_LIKE_TYPES, _bbox, _block_page, _is_near_page_top, _page_coord_heights
+from ..constants import FLOAT_LIKE_TYPES
+from ..block_access import block_bbox as _bbox, block_page as _block_page
+from ..layout_helpers import _is_near_page_top, _page_coord_heights
 from .helpers import _force_generic_quote_attrs, _prev_text_non_float
 
 

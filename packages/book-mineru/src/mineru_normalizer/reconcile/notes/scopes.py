@@ -10,7 +10,8 @@ from typing import Any, Dict, List, Optional, Protocol
 from ...extraction.text import normalize_note_marker, normalize_ws
 from ...schema.patterns import PART_RE
 from ...schema.models import CanonicalBlock
-from ..common import _block_id, _chinese_to_int, _leading_note_marker as _com_leading_note_marker
+from ..block_access import block_id as _block_id
+from ..notes.keys import chinese_to_int as _chinese_to_int, leading_note_marker as _com_leading_note_marker
 
 CHAPTER_HEADING_RE = re.compile(r"^\s*(?:第[一二三四五六七八九十百\d]+[章节]|[IVXLCDMivxlcdm]+|\d{1,2})[\s.．、:\n：]+")
 NOTE_SUBSECTION_RE = re.compile(r"^\s*(?:第[一二三四五六七八九十百\d]+[章节]|[IVXLCDMivxlcdm]+|\d{1,2})\s+[“”\"'‘’]*[\u4e00-\u9fff]")

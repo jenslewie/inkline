@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
-from ..common import (
-    QUOTE_TYPES, _DEFAULT_PAGE_HEIGHT, _bbox, _block_page, _block_pages,
+from ..constants import QUOTE_TYPES, _DEFAULT_PAGE_HEIGHT
+from ..block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
+from ..block_merge import _merge_block_pair, _refresh_canonical_quote_attrs
+from ..layout_helpers import (
     _canonical_quote_layout, _ends_with_terminal,
-    _is_near_page_bottom, _is_near_page_top, _merge_block_pair,
-    _page_coord_heights, _prev_text_non_float, _refresh_canonical_quote_attrs,
+    _is_near_page_bottom, _is_near_page_top, _page_coord_heights,
 )
+from ..block_nav import _prev_text_non_float
 from .helpers import (
     display_lanes_compatible,
     has_display_attribution_line,

@@ -9,13 +9,17 @@ from ..analysis.layout import LayoutStats
 from ..analysis.pdf_page_metrics import PdfPageCache, line_bands
 from ..schema.models import BBox
 from ..extraction.text import chinese_len, normalize_ws
-from .common import (
+from .constants import (
     FLOAT_LIKE_TYPES, MERGEABLE_TEXT_TYPES, QUOTE_TYPES, _DEFAULT_PAGE_HEIGHT,
-    _NEAR_PAGE_BOTTOM_RATIO, _bbox, _block_page, _block_pages,
-    _canonical_quote_layout, _ends_with_terminal, _is_near_page_bottom,
-    _is_near_page_top, _join_text, _leading_note_marker, _merge_block_pair,
-    _page_coord_heights, _page_coord_widths,
+    _NEAR_PAGE_BOTTOM_RATIO,
 )
+from .block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
+from .block_merge import _join_text, _merge_block_pair
+from .layout_helpers import (
+    _canonical_quote_layout, _ends_with_terminal, _is_near_page_bottom,
+    _is_near_page_top, _page_coord_heights, _page_coord_widths,
+)
+from .notes.keys import leading_note_marker as _leading_note_marker
 
 FLOAT_INTERRUPTION_TYPES = FLOAT_LIKE_TYPES | {"table"}
 

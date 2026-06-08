@@ -6,13 +6,9 @@ import re
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
-from ..common import (
-    _merge_block_pair,
-    _prev_text_non_float,
-    _refresh_canonical_quote_attrs,
-    _bbox,
-    _block_page,
-)
+from ..block_access import block_bbox as _bbox, block_page as _block_page
+from ..block_merge import _merge_block_pair, _refresh_canonical_quote_attrs
+from ..block_nav import _prev_text_non_float
 from ...extraction.text import normalize_ws
 
 ERA_MONTH_RE = re.compile(r"^\s*[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]年[正一二三四五六七八九十冬腊]+月\s*$")
@@ -91,7 +87,8 @@ def merge_quote_run(
 
 
 def quote_run_is_intro_continuation_candidate(b: Dict[str, Any], layout: LayoutStats) -> bool:
-    from ..common import QUOTE_TYPES, _canonical_quote_layout
+    from ..constants import QUOTE_TYPES
+    from ..layout_helpers import _canonical_quote_layout
 
     if b.get("type") not in QUOTE_TYPES:
         return False
@@ -99,7 +96,7 @@ def quote_run_is_intro_continuation_candidate(b: Dict[str, Any], layout: LayoutS
 
 
 def is_short_display_text_block(b: Dict[str, Any], layout: LayoutStats, max_len: int = 120) -> bool:
-    from ..common import _canonical_quote_layout
+    from ..layout_helpers import _canonical_quote_layout
 
     if b.get("type") not in {"paragraph", "blockquote"}:
         return False
@@ -117,7 +114,7 @@ def is_short_display_text_block(b: Dict[str, Any], layout: LayoutStats, max_len:
 
 
 def is_left_shifted_intro_before_display_lane_ds(blocks: List[Dict[str, Any]], i: int, layout: LayoutStats) -> bool:
-    from ..common import QUOTE_TYPES
+    from ..constants import QUOTE_TYPES
 
     b = blocks[i]
     if b.get("type") != "paragraph":

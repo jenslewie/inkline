@@ -9,7 +9,9 @@ from typing import Any, Dict, List, Optional
 
 from ..canonical.builders import union_bbox
 from ..extraction.text import normalize_ws
-from .common import _DEFAULT_PAGE_HEIGHT, _NEAR_PAGE_TOP_RATIO, _bbox, _block_page, _page_coord_heights
+from .constants import _DEFAULT_PAGE_HEIGHT, _NEAR_PAGE_TOP_RATIO
+from .block_access import block_bbox as _bbox, block_page as _block_page
+from .layout_helpers import _page_coord_heights
 
 _TABLE_NEAR_PAGE_BOTTOM_RATIO = 0.72
 _TABLE_PAGE_BOTTOM_MARKER_RATIO = 0.74
