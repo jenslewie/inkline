@@ -10,8 +10,8 @@ from typing import Dict, List
 from inkline.canonical import validate_document
 
 from ..analysis.note_gap_report import build_note_ref_gap_report, note_ref_gap_report_path
-from ..canonical.assets import materialize_image_assets
-from ..canonical.core import build_canonical
+from ..normalize.assets import materialize_image_assets
+from ..normalize.core import build_canonical
 from ..extraction.io import flatten_content_list_legacy, flatten_content_list_v2, load_json, page_sizes_from_middle
 from ..schema.models import RawBlock
 from ..reconcile import resolve_source_pdf_path

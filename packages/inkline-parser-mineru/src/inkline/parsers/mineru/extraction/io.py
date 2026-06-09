@@ -26,7 +26,7 @@ def page_sizes_from_middle(middle: Any) -> Dict[int, Tuple[float, float]]:
 
 
 def load_inputs(args: Any) -> tuple[Dict[int, List[RawBlock]], Dict[int, Tuple[float, float]]]:
-    """Load MinerU JSON inputs from the normalizer argument namespace."""
+    """Load MinerU JSON inputs from the normalization CLI arguments."""
 
     middle = load_json(getattr(args, "middle", None))
     page_sizes = page_sizes_from_middle(middle)

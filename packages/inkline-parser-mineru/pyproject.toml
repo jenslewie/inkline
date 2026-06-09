@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "inkline-parser-mineru"
 version = "0.1.0"
-description = "MinerU parser adapter and normalizer for inkline."
+description = "MinerU parser adapter and normalization pipeline for inkline."
 requires-python = ">=3.11"
 dependencies = [
   "inkline-canonical>=0.1.0",
@@ -20,7 +20,7 @@ mineru = [
 ]
 
 [project.scripts]
-mineru-to-canonical = "inkline.parsers.mineru.normalizer.app.cli:main"
+mineru-to-canonical = "inkline.parsers.mineru.app.cli:main"
 
 [project.entry-points."inkline.parsers"]
 mineru = "inkline.parsers.mineru:MinerUParser"

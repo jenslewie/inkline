@@ -1,5 +1,5 @@
-from inkline.parsers.mineru.normalizer.canonical.builders import make_paragraph
-from inkline.parsers.mineru.normalizer.schema.models import IdFactory, NoteRef, RawBlock
+from inkline.parsers.mineru.normalize.builders import make_paragraph
+from inkline.parsers.mineru.schema.models import IdFactory, NoteRef, RawBlock
 
 
 def test_make_paragraph_copies_equation_inline_offset_to_note_ref() -> None:

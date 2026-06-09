@@ -63,15 +63,15 @@ def normalize_mineru_outputs(
     title: str | None = None,
     language: str = "zh-CN",
 ) -> dict[str, Any]:
-    """Run the migrated MinerU normalizer programmatically.
+    """Run the MinerU normalization pipeline programmatically.
 
     Heavy optional dependencies are imported inside the function so the rest of
     the monorepo can run without a MinerU/PyMuPDF environment.
     """
 
-    from inkline.parsers.mineru.normalizer.canonical.core import build_canonical
-    from inkline.parsers.mineru.normalizer.canonical.assets import materialize_image_assets
-    from inkline.parsers.mineru.normalizer.extraction.io import load_inputs
+    from inkline.parsers.mineru.normalize.core import build_canonical
+    from inkline.parsers.mineru.normalize.assets import materialize_image_assets
+    from inkline.parsers.mineru.extraction.io import load_inputs
 
     args = Namespace(
         content_list=None,

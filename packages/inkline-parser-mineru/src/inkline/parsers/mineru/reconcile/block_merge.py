@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from ..canonical.builders import union_bbox
+from ..normalize.builders import union_bbox
 from ..schema.patterns import CHINESE_RE
 
 QUOTE_TYPES = {"blockquote", "epigraph"}

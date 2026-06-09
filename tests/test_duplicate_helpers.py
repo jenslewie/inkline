@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 # Import both implementations
-from inkline.parsers.mineru.normalizer.reconcile.notes.marker_inline import (
+from inkline.parsers.mineru.reconcile.notes.marker_inline import (
     _inline_note_run_from_ref as inline_run_from_marker_inline,
     _ref_requires_inline_run as requires_from_marker_inline,
     _fallback_raw_marker as fallback_from_marker_inline,

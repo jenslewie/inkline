@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol
 
-from ..canonical.builders import union_bbox
+from ..normalize.builders import union_bbox
 from ..schema.models import BBox
 from .constants import _DEFAULT_PAGE_HEIGHT
 from .block_access import block_bbox as _bbox, block_page as _block_page

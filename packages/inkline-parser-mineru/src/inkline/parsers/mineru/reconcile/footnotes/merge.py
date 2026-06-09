@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from ...canonical.builders import union_bbox
+from ...normalize.builders import union_bbox
 from ...extraction.text import normalize_ws
 from ..block_access import block_bbox as _bbox, block_page as _block_page
 from ..notes.keys import leading_note_marker as _leading_note_marker

@@ -47,8 +47,8 @@ group, so the CLI does not maintain a hard-coded parser list.
 ## Migration Notes
 
 - `pdf-parser-eval` remains the source of parser evaluation history and the first canonical contract.
-- The former `mineru_normalizer` code is isolated under
-  `inkline.parsers.mineru.normalizer`; its algorithms remain parser-specific until
+- The former standalone MinerU normalization code now lives directly under
+  `inkline.parsers.mineru`; its algorithms remain parser-specific until
   a second adapter demonstrates a real reusable normalization boundary.
 - `corpus-rag` provides RAG implementation patterns, but its EPUB normalized JSONL is not a long-term boundary.
 - `booksmith` provides the EPUB packaging direction; this repository starts with a dependency-free EPUB writer that can be swapped for a richer builder without changing the canonical contract.
