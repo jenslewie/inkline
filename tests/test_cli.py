@@ -1,9 +1,9 @@
 import json
 import zipfile
 
-from book_canonical import sample_document
-from book_canonical.io import write_canonical
-from inkline_cli.main import main
+from inkline.canonical import sample_document
+from inkline.canonical.io import write_canonical
+from inkline.cli.main import build_parser, main
 
 
 def test_cli_rag_chunk_and_export_epub(tmp_path):
@@ -33,3 +33,11 @@ def test_cli_import_epub(tmp_path):
     payload = json.loads(imported.read_text(encoding="utf-8"))
     assert payload["metadata"]["doc_id"] == "roundtrip"
     assert payload["blocks"]
+
+
+def test_cli_accepts_parser_names_not_known_at_build_time():
+    args = build_parser().parse_args(
+        ["ingest", "pdf", "input.pdf", "--parser", "paddle", "--output", "canonical.json"]
+    )
+
+    assert args.parser_name == "paddle"

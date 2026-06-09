@@ -1,40 +1,45 @@
 # inkline
 
-Monorepo for document ingestion, canonical book representation, EPUB export, and RAG pipelines.
+Composable document parsing, canonical representation, EPUB export, and RAG pipelines.
 
-The first implementation keeps the pipeline centered on a parser-neutral `CanonicalDocument`:
+The pipeline is centered on a parser-neutral `CanonicalDocument`:
 
 ```text
-source document -> canonical.json -> EPUB
-                              \-> chunks.jsonl -> embeddings -> FAISS/search
+source document -> parser adapter -> canonical.json -> EPUB
+                                             \-> chunks.jsonl -> embeddings -> FAISS/search
 ```
 
 ## Layout
 
 ```text
-packages/book-canonical/  Canonical schema, validation, JSON/JSONL IO.
-packages/book-ingest/     Lightweight ingestion interfaces.
-packages/book-mineru/     MinerU integration and migrated MinerU normalizer code.
-packages/book-epub/       CanonicalDocument to reflowable EPUB.
-packages/book-rag/        CanonicalDocument to chunks, embeddings, index, search.
-packages/book-cli/        Unified `inkline` CLI.
-docs/                     Architecture and canonical contract notes.
-tests/                    Cross-package smoke and regression tests.
+packages/inkline-canonical/       Stable document contract, validation, and IO.
+packages/inkline-parse/           Parser protocol, registry, orchestration, and importers.
+packages/inkline-parser-mineru/   MinerU adapter and MinerU-specific normalization.
+packages/inkline-epub/            CanonicalDocument to reflowable EPUB.
+packages/inkline-rag/             Chunking, embeddings, index, and search.
+packages/inkline-cli/             Unified `inkline` CLI.
+docs/                             Architecture and canonical contract notes.
+tests/                            Cross-package smoke and regression tests.
 ```
 
 ## Quick Start
 
-Run tests from the repository root:
+Install the workspace and run tests from the repository root:
 
 ```bash
-python -m pytest -q
+uv sync
+uv run python -m pytest -q
 ```
 
-Use the CLI without installing by setting `PYTHONPATH` to the package source roots, or install the root project in editable mode.
+Install the optional MinerU adapter and its runtime before parsing PDFs:
 
 ```bash
-inkline rag chunk data/outputs/sample/canonical.json --output data/outputs/sample/chunks.jsonl
-inkline export epub data/outputs/sample/canonical.json --output data/outputs/sample/book.epub
+uv sync --extra mineru
+uv run inkline ingest pdf input.pdf --parser mineru --output data/outputs/sample/canonical.json
+uv run inkline export epub data/outputs/sample/canonical.json --output data/outputs/sample/book.epub
+uv run inkline rag chunk data/outputs/sample/canonical.json --output data/outputs/sample/chunks.jsonl
 ```
 
-`book-mineru` keeps MinerU and the migrated `mineru_normalizer` code isolated from the lightweight canonical, EPUB, and RAG packages.
+Parser-specific dependencies and repair logic stay inside parser adapters. A future
+PaddleOCR integration should live in `inkline-parser-paddle` and implement the
+same `inkline.parse.DocumentParser` protocol plus an `inkline.parsers` entry point.

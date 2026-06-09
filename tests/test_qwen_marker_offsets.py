@@ -1,11 +1,11 @@
-from mineru_normalizer.reconcile.notes.markers import (
+from inkline.parsers.mineru.normalizer.reconcile.notes.markers import (
     _locate_qwen_body_ref,
     _qwen_marker_offset_in_text,
     _update_existing_qwen_ref_inline_location,
     recover_missing_note_refs,
 )
-from mineru_normalizer.reconcile.notes.marker_inline import _InlineMarkerLocation
-from mineru_normalizer.reconcile.notes.resolver import _NoteContext, resolve_note_links
+from inkline.parsers.mineru.normalizer.reconcile.notes.marker_inline import _InlineMarkerLocation
+from inkline.parsers.mineru.normalizer.reconcile.notes.resolver import _NoteContext, resolve_note_links
 
 
 def test_qwen_symbol_marker_before_omitted_comma() -> None:

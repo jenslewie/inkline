@@ -1,7 +1,7 @@
 import zipfile
 
-from book_canonical import sample_document
-from book_epub import export_epub
+from inkline.canonical import sample_document
+from inkline.epub import export_epub
 
 
 def test_export_epub_writes_standard_container(tmp_path):

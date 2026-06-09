@@ -1,10 +1,10 @@
-from book_canonical import validate_document
-from book_epub import export_epub
-from book_ingest import import_epub
+from inkline.canonical import validate_document
+from inkline.epub import export_epub
+from inkline.parse import import_epub
 
 
 def test_import_epub_returns_canonical_document(tmp_path):
-    from book_canonical import sample_document
+    from inkline.canonical import sample_document
 
     epub_path = tmp_path / "sample.epub"
     export_epub(sample_document(), epub_path)

@@ -1,6 +1,9 @@
+import json
+
 import pytest
 
-from book_canonical import ValidationError, make_block, make_document, make_toc_entry, sample_document, validate_document
+from inkline.canonical import MigrationError, ValidationError, make_block, make_document, make_toc_entry, sample_document, validate_document
+from inkline.canonical.io import read_canonical
 
 
 def test_sample_document_validates():
@@ -48,3 +51,25 @@ def test_toc_entry_validation_requires_title():
                 toc=[{"level": 1}],
             )
         )
+
+
+def test_read_canonical_migrates_unversioned_document(tmp_path):
+    legacy = sample_document()
+    legacy["metadata"].pop("schema_version")
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    migrated = read_canonical(path)
+
+    assert migrated["metadata"]["schema_version"] == "1.0"
+    assert "schema_version" not in legacy["metadata"]
+
+
+def test_read_canonical_rejects_unknown_schema_version(tmp_path):
+    document = sample_document()
+    document["metadata"]["schema_version"] = "99.0"
+    path = tmp_path / "future.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(MigrationError, match="99.0"):
+        read_canonical(path)

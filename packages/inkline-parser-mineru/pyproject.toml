@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inkline-parser-mineru"
+version = "0.1.0"
+description = "MinerU parser adapter and normalizer for inkline."
+requires-python = ">=3.11"
+dependencies = [
+  "inkline-canonical>=0.1.0",
+  "inkline-parse>=0.1.0",
+]
+
+[project.optional-dependencies]
+mineru = [
+  "mineru[core,mlx,pipeline]>=3.2.3,<4",
+  "PyMuPDF>=1.24",
+  "Pillow>=10",
+]
+
+[project.scripts]
+mineru-to-canonical = "inkline.parsers.mineru.normalizer.app.cli:main"
+
+[project.entry-points."inkline.parsers"]
+mineru = "inkline.parsers.mineru:MinerUParser"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pyright]
+reportMissingTypeArgument = "warning"
+reportUnknownMemberType = "warning"

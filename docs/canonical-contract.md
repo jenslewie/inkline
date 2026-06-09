@@ -10,6 +10,7 @@
 
 Required metadata fields:
 
+- `schema_version`
 - `doc_id`
 - `title`
 - `language`
@@ -20,8 +21,13 @@ Required metadata fields:
 Supported block types:
 
 ```text
-heading paragraph epigraph blockquote signature list table figure caption
-footnote_ref footnote equation page_break
+heading paragraph toc_item display_block epigraph blockquote signature list
+list_item table table_continuation figure caption footnote_ref footnote
+equation page_break
 ```
 
 Downstream packages must consume canonical fields instead of parser-private raw outputs. Parser-specific evidence can live under `block.attrs`.
+
+Canonical JSON written before `schema_version` was introduced is treated as the
+implicit v0 format. `read_canonical()` migrates it to `1.0` in memory; validation
+and newly written files remain strict about the version field.

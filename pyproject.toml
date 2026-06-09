@@ -5,33 +5,51 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "inkline"
 version = "0.1.0"
-description = "Document ingestion, canonical book representation, EPUB export, and RAG pipeline monorepo."
+description = "Composable document parsing, canonical representation, EPUB export, and RAG pipeline."
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["inkline-cli>=0.1.0"]
 
 [project.optional-dependencies]
 rag = ["numpy>=1.26", "faiss-cpu>=1.8", "requests>=2.31"]
+mineru = ["inkline-parser-mineru[mineru]>=0.1.0"]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
 
 [project.scripts]
-inkline = "inkline_cli.main:main"
+inkline = "inkline.cli.main:main"
 
-[tool.setuptools.packages.find]
-where = [
-  "packages/book-canonical/src",
-  "packages/book-ingest/src",
-  "packages/book-mineru/src",
-  "packages/book-epub/src",
-  "packages/book-rag/src",
-  "packages/book-cli/src",
-]
+[tool.setuptools]
+packages = []
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+inkline-cli = { workspace = true }
+inkline-canonical = { workspace = true }
+inkline-parse = { workspace = true }
+inkline-parser-mineru = { workspace = true }
+inkline-epub = { workspace = true }
+inkline-rag = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [
-  "packages/book-canonical/src",
-  "packages/book-ingest/src",
-  "packages/book-mineru/src",
-  "packages/book-epub/src",
-  "packages/book-rag/src",
-  "packages/book-cli/src",
+  "packages/inkline-canonical/src",
+  "packages/inkline-parse/src",
+  "packages/inkline-parser-mineru/src",
+  "packages/inkline-epub/src",
+  "packages/inkline-rag/src",
+  "packages/inkline-cli/src",
+]
+
+[tool.pyright]
+extraPaths = [
+  "packages/inkline-canonical/src",
+  "packages/inkline-parse/src",
+  "packages/inkline-parser-mineru/src",
+  "packages/inkline-epub/src",
+  "packages/inkline-rag/src",
+  "packages/inkline-cli/src",
 ]

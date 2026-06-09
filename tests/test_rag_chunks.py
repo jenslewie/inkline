@@ -1,7 +1,7 @@
 import json
 
-from book_canonical import sample_document
-from book_rag import export_chunks
+from inkline.canonical import sample_document
+from inkline.rag import export_chunks
 
 
 def test_export_chunks_writes_valid_jsonl(tmp_path):

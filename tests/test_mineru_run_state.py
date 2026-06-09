@@ -4,7 +4,7 @@ import json
 import sys
 import types
 
-from book_mineru.bridge import run_mineru_raw
+from inkline.parsers.mineru.bridge import run_mineru_raw
 
 
 def test_run_mineru_raw_writes_run_state(tmp_path, monkeypatch):
