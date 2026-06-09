@@ -38,9 +38,19 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
         doc_id="sample",
         title="Sample",
         language="en",
+        mineru_version="3.2.3",
+        mineru_vl_utils_version="1.0.4",
+        vlm_model={
+            "local_path": "/cache/MinerU2.5-Pro-2605-1.2B",
+            "model_name": "MinerU2.5-Pro-2605-1.2B",
+            "model_type": "qwen2_vl",
+            "architectures": ["Qwen2VLForConditionalGeneration"],
+        },
     )
 
     validate_document(document)
     assert document["metadata"]["parser_name"] == "mineru"
     assert document["metadata"]["schema_version"] == "1.0"
+    assert document["metadata"]["mineru"]["version"] == "3.2.3"
+    assert document["metadata"]["mineru"]["vlm_model"]["model_name"] == "MinerU2.5-Pro-2605-1.2B"
     assert output.exists()

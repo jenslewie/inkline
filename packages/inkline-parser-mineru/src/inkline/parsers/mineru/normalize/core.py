@@ -147,38 +147,43 @@ def build_canonical(
             "source_files": source_files,
             "parser_name": "mineru",
             "parser_mode": str(getattr(args, "parser_mode", "vlm")),
-            "normalizer": "mineru_to_canonical.py",
-            "normalizer_version": "0.3.0",
-            "layout_stats": {
-                "page_width": layout.page_width,
-                "page_height": layout.page_height,
-                "body_left": layout.body_left,
-                "body_right": layout.body_right,
-            },
-            "auxiliary_ocr": {
-                "qwen_marker_locator": {
-                    "enabled": marker_locator_enabled,
-                    "repair_enabled": marker_locator_enabled,
-                    "model": getattr(args, "marker_locator_model", "qwen3.5:9b"),
-                    "keep_alive": getattr(args, "marker_locator_keep_alive", "2h"),
-                    "body_mode": getattr(args, "marker_locator_body_mode", "page_then_block"),
-                    "page_dpi": _marker_locator_page_dpi(args),
-                    "block_dpi": _marker_locator_block_dpi(args),
-                    "pages": sorted({item.page for item in marker_locator_evidence}),
-                    "evidence": [
-                        {"page": item.page, "kind": item.kind}
-                        for item in marker_locator_evidence
-                    ],
-                    "artifact_dir": str(_qwen_marker_locator_artifact_dir(args)) if marker_locator_enabled else None,
-                    "timing_log": str(_qwen_marker_locator_timing_log_path(args)) if marker_locator_enabled else None,
-                }
-            },
-            "note_trace_log": str(getattr(args, "note_trace_log", "")) or None,
-            "note_recovery_mode": str(getattr(args, "note_recovery_mode", "qwen")),
-            "type_system": {
-                "block_types": block_types,
-                "content_forms": [],
-                "note": "Display text block types are layout-first; semantic forms are not emitted.",
+            "mineru": {
+                "version": getattr(args, "mineru_version", None),
+                "vlm_utils_version": getattr(args, "mineru_vl_utils_version", None),
+                "vlm_model": getattr(args, "vlm_model", None),
+                "normalizer": "mineru_to_canonical.py",
+                "normalizer_version": "0.3.0",
+                "layout_stats": {
+                    "page_width": layout.page_width,
+                    "page_height": layout.page_height,
+                    "body_left": layout.body_left,
+                    "body_right": layout.body_right,
+                },
+                "auxiliary_ocr": {
+                    "qwen_marker_locator": {
+                        "enabled": marker_locator_enabled,
+                        "repair_enabled": marker_locator_enabled,
+                        "model": getattr(args, "marker_locator_model", "qwen3.5:9b"),
+                        "keep_alive": getattr(args, "marker_locator_keep_alive", "2h"),
+                        "body_mode": getattr(args, "marker_locator_body_mode", "page_then_block"),
+                        "page_dpi": _marker_locator_page_dpi(args),
+                        "block_dpi": _marker_locator_block_dpi(args),
+                        "pages": sorted({item.page for item in marker_locator_evidence}),
+                        "evidence": [
+                            {"page": item.page, "kind": item.kind}
+                            for item in marker_locator_evidence
+                        ],
+                        "artifact_dir": str(_qwen_marker_locator_artifact_dir(args)) if marker_locator_enabled else None,
+                        "timing_log": str(_qwen_marker_locator_timing_log_path(args)) if marker_locator_enabled else None,
+                    }
+                },
+                "note_trace_log": getattr(args, "note_trace_log", None) or None,
+                "note_recovery_mode": str(getattr(args, "note_recovery_mode", "qwen")),
+                "type_system": {
+                    "block_types": block_types,
+                    "content_forms": [],
+                    "note": "Display text block types are layout-first; semantic forms are not emitted.",
+                },
             },
         },
         "toc": [],

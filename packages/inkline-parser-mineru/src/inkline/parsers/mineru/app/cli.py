@@ -15,6 +15,7 @@ from ..normalize.core import build_canonical
 from ..extraction.io import flatten_content_list_legacy, flatten_content_list_v2, load_json, page_sizes_from_middle
 from ..schema.models import RawBlock
 from ..reconcile import resolve_source_pdf_path
+from ..bridge import find_mineru_run_version_info, get_mineru_version_info
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Normalize MinerU VLM outputs to canonical.json")
@@ -63,6 +64,16 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     args.source_pdf = resolve_source_pdf_path(args.source_pdf, allow_missing=args.allow_missing_pdf_text)
+    version_info = find_mineru_run_version_info(
+        args.content_list_v2,
+        args.content_list,
+        args.middle,
+        args.model,
+        args.md,
+    ) or get_mineru_version_info()
+    args.mineru_version = version_info.get("mineru_version")
+    args.mineru_vl_utils_version = version_info.get("mineru_vl_utils_version")
+    args.vlm_model = version_info.get("vlm_model")
     middle = load_json(args.middle)
     page_sizes = page_sizes_from_middle(middle)
 
