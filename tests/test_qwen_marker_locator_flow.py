@@ -1,5 +1,7 @@
+import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from mineru_normalizer.canonical.core import (
     _marker_locator_block_dpi,
@@ -19,6 +21,7 @@ from mineru_normalizer.reconcile.notes.qwen_marker_locator import (
     QwenMarkerPageEvidence,
     run_qwen_marker_locator_repairs,
 )
+from mineru_normalizer.reconcile.notes.qwen_types import _PROMPT_VERSION
 
 
 def test_marker_locator_page_and_block_dpi_config() -> None:
@@ -235,3 +238,61 @@ def test_problem_page_plan_keeps_scoped_endnote_body_candidates() -> None:
 
     assert 2 in plan.body_ref_pages
     assert id(blocks[2]) in plan.body_candidate_block_ids
+
+
+def test_complete_cache_hit_does_not_raise_unboundlocalerror(monkeypatch, tmp_path: Path) -> None:
+    """Regression test: when cached evidence fully covers both footnote and body
+    refs, the conditional branch is skipped and `item` must come from
+    cached_item — otherwise evidence.append(item) raises UnboundLocalError."""
+
+    # Build a fully-satisfied cached item (has footnote_defs + matching body_ref_source)
+    cached_item = QwenMarkerPageEvidence(
+        page=1,
+        image=str(tmp_path / "qwen" / "page_0001_200dpi_qwen_full_page.png"),
+        crop_bbox_pdf=[0.0, 0.0, 595.0, 842.0],
+        dpi=200,
+        raw_json={"footnote_defs": [{"marker": "1"}], "body_ref_source": "full_page"},
+        body_refs=[{"marker": "1"}],
+        footnote_defs=[{"marker": "1"}],
+        prompt_version=_PROMPT_VERSION,
+    )
+    cache_key = (1, "page_0001_200dpi_qwen_full_page.png")
+    fake_cache = {cache_key: cached_item}
+
+    # Mock fitz (PyMuPDF) — injected via sys.modules since it's imported inside the function
+    fake_page = MagicMock()
+    fake_page.rect = MagicMock(x0=0, y0=0, x1=595, y1=842)
+    fake_doc = MagicMock()
+    fake_doc.page_count = 1
+    fake_doc.__getitem__ = MagicMock(return_value=fake_page)
+    fake_doc.__enter__ = MagicMock(return_value=fake_doc)
+    fake_doc.__exit__ = MagicMock(return_value=False)
+    fake_fitz = MagicMock(open=MagicMock(return_value=fake_doc))
+    monkeypatch.setitem(sys.modules, "fitz", fake_fitz)
+
+    # Patch _read_existing_evidence to return our cache
+    monkeypatch.setattr("mineru_normalizer.reconcile.notes.qwen_evidence._read_existing_evidence", MagicMock(return_value=fake_cache))
+    # Patch render to avoid real PDF rendering
+    monkeypatch.setattr("mineru_normalizer.reconcile.notes.qwen_prompt._render_full_page", MagicMock())
+    # Patch timing to avoid needing a real config with all fields
+    monkeypatch.setattr("mineru_normalizer.reconcile.notes.qwen_evidence._write_timing_event", MagicMock())
+
+    config = QwenMarkerLocatorConfig(
+        source_pdf=tmp_path / "source.pdf",
+        artifact_dir=tmp_path / "qwen",
+        reuse_evidence=True,
+    )
+
+    evidence = _collect_qwen_marker_evidence(
+        [],
+        [1],
+        config,
+        pass_name="initial",
+        footnote_pages={1},
+        body_ref_pages={1},
+    )
+
+    assert len(evidence) == 1
+    assert evidence[0].page == 1
+    assert evidence[0].footnote_defs == [{"marker": "1"}]
+    assert evidence[0].body_refs == [{"marker": "1"}]

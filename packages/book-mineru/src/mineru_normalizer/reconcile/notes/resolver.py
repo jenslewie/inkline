@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, cast
 
 from ...extraction.text import normalize_note_marker
 from ..block_access import block_id as _block_id
@@ -67,8 +67,15 @@ class _PageFootnoteStrategy:
         return None
 
 
-def resolve_note_links(blocks: List[CanonicalBlock]) -> None:
-    context = _NoteContext(blocks)
+def resolve_note_links(blocks: List[Dict[str, Any]]) -> None:
+    """Resolve note links — pipeline boundary entry point.
+
+    ``blocks`` arrives from the canonical pipeline as ``List[Dict[str, Any]]``.
+    Internally the note subsystem uses ``List[CanonicalBlock]`` for type
+    precision.  The cast bridges the two until the full pipeline migration.
+    """
+    typed_blocks = cast(List[CanonicalBlock], blocks)
+    context = _NoteContext(typed_blocks)
     strategies: List[_NoteResolutionStrategy] = [
         _PageFootnoteStrategy(),
         _EndnoteSectionStrategy("chapter_endnote", scope_required=True),
@@ -76,16 +83,16 @@ def resolve_note_links(blocks: List[CanonicalBlock]) -> None:
     ]
     candidates: List[_NoteCandidate] = []
     for strategy in strategies:
-        candidates.extend(strategy.collect(blocks, context))
+        candidates.extend(strategy.collect(typed_blocks, context))
     if not candidates:
         return
 
-    by_id: Dict[str, CanonicalBlock] = {_block_id(b): b for b in blocks if _block_id(b)}
-    _filter_invalid_note_refs(blocks)
+    by_id: Dict[str, CanonicalBlock] = {_block_id(b): b for b in typed_blocks if _block_id(b)}
+    _filter_invalid_note_refs(typed_blocks)
     _annotate_note_definitions(candidates, by_id)
-    _suppress_lower_confidence_duplicate_page_footnote_refs(blocks, by_id)
+    _suppress_lower_confidence_duplicate_page_footnote_refs(typed_blocks, by_id)
     resolved_candidate_by_note: Dict[str, _NoteCandidate] = {}
-    for block in blocks:
+    for block in typed_blocks:
         refs = block.get("attrs", {}).get("note_refs") or []
         if not refs:
             continue
@@ -104,8 +111,8 @@ def resolve_note_links(blocks: List[CanonicalBlock]) -> None:
             ref["resolution_confidence"] = match.confidence
             resolved_candidate_by_note.setdefault(match.block_id, match)
 
-    _suppress_lower_confidence_duplicate_page_footnote_refs(blocks, by_id)
-    resolved_by_note, resolved_markers_by_note = _resolved_note_indexes(blocks, by_id)
+    _suppress_lower_confidence_duplicate_page_footnote_refs(typed_blocks, by_id)
+    resolved_by_note, resolved_markers_by_note = _resolved_note_indexes(typed_blocks, by_id)
 
     for candidate in candidates:
         if candidate.block_id not in resolved_by_note:
@@ -131,7 +138,7 @@ def resolve_note_links(blocks: List[CanonicalBlock]) -> None:
         refs = sorted({x for x in resolved_by_note.get(candidate.block_id, []) if x})
         if refs:
             attrs["referenced_by"] = refs
-    _sync_inline_note_refs(blocks)
+    _sync_inline_note_refs(typed_blocks)
 
 
 def _resolved_note_indexes(

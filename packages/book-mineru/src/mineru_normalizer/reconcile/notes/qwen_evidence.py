@@ -137,6 +137,9 @@ def _collect_qwen_marker_evidence(
                     body_refs=qwen_api._clean_body_refs(raw_parts.get("body_refs")),
                     footnote_defs=qwen_api._clean_footnote_defs(raw_parts.get("footnote_defs")),
                 )
+            else:
+                # Complete cache hit — reuse cached item directly
+                item = cached_item
             evidence.append(item)
             _write_timing_event(
                 config,

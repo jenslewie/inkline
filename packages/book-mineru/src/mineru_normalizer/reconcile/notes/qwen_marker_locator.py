@@ -12,8 +12,9 @@ The implementation has been split into sub-modules:
   - ``qwen_page_plan``: problem-page planning + body candidate selection
 
 This module retains the public entry point ``run_qwen_marker_locator_repairs``
-and ``apply_qwen_footnote_markers``, plus re-exports for test monkeypatch
-compatibility.  Uses module-level imports from sub-modules so that
+and ``apply_qwen_footnote_markers``, plus convenience aliases
+``QwenMarkerLocatorConfig`` and ``QwenMarkerPageEvidence`` from
+``qwen_types``.  Uses module-level imports from sub-modules so that
 monkeypatching the definition module namespace works correctly.
 """
 
@@ -21,7 +22,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
-from typing import Any, Callable, Dict, List, Sequence
+from typing import Any, Callable, Dict, List, Sequence, cast
 
 from . import qwen_api
 from . import qwen_evidence
@@ -31,19 +32,6 @@ from . import qwen_types
 from ...schema.models import CanonicalBlock
 
 
-# ---------------------------------------------------------------------------
-# Re-exports for monkeypatch compatibility
-# ---------------------------------------------------------------------------
-# Tests monkeypatch these names on the ``qwen_marker_locator`` module object.
-# The real definitions live in their respective sub-modules.  Re-exporting
-# here preserves the ``monkeypatch.setattr(qwen_marker_locator, "_X", ...)``
-# pattern, but **new code** should import from the definition module directly.
-# ---------------------------------------------------------------------------
-
-from .qwen_api import _call_qwen_marker_locator  # noqa: F401
-from .qwen_evidence import _collect_qwen_marker_evidence  # noqa: F401
-from .qwen_evidence import _retry_missing_single_marker_body_refs  # noqa: F401
-from .qwen_page_plan import _problem_page_plan  # noqa: F401
 
 QwenMarkerLocatorConfig = qwen_types.QwenMarkerLocatorConfig
 QwenMarkerPageEvidence = qwen_types.QwenMarkerPageEvidence
@@ -54,47 +42,53 @@ QwenMarkerPageEvidence = qwen_types.QwenMarkerPageEvidence
 # ---------------------------------------------------------------------------
 
 def run_qwen_marker_locator_repairs(
-    blocks: List[CanonicalBlock],
+    blocks: List[Dict[str, Any]],
     config: qwen_types.QwenMarkerLocatorConfig,
     *,
     missing_body_ref_pages_after_page: Callable[[List[qwen_types.QwenMarkerPageEvidence]], Sequence[int]] | None = None,
 ) -> List[qwen_types.QwenMarkerPageEvidence]:
-    """Collect Qwen marker evidence and apply footnote-definition marker fixes."""
+    """Collect Qwen marker evidence and apply footnote-definition marker fixes.
 
-    plan = qwen_page_plan._problem_page_plan(blocks)
+    ``blocks`` arrives from the canonical pipeline as ``List[Dict[str, Any]]``.
+    Internally the note subsystem uses ``List[CanonicalBlock]`` for type
+    precision.  The cast bridges the two until the full pipeline migration.
+    """
+    typed_blocks = cast(List[CanonicalBlock], blocks)
+
+    plan = qwen_page_plan._problem_page_plan(typed_blocks)
     pages = set(plan.footnote_pages) | set(plan.body_ref_pages)
     if not pages:
         return []
 
     # Init run: create artifact dir, start timing, log run_start
-    run_started, run_timer = _init_marker_locator_run(config, blocks, pages, plan)
+    run_started, run_timer = _init_marker_locator_run(config, typed_blocks, pages, plan)
 
     # Initial evidence pass (page DPI or single block pass)
     initial_config = _body_pass_config(config, "page" if config.body_mode == "page_then_block" else config.body_mode)
     evidence = qwen_evidence._collect_qwen_marker_evidence(
-        blocks,
+        typed_blocks,
         sorted(pages),
         initial_config,
         pass_name="initial",
         footnote_pages=plan.footnote_pages,
         body_ref_pages=plan.body_ref_pages,
-        expected_body_markers_by_page=qwen_evidence._page_footnote_markers_by_page(blocks),
+        expected_body_markers_by_page=qwen_evidence._page_footnote_markers_by_page(typed_blocks),
     )
-    apply_qwen_footnote_markers(blocks, evidence)
+    apply_qwen_footnote_markers(typed_blocks, evidence)
 
     # Retry pass for pages still missing body refs
-    missing_pages = _missing_body_ref_pages(config, blocks, plan, evidence, missing_body_ref_pages_after_page)
+    missing_pages = _missing_body_ref_pages(config, typed_blocks, plan, evidence, missing_body_ref_pages_after_page)
     if missing_pages:
         retry_config = _body_pass_config(config, "block" if config.body_mode == "page_then_block" else config.body_mode)
         evidence.extend(
             qwen_evidence._collect_qwen_marker_evidence(
-                blocks,
+                typed_blocks,
                 missing_pages,
                 retry_config,
                 pass_name="body_ref_retry",
                 footnote_pages=set(),
                 body_ref_pages=set(missing_pages),
-                expected_body_markers_by_page=qwen_evidence._page_footnote_markers_by_page(blocks),
+                expected_body_markers_by_page=qwen_evidence._page_footnote_markers_by_page(typed_blocks),
             )
         )
 

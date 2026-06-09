@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
 from ...analysis.pdf_page_metrics import PdfPageCache
 from ...extraction.text import normalize_note_marker
@@ -22,7 +22,7 @@ from .scopes import _EndnoteSectionStrategy, _NoteContext
 __all__ = ["recover_missing_note_refs"]
 
 
-def recover_missing_note_refs(blocks: List[CanonicalBlock], source_pdf: Any = None, *_args: Any, pdf_cache: Optional[PdfPageCache] = None, **_kwargs: Any) -> None:
+def recover_missing_note_refs(blocks: List[Dict[str, Any]], source_pdf: Any = None, *_args: Any, pdf_cache: Optional[PdfPageCache] = None, **_kwargs: Any) -> None:
     """Recover conservative inline note refs before final note linking.
 
     MinerU sometimes preserves note bodies but flattens body-side markers into
@@ -30,24 +30,28 @@ def recover_missing_note_refs(blocks: List[CanonicalBlock], source_pdf: Any = No
     This pass uses available note-definition sequences as guardrails and records
     recovered refs in ``attrs.note_refs`` so ``resolve_note_links`` can treat
     explicit, recovered, and inferred refs through the same path.
-    """
 
-    context = _NoteContext(blocks)
-    scope_defs, page_defs, book_defs = _collect_note_definition_markers(blocks, context)
-    page_symbol_defs = _collect_page_symbol_definition_markers(blocks, context)
+    ``blocks`` arrives from the canonical pipeline as ``List[Dict[str, Any]]``.
+    Internally the note subsystem uses ``List[CanonicalBlock]`` for type
+    precision.  The cast bridges the two until the full pipeline migration.
+    """
+    typed_blocks = cast(List[CanonicalBlock], blocks)
+    context = _NoteContext(typed_blocks)
+    scope_defs, page_defs, book_defs = _collect_note_definition_markers(typed_blocks, context)
+    page_symbol_defs = _collect_page_symbol_definition_markers(typed_blocks, context)
     if not scope_defs and not page_defs and not book_defs and not page_symbol_defs:
         return
 
     qwen_marker_pages = _kwargs.get("qwen_marker_pages") or _kwargs.get("marker_locator_pages")
     _recover_direct_page_footnote_qwen_refs(
-        blocks,
+        typed_blocks,
         context,
         page_defs,
         page_symbol_defs,
         qwen_marker_pages=qwen_marker_pages,
     )
     _recover_direct_scoped_endnote_qwen_refs(
-        blocks,
+        typed_blocks,
         context,
         qwen_marker_pages=qwen_marker_pages,
     )

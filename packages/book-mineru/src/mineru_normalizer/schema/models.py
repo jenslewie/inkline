@@ -1,7 +1,5 @@
 """Canonical data models. Defines RawBlock, BBox, LayoutStats, IdFactory, NoteRef, and the canonical_block() factory. These are the core data types used throughout the entire pipeline."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, NotRequired, Optional, TypedDict
 
@@ -20,14 +18,13 @@ class CanonicalSource(TypedDict):
     pages: NotRequired[List[int]]
 
 
-class CanonicalBlock(TypedDict, total=False):
+class CanonicalBlock(TypedDict):
     """TypedDict for the canonical block dict produced by ``canonical_block()``.
 
-    All keys except those marked ``NotRequired`` in ``CanonicalSource`` are
-    always present when the block is created by ``canonical_block()``.  The
-    ``total=False`` setting allows downstream code to safely read optional
-    keys like ``level`` without triggering ``KeyError`` — matching the
-    runtime pattern where many blocks lack ``level``.
+    ``block_id``, ``type``, ``text``, ``source``, and ``attrs`` are always
+    present when the block is created by ``canonical_block()``.  ``level`` is
+    genuinely optional — many blocks lack it — and is marked ``NotRequired``
+    so the key itself may be absent, while all other keys must be present.
 
     NOTE: ``Dict[str, Any]`` is still used for ``attrs`` and for parameters
     that may hold API responses, evidence dicts, or inline run dicts — only
@@ -38,7 +35,7 @@ class CanonicalBlock(TypedDict, total=False):
     text: str
     source: CanonicalSource
     attrs: Dict[str, Any]
-    level: int
+    level: NotRequired[int]
 
 
 class NoteRefDict(TypedDict, total=False):

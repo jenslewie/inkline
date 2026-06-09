@@ -211,7 +211,7 @@ def _render_full_page(pdf_page: Any, image_path: Path, config: qwen_types.QwenMa
     pix.save(str(image_path))
 
 
-def _footnote_defs_match_blocks(defs: Sequence[Dict[str, Any]], blocks: Sequence[Dict[str, Any]]) -> bool:
+def _footnote_defs_match_blocks(defs: Sequence[Dict[str, Any]], blocks: Sequence[CanonicalBlock]) -> bool:
     return all(_footnote_def_matches_block(item, block) for item, block in zip(defs, blocks))
 
 
