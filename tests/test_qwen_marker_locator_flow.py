@@ -37,7 +37,7 @@ def test_marker_locator_page_and_block_dpi_config() -> None:
         marker_locator_block_dpi=None,
     )
 
-    assert _marker_locator_page_dpi(default_args) == 300
+    assert _marker_locator_page_dpi(default_args) == 150
     assert _marker_locator_block_dpi(default_args) == 200
 
     legacy_args = Namespace(marker_locator_dpi=250, marker_locator_page_dpi=None, marker_locator_block_dpi=None)

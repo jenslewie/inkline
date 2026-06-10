@@ -41,7 +41,8 @@ uv run inkline rag chunk data/outputs/sample/canonical.json --output data/output
 ```
 
 MinerU ingestion keeps Qwen visual marker repair disabled by default. Enable it
-with `--marker-locator-repair`; it uses `qwen3.5:9b` at 300 DPI.
+with `--marker-locator-repair`; it uses `qwen3.6:35b-a3b` at 150 DPI for full
+pages and 200 DPI for paragraph-block retries.
 
 Parser-specific dependencies and repair logic stay inside parser adapters. A future
 PaddleOCR integration should live in `inkline-parser-paddle` and implement the

@@ -166,7 +166,7 @@ def build_canonical(
                     "qwen_marker_locator": {
                         "enabled": marker_locator_enabled,
                         "repair_enabled": marker_locator_enabled,
-                        "model": getattr(args, "marker_locator_model", "qwen3.5:9b"),
+                        "model": getattr(args, "marker_locator_model", "qwen3.6:35b-a3b"),
                         "keep_alive": getattr(args, "marker_locator_keep_alive", "2h"),
                         "body_mode": getattr(args, "marker_locator_body_mode", "page_then_block"),
                         "page_dpi": _marker_locator_page_dpi(args),
@@ -352,7 +352,7 @@ def _qwen_marker_locator_config(args: argparse.Namespace) -> QwenMarkerLocatorCo
     return QwenMarkerLocatorConfig(
         source_pdf=Path(source_pdf),
         artifact_dir=_qwen_marker_locator_artifact_dir(args),
-        model=getattr(args, "marker_locator_model", "qwen3.5:9b"),
+        model=getattr(args, "marker_locator_model", "qwen3.6:35b-a3b"),
         api_url=getattr(args, "marker_locator_api_url", "http://127.0.0.1:11434/api/chat"),
         keep_alive=str(getattr(args, "marker_locator_keep_alive", "2h")),
         dpi=_marker_locator_page_dpi(args),
@@ -372,7 +372,7 @@ def _marker_locator_page_dpi(args: argparse.Namespace) -> int:
     legacy = getattr(args, "marker_locator_dpi", None)
     if legacy is not None:
         return int(legacy)
-    return 300
+    return 150
 
 
 def _marker_locator_block_dpi(args: argparse.Namespace) -> int:

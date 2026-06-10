@@ -39,7 +39,7 @@ class MinerUParser:
         backend = str(request.options.get("backend", self.backend))
         method = str(request.options.get("method", self.method))
         marker_locator_repair = bool(request.options.get("marker_locator_repair", False))
-        marker_locator_page_dpi = int(request.options.get("marker_locator_page_dpi", 300))
+        marker_locator_page_dpi = int(request.options.get("marker_locator_page_dpi", 150))
         document = ingest_pdf_with_mineru(
             request.input_path,
             backend=backend,
@@ -70,7 +70,7 @@ def normalize_mineru_outputs(
     mineru_vl_utils_version: str | None = None,
     vlm_model: dict[str, Any] | None = None,
     marker_locator_repair: bool = False,
-    marker_locator_page_dpi: int = 300,
+    marker_locator_page_dpi: int = 150,
 ) -> dict[str, Any]:
     """Run the MinerU normalization pipeline programmatically.
 
@@ -96,7 +96,7 @@ def normalize_mineru_outputs(
         language=language,
         marker_locator_repair=marker_locator_repair,
         marker_locator_artifact_dir=None,
-        marker_locator_model="qwen3.5:9b",
+        marker_locator_model="qwen3.6:35b-a3b",
         marker_locator_api_url="http://127.0.0.1:11434/api/chat",
         marker_locator_keep_alive="2h",
         marker_locator_dpi=None,
@@ -135,7 +135,7 @@ def ingest_pdf_with_mineru(
     output: str | Path,
     language: str = "zh-CN",
     marker_locator_repair: bool = False,
-    marker_locator_page_dpi: int = 300,
+    marker_locator_page_dpi: int = 150,
 ) -> dict[str, Any]:
     if engine != "mineru":
         raise ValueError(f"Unsupported PDF engine: {engine}")

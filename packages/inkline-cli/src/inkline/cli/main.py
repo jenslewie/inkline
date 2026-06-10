@@ -35,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_pdf.add_argument(
         "--marker-locator-page-dpi",
         type=int,
-        default=300,
+        default=150,
         help="DPI for Qwen full-page marker location.",
     )
     ingest_pdf.add_argument("--output", required=True)
