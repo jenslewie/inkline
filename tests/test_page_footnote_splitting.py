@@ -73,7 +73,7 @@ def test_definition_gap_splits_only_at_later_marker_boundary() -> None:
         "1 第一条首行\n第一条续行",
         "2 第二条首行\n第二条续行",
     ]
-    assert blocks[1]["attrs"]["split_reason"] == "page_footnote_definition_gap"
+    assert blocks[1]["attrs"]["split_reason"] == "page_footnote_explicit_line_marker"
 
 
 def test_definition_gap_splits_embedded_marker_after_sentence_boundary() -> None:
@@ -112,3 +112,22 @@ def test_embedded_citation_number_is_not_used_as_split_boundary() -> None:
     split_page_footnote_blocks(blocks)
 
     assert [block["block_id"] for block in blocks] == ["b_body", "b_note"]
+
+
+def test_later_explicit_line_marker_splits_without_definition_gap() -> None:
+    blocks = [
+        _body("b_body", 277, ["1"]),
+        _footnote(
+            "b_note",
+            277,
+            "无可见编号的第一条。\n1 有明确编号的第二条。",
+        ),
+    ]
+
+    split_page_footnote_blocks(blocks)
+
+    assert [block["text"] for block in blocks[1:]] == [
+        "无可见编号的第一条。",
+        "1 有明确编号的第二条。",
+    ]
+    assert blocks[1]["attrs"]["split_reason"] == "page_footnote_explicit_line_marker"

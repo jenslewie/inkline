@@ -289,6 +289,22 @@ def test_problem_page_plan_keeps_scoped_endnote_body_candidates() -> None:
     assert id(blocks[2]) in plan.body_candidate_block_ids
 
 
+def test_problem_page_plan_reviews_two_line_footnote_with_unmarked_second_line() -> None:
+    blocks = [
+        {
+            "block_id": "b_note",
+            "type": "footnote",
+            "text": "1 第一条脚注。\n第二条没有可见 marker。",
+            "source": {"page": 22, "bbox": [100, 800, 900, 900]},
+            "attrs": {"role": "page_footnote"},
+        }
+    ]
+
+    plan = _problem_page_plan(blocks)
+
+    assert plan.footnote_pages == {22}
+
+
 def test_complete_cache_hit_does_not_raise_unboundlocalerror(monkeypatch, tmp_path: Path) -> None:
     """Regression test: when cached evidence fully covers both footnote and body
     refs, the conditional branch is skipped and `item` must come from

@@ -32,7 +32,7 @@ def _problem_page_plan(blocks: List[CanonicalBlock]) -> _ProblemPagePlan:
     body_candidate_block_ids: Set[int] = set()
     for page, footnotes in footnotes_by_page.items():
         markers = [leading_note_marker(str(block.get("text") or ""), include_superscript=True) for block in footnotes]
-        if any(marker is None for marker in markers):
+        if any(marker is None for marker in markers) or any(_needs_footnote_definition_review(block) for block in footnotes):
             footnote_pages.add(page)
         defs = {marker for marker in markers if marker}
         refs = {str(marker) for _idx, _block, marker in refs_by_page.get(page, [])}
@@ -73,6 +73,19 @@ def _footnote_sort_key(block: CanonicalBlock) -> tuple[float, float, str]:
     y = float(bbox[1]) if len(bbox) >= 2 else 0.0
     x = float(bbox[0]) if len(bbox) >= 1 else 0.0
     return (y, x, str(block.get("id") or block.get("block_id") or ""))
+
+
+def _needs_footnote_definition_review(block: CanonicalBlock) -> bool:
+    lines = [
+        normalize_ws(line)
+        for line in str(block.get("text") or "").splitlines()
+        if normalize_ws(line)
+    ]
+    return (
+        len(lines) == 2
+        and leading_note_marker(lines[0], include_superscript=True) is not None
+        and leading_note_marker(lines[1], include_superscript=True) is None
+    )
 
 
 def _page_footnote_markers_by_page(blocks: List[CanonicalBlock]) -> Dict[int, List[str]]:

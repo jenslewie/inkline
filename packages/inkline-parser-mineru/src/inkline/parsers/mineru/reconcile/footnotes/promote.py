@@ -34,6 +34,18 @@ def split_page_footnote_blocks(blocks: List[Dict[str, Any]]) -> None:
             continue
         page = _block_page(blk)
         deficit = deficits.get(page, 0) if page is not None else 0
+        explicit_parts = _split_at_explicit_line_markers(str(blk.get("text", "")))
+        if len(explicit_parts) > 1:
+            split_blocks = _make_split_footnotes(
+                blk,
+                explicit_parts,
+                reason="page_footnote_explicit_line_marker",
+            )
+            blocks[i:i + 1] = split_blocks
+            if page is not None:
+                deficits[page] = max(0, deficit - (len(explicit_parts) - 1))
+            i += len(split_blocks)
+            continue
         if deficit <= 0:
             i += 1
             continue
@@ -179,6 +191,22 @@ def _footnote_lines(text: str) -> List[str]:
     return [normalize_ws(line) for line in str(text or "").splitlines() if normalize_ws(line)]
 
 
+def _split_at_explicit_line_markers(text: str) -> List[str]:
+    lines = _footnote_lines(text)
+    boundaries = [
+        index
+        for index, line in enumerate(lines[1:], 1)
+        if _leading_note_marker(line) is not None
+    ]
+    if not boundaries:
+        return [text]
+    cuts = [0, *boundaries, len(lines)]
+    return [
+        "\n".join(lines[cuts[index] : cuts[index + 1]])
+        for index in range(len(cuts) - 1)
+    ]
+
+
 def _split_footnote_text(
     text: str,
     expected_markers: List[str],
@@ -288,7 +316,12 @@ def _page_note_ref_markers_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, Li
     return markers
 
 
-def _make_split_footnotes(blk: Dict[str, Any], parts: List[str]) -> List[Dict[str, Any]]:
+def _make_split_footnotes(
+    blk: Dict[str, Any],
+    parts: List[str],
+    *,
+    reason: str = "page_footnote_definition_gap",
+) -> List[Dict[str, Any]]:
     bbox = _bbox(blk)
     boxes = _split_bbox_vertically(bbox, len(parts))
     out: List[Dict[str, Any]] = []
@@ -304,7 +337,7 @@ def _make_split_footnotes(blk: Dict[str, Any], parts: List[str]) -> List[Dict[st
         attrs["split_from"] = split_from
         attrs["split_index"] = idx + 1
         attrs["split_count"] = len(parts)
-        attrs["split_reason"] = "page_footnote_definition_gap"
+        attrs["split_reason"] = reason
         out.append(item)
     return out
 
