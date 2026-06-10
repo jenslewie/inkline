@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from ...normalize.builders import union_bbox
 from ...extraction.text import normalize_ws
@@ -69,8 +69,8 @@ def _merge_same_page_unmarked_footnotes(blocks: List[Dict[str, Any]]) -> None:
             cur.get("type") == "footnote"
             and nxt.get("type") == "footnote"
             and _block_page(cur) == _block_page(nxt)
-            and _leading_note_marker(nxt.get("text", "")) is None
-            and (_leading_note_marker(cur.get("text", "")) is not None or _has_next_page_continuation(cur) or _has_previous_page_continuation(cur))
+            and _footnote_marker(nxt) is None
+            and (_footnote_marker(cur) is not None or _has_next_page_continuation(cur) or _has_previous_page_continuation(cur))
             and _is_footnote_continuation_layout(cur, nxt)
         ):
             _merge_footnote_pair(cur, nxt, "same_page_unmarked_footnote_continuation")
@@ -101,7 +101,7 @@ def _merge_explicit_cross_page_footnotes(blocks: List[Dict[str, Any]]) -> None:
                     j < len(blocks)
                     and blocks[j].get("type") == "footnote"
                     and _block_page(blocks[j]) == np
-                    and _leading_note_marker(blocks[j].get("text", "")) is None
+                    and _footnote_marker(blocks[j]) is None
                     and _is_footnote_continuation_layout(previous_fragment, blocks[j])
                 ):
                     previous_fragment = blocks[j]
@@ -126,6 +126,11 @@ def _has_next_page_continuation(blk: Dict[str, Any]) -> bool:
 
 def _has_previous_page_continuation(blk: Dict[str, Any]) -> bool:
     return _has_previous_page_marker(blk.get("text", "")) or bool((blk.get("attrs") or {}).get("continues_from_previous_page"))
+
+
+def _footnote_marker(blk: Dict[str, Any]) -> str | None:
+    marker = str((blk.get("attrs") or {}).get("note_marker") or "").strip()
+    return marker or _leading_note_marker(blk.get("text", ""))
 
 
 def _clean_continuation_markers(text: str) -> str:

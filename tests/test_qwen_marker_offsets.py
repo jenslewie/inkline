@@ -71,7 +71,7 @@ def test_qwen_does_not_override_existing_equation_inline_run() -> None:
             char_index=10,
             source="qwen_marker_locator",
             confidence="high",
-            evidence={"inline_position_source": "qwen_marker_locator"},
+            evidence={},
         ),
     )
 
@@ -125,14 +125,74 @@ def test_qwen_overrides_invalid_existing_equation_inline_run() -> None:
             char_index=2,
             source="qwen_marker_locator",
             confidence="high",
-            evidence={"inline_position_source": "qwen_marker_locator"},
+            evidence={},
         ),
     )
 
     assert changed is True
     ref = block["attrs"]["note_refs"][0]
-    assert ref["inline_position_source"] == "qwen_marker_locator"
-    assert ref["inline_offset"] == 2
+    assert "inline_offset" not in ref
+    assert block["attrs"]["inline_runs"] == [
+        {"type": "text", "text": "正确"},
+        {
+            "type": "note_ref",
+            "marker": "*",
+            "source": "equation_inline",
+            "source_page": 1,
+            "raw_marker": "^{*}",
+            "target_note_id": "note_1",
+        },
+        {"type": "text", "text": "正文。"},
+    ]
+
+
+def test_qwen_insertion_preserves_other_mineru_inline_runs() -> None:
+    block = {
+        "block_id": "b1",
+        "type": "paragraph",
+        "text": "甲 乙 丙",
+        "source": {"page": 1},
+        "attrs": {
+            "note_refs": [
+                {
+                    "marker": "*",
+                    "source": "equation_inline",
+                    "source_page": 1,
+                    "raw_marker": "^{*}",
+                },
+                {
+                    "marker": "1",
+                    "source": "qwen_marker_locator",
+                    "source_page": 1,
+                    "raw_marker": "^{1}",
+                },
+            ],
+            "inline_runs": [
+                {"type": "text", "text": "甲  "},
+                {
+                    "type": "note_ref",
+                    "marker": "*",
+                    "source": "equation_inline",
+                    "source_page": 1,
+                    "raw_marker": "^{*}",
+                },
+                {"type": "text", "text": " 乙 丙"},
+            ],
+        },
+    }
+
+    changed = _update_existing_qwen_ref_inline_location(
+        block,
+        "1",
+        1,
+        {"marker": "1", "before_text": "乙", "after_text": "丙", "quote": "乙1丙"},
+        _InlineMarkerLocation(char_index=3, source="qwen_marker_locator", confidence="high", evidence={}),
+    )
+
+    assert changed is True
+    runs = block["attrs"]["inline_runs"]
+    assert [run.get("marker") for run in runs if run.get("type") == "note_ref"] == ["*", "1"]
+    assert "".join(run.get("text", "") for run in runs if run.get("type") == "text") == "甲   乙 丙"
 
 
 def test_qwen_symbol_marker_before_omitted_comma_with_normalized_spacing() -> None:
@@ -385,4 +445,4 @@ def test_qwen_recovers_scoped_chapter_endnote_ref() -> None:
     assert refs[0]["source"] == "qwen_marker_locator"
     assert refs[0]["target_block_id"] == "b_note_1"
     assert refs[0]["note_strategy"] == "chapter_endnote"
-    assert refs[0]["inline_position"] == "exact"
+    assert blocks[1]["attrs"]["inline_runs"][1]["type"] == "note_ref"

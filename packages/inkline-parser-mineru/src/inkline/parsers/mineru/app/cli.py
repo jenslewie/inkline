@@ -5,15 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, List
 
 from inkline.canonical import validate_document
 
 from ..analysis.note_gap_report import build_note_ref_gap_report, note_ref_gap_report_path
 from ..normalize.assets import materialize_image_assets
 from ..normalize.core import build_canonical
-from ..extraction.io import flatten_content_list_legacy, flatten_content_list_v2, load_json, page_sizes_from_middle
-from ..schema.models import RawBlock
+from ..extraction.io import load_inputs
 from ..reconcile import resolve_source_pdf_path
 from ..bridge import find_mineru_run_version_info, get_mineru_version_info
 
@@ -29,15 +27,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--marker-locator-repair",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Use local Qwen visual marker locator to repair targeted problem pages (enabled by default)",
+        default=False,
+        help="Use local Qwen visual marker locator to repair targeted problem pages (disabled by default)",
     )
     p.add_argument("--marker-locator-artifact-dir", help="Directory for rendered Qwen marker locator pages and evidence JSON; defaults next to the output file")
-    p.add_argument("--marker-locator-model", default="qwen3.6:35b-a3b", help="Local Ollama visual model name for marker location")
+    p.add_argument("--marker-locator-model", default="qwen3.5:9b", help="Local Ollama visual model name for marker location")
     p.add_argument("--marker-locator-api-url", default="http://127.0.0.1:11434/api/chat", help="Local Ollama chat endpoint for marker location")
     p.add_argument("--marker-locator-keep-alive", default="2h", help="Ollama keep_alive value for Qwen marker locator requests")
     p.add_argument("--marker-locator-dpi", type=int, default=None, help="Deprecated shorthand that sets both page and block DPI for Qwen marker location")
-    p.add_argument("--marker-locator-page-dpi", type=int, default=150, help="DPI for Qwen full-page body-ref marker location")
+    p.add_argument("--marker-locator-page-dpi", type=int, default=300, help="DPI for Qwen full-page body-ref marker location")
     p.add_argument("--marker-locator-block-dpi", type=int, default=200, help="DPI for Qwen paragraph-block retry marker location")
     p.add_argument("--marker-locator-max-megapixels", type=float, default=0.0, help="Maximum megapixels for one Qwen marker locator image; 0 disables the limit")
     p.add_argument(
@@ -75,22 +73,7 @@ def main() -> None:
     args.mineru_version = version_info.get("mineru_version")
     args.mineru_vl_utils_version = version_info.get("mineru_vl_utils_version")
     args.vlm_model = version_info.get("vlm_model")
-    middle = load_json(args.middle)
-    page_sizes = page_sizes_from_middle(middle)
-
-    pages: Dict[int, List[RawBlock]]
-    if args.content_list_v2:
-        content_v2 = load_json(args.content_list_v2)
-        if not isinstance(content_v2, list):
-            raise ValueError("content_list_v2 must be a list of page item lists")
-        pages = flatten_content_list_v2(content_v2)
-    elif args.content_list:
-        content = load_json(args.content_list)
-        if not isinstance(content, list):
-            raise ValueError("content_list must be a list")
-        pages = flatten_content_list_legacy(content)
-    else:
-        raise SystemExit("Either --content-list-v2 or --content-list is required")
+    pages, page_sizes = load_inputs(args)
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)

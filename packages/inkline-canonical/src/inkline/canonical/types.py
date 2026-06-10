@@ -25,10 +25,6 @@ class NoteRef(TypedDict, total=False):
     target_note_id: str
     target_block_id: str
     raw_marker: str
-    inline_position: str
-    inline_position_source: str
-    inline_position_confidence: str
-    inline_offset: int
     confidence: str
     recovery_reason: str
     evidence: dict[str, Any]

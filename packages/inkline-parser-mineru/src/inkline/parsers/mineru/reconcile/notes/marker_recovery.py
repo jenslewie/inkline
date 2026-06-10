@@ -17,8 +17,9 @@ from .keys import leading_note_marker
 from .marker_inline import (
     _InlineMarkerLocation,
     _append_note_ref,
+    _inline_note_run_char_index,
+    _insert_inline_note_run,
     _note_refs,
-    _rebuild_inline_note_runs_from_exact_refs,
 )
 from .marker_location import (
     _existing_ref_marker_on_page,
@@ -192,7 +193,6 @@ def _recover_direct_scoped_endnote_qwen_refs(
     if not defs_by_scope:
         return
     existing_by_scope = _existing_body_ref_markers_by_scope(blocks, context)
-    block_index = {id(block): index for index, block in enumerate(blocks)}
     located_items: List[Tuple[CanonicalBlock, str, int, Dict[str, Any], _InlineMarkerLocation, Optional[str]]] = []
     for evidence in _qwen_marker_page_items(qwen_marker_pages):
         page = evidence.get("page")
@@ -244,8 +244,6 @@ def _recover_direct_scoped_endnote_qwen_refs(
             inline_location=inline_location,
         )
         existing_by_scope.setdefault(scope, set()).add(marker)
-        if id(target) in block_index:
-            _rebuild_inline_note_runs_from_exact_refs(target)
 
 
 def _scoped_endnote_definition_markers(
@@ -314,45 +312,22 @@ def _update_existing_qwen_ref_inline_location(
             continue
         if _has_valid_existing_structured_inline_run(block, ref):
             continue
-        if (
-            ref.get("inline_position") == "exact"
-            and ref.get("inline_position_source") == "canonical_visible_marker"
-        ):
-            continue
         visible_location = _visible_raw_marker_inline_location(block, ref)
         if visible_location is not None:
-            ref["inline_position"] = "exact"
-            ref["inline_position_source"] = visible_location.source
-            ref["inline_position_confidence"] = visible_location.confidence
-            ref["inline_offset"] = visible_location.char_index
             ref.setdefault("evidence", {}).update(visible_location.evidence)
+            _insert_inline_note_run(block, ref, visible_location.char_index)
             changed = True
             continue
         verified_location = _user_verified_inline_location(block, ref)
         if verified_location is not None and verified_location.char_index != inline_location.char_index:
-            if (
-                ref.get("inline_position") == "exact"
-                and ref.get("inline_offset") == verified_location.char_index
-                and ref.get("inline_position_source") == verified_location.source
-            ):
+            if _inline_note_run_char_index(block, ref) == verified_location.char_index:
                 continue
-            ref["inline_position"] = "exact"
-            ref["inline_position_source"] = verified_location.source
-            ref["inline_position_confidence"] = verified_location.confidence
-            ref["inline_offset"] = verified_location.char_index
             ref.setdefault("evidence", {}).update(verified_location.evidence)
+            _insert_inline_note_run(block, ref, verified_location.char_index)
             changed = True
             continue
-        if (
-            ref.get("inline_position") == "exact"
-            and ref.get("inline_offset") == inline_location.char_index
-            and ref.get("inline_position_source") == "qwen_marker_locator"
-        ):
+        if _inline_note_run_char_index(block, ref) == inline_location.char_index:
             continue
-        ref["inline_position"] = "exact"
-        ref["inline_position_source"] = "qwen_marker_locator"
-        ref["inline_position_confidence"] = str(item.get("confidence") or inline_location.confidence)
-        ref["inline_offset"] = inline_location.char_index
         evidence = ref.setdefault("evidence", {})
         evidence.update(
             {
@@ -362,9 +337,8 @@ def _update_existing_qwen_ref_inline_location(
                 **inline_location.evidence,
             }
         )
+        _insert_inline_note_run(block, ref, inline_location.char_index)
         changed = True
-    if changed:
-        _rebuild_inline_note_runs_from_exact_refs(block)
     return changed
 
 
@@ -429,7 +403,6 @@ def _visible_raw_marker_inline_location(block: CanonicalBlock, ref: Dict[str, An
         confidence="high",
         evidence={
             "visible_raw_marker": raw_marker,
-            "visible_raw_marker_offset": offset,
             "visible_raw_marker_stripped": True,
         },
     )
@@ -452,10 +425,7 @@ def _user_verified_inline_location(block: CanonicalBlock, ref: Dict[str, Any]) -
         char_index=offset,
         source="manual_correction",
         confidence="high",
-        evidence={
-            "manual_position_preserved": True,
-            "manual_position_preserved_from_qwen_offset": ref.get("inline_offset"),
-        },
+        evidence={"manual_position_preserved": True},
     )
 
 
@@ -474,24 +444,13 @@ def _align_symbol_refs_from_qwen_footnote_context(
         marker = normalize_note_marker(ref.get("marker", ""))
         if not marker.startswith("*") or ref.get("source_page") != page:
             continue
-        if (
-            ref.get("inline_position") == "exact"
-            and ref.get("inline_offset") == inline_location.char_index
-            and ref.get("inline_position_source") == "qwen_marker_locator_symbol_context"
-        ):
-            continue
         note_block = blocks_by_id.get(str(ref.get("target_block_id") or ""))
         if not note_block or not _qwen_after_text_matches_note_definition(after, note_block):
             continue
-        ref["inline_position"] = "exact"
-        ref["inline_position_source"] = "qwen_marker_locator_symbol_context"
-        ref["inline_position_confidence"] = inline_location.confidence
-        ref["inline_offset"] = inline_location.char_index
         ref.setdefault("evidence", {})["qwen_symbol_context_after_text"] = after
-        changed = True
-    split_changed = _split_same_offset_symbol_numeric_refs_around_terminal_punctuation(block, page, inline_location.char_index)
-    if changed or split_changed:
-        _rebuild_inline_note_runs_from_exact_refs(block)
+        if _inline_note_run_char_index(block, ref) != inline_location.char_index:
+            _insert_inline_note_run(block, ref, inline_location.char_index)
+    _split_adjacent_symbol_numeric_refs_around_terminal_punctuation(block, page, inline_location.char_index)
 
 
 def _qwen_after_text_matches_note_definition(after: str, note_block: CanonicalBlock) -> bool:
@@ -505,7 +464,7 @@ def _qwen_after_text_matches_note_definition(after: str, note_block: CanonicalBl
     return note_text.startswith(after) or _qwen_fold_bracket_width(note_text).startswith(_qwen_fold_bracket_width(after))
 
 
-def _split_same_offset_symbol_numeric_refs_around_terminal_punctuation(block: CanonicalBlock, page: int, offset: int) -> bool:
+def _split_adjacent_symbol_numeric_refs_around_terminal_punctuation(block: CanonicalBlock, page: int, offset: int) -> bool:
     text = str(block.get("text") or "")
     if offset < 0 or offset >= len(text) or text[offset] not in TERMINAL_PUNCTUATION:
         return False
@@ -513,8 +472,7 @@ def _split_same_offset_symbol_numeric_refs_around_terminal_punctuation(block: Ca
         ref
         for ref in _note_refs(block)
         if ref.get("source_page") == page
-        and ref.get("inline_position") == "exact"
-        and ref.get("inline_offset") == offset
+        and _inline_note_run_char_index(block, ref) == offset
     ]
     if not any(normalize_note_marker(ref.get("marker", "")).startswith("*") for ref in refs):
         return False
@@ -525,9 +483,8 @@ def _split_same_offset_symbol_numeric_refs_around_terminal_punctuation(block: Ca
     if adjusted_offset == offset:
         return False
     for ref in numeric_refs:
-        ref["inline_offset"] = adjusted_offset
-        ref["inline_position_source"] = ref.get("inline_position_source") or "qwen_marker_locator"
-        ref.setdefault("evidence", {})["same_offset_symbol_numeric_split_from"] = offset
+        ref.setdefault("evidence", {})["symbol_numeric_split_at_punctuation"] = True
+        _insert_inline_note_run(block, ref, adjusted_offset)
     return True
 
 

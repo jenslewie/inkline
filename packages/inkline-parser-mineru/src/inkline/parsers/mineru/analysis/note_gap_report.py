@@ -32,7 +32,6 @@ def build_note_ref_gap_report(document: Dict[str, Any], *, canonical_path: Optio
     ]
     missing_notes = [entry for entry in missing_notes if entry is not None]
     unresolved_refs = _unresolved_body_note_refs(blocks)
-    unknown_inline_refs = _unknown_inline_position_refs(blocks)
     independent_notes = [block for block in blocks if _is_independent_note(block)]
     referenced_notes = [block for block in independent_notes if _has_body_ref(block, referenced_note_ids)]
 
@@ -50,12 +49,10 @@ def build_note_ref_gap_report(document: Dict[str, Any], *, canonical_path: Optio
             "missing_body_ref_notes_with_marker": sum(1 for item in missing_notes if item.get("note_marker")),
             "missing_body_ref_notes_without_marker": sum(1 for item in missing_notes if not item.get("note_marker")),
             "unresolved_body_note_refs": len(unresolved_refs),
-            "unknown_inline_position_refs": len(unknown_inline_refs),
         },
         "missing_by_page": _missing_by_page(missing_notes),
         "missing_body_ref_notes": missing_notes,
         "unresolved_body_note_refs": unresolved_refs,
-        "unknown_inline_position_refs": unknown_inline_refs,
     }
     return report
 
@@ -86,11 +83,7 @@ def _referenced_note_ids(blocks: List[Dict[str, Any]]) -> set[str]:
     for block in blocks:
         if _is_independent_note(block):
             continue
-        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
-        refs = attrs.get("note_refs")
-        if not isinstance(refs, list):
-            continue
-        for ref in refs:
+        for ref in _body_note_refs(block):
             if isinstance(ref, dict) and ref.get("target_note_id"):
                 note_ids.add(str(ref["target_note_id"]))
     return note_ids
@@ -153,30 +146,25 @@ def _unresolved_body_note_refs(blocks: List[Dict[str, Any]]) -> List[Dict[str, A
     for block in blocks:
         if _is_independent_note(block):
             continue
-        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
-        refs = attrs.get("note_refs")
-        if not isinstance(refs, list):
-            continue
-        for ref in refs:
+        for ref in _body_note_refs(block):
             if not isinstance(ref, dict) or ref.get("target_note_id"):
                 continue
             out.append(_body_ref_entry(block, ref))
     return out
 
 
-def _unknown_inline_position_refs(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for block in blocks:
-        if _is_independent_note(block):
-            continue
-        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
-        refs = attrs.get("note_refs")
-        if not isinstance(refs, list):
-            continue
-        for ref in refs:
-            if isinstance(ref, dict) and ref.get("inline_position") == "unknown":
-                out.append(_body_ref_entry(block, ref))
-    return out
+def _body_note_refs(block: Dict[str, Any]) -> List[Dict[str, Any]]:
+    attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+    runs = attrs.get("inline_runs")
+    inline_refs = [
+        run
+        for run in runs
+        if isinstance(run, dict) and run.get("type") == "note_ref"
+    ] if isinstance(runs, list) else []
+    if inline_refs:
+        return inline_refs
+    refs = attrs.get("note_refs")
+    return [ref for ref in refs if isinstance(ref, dict)] if isinstance(refs, list) else []
 
 
 def _body_ref_entry(block: Dict[str, Any], ref: Dict[str, Any]) -> Dict[str, Any]:
@@ -191,8 +179,6 @@ def _body_ref_entry(block: Dict[str, Any], ref: Dict[str, Any]) -> Dict[str, Any
         "source_page": ref.get("source_page"),
         "target_note_id": ref.get("target_note_id"),
         "target_block_id": ref.get("target_block_id"),
-        "inline_position": ref.get("inline_position"),
-        "inline_position_source": ref.get("inline_position_source"),
         "text_preview": _preview(text),
     }
 

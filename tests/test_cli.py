@@ -43,25 +43,25 @@ def test_cli_accepts_parser_names_not_known_at_build_time():
     assert args.parser_name == "paddle"
 
 
-def test_cli_enables_qwen_marker_repair_at_150_dpi_by_default():
+def test_cli_disables_qwen_marker_repair_at_300_dpi_by_default():
     args = build_parser().parse_args(
         ["ingest", "pdf", "input.pdf", "--output", "canonical.json"]
     )
 
-    assert args.marker_locator_repair is True
-    assert args.marker_locator_page_dpi == 150
+    assert args.marker_locator_repair is False
+    assert args.marker_locator_page_dpi == 300
 
 
-def test_cli_can_disable_qwen_marker_repair():
+def test_cli_can_enable_qwen_marker_repair():
     args = build_parser().parse_args(
         [
             "ingest",
             "pdf",
             "input.pdf",
-            "--no-marker-locator-repair",
+            "--marker-locator-repair",
             "--output",
             "canonical.json",
         ]
     )
 
-    assert args.marker_locator_repair is False
+    assert args.marker_locator_repair is True

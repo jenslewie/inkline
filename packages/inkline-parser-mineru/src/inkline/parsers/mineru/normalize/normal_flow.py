@@ -83,17 +83,24 @@ def process_normal_flow(
             prev_major_type = "table_continuation"
             i += 1
             continue
-        if b.raw_type == "page_footnote" and block_text(b):
-            out.append(make_paragraph(ids, b, block_type="footnote", extra_attrs={"role": "page_footnote"}))
+        if b.raw_type in {"page_footnote", "ref_text"} and block_text(b):
+            footnote_attrs: Dict[str, Any] = {"role": "page_footnote"}
+            middle_markers = b.raw.get("_middle_page_inline_markers")
+            if isinstance(middle_markers, list) and middle_markers:
+                footnote_attrs["_middle_page_inline_markers"] = list(middle_markers)
+            out.append(make_paragraph(ids, b, block_type="footnote", extra_attrs=footnote_attrs))
             i += 1
             continue
         if b.raw_type == "list":
-            items = b.raw.get("content", {}).get("list_items", [])
+            content = b.raw.get("content", {})
+            items = content.get("list_items", [])
+            list_type = content.get("list_type")
             for li in items:
                 t, _ = extract_list_item_text(li)
                 if t:
                     pseudo = RawBlock(page=b.page, index=b.index, raw_type="list_item", text=t, bbox=b.bbox, raw=li)
-                    out.append(make_paragraph(ids, pseudo, block_type="list_item"))
+                    list_attrs = {"list_type": list_type} if list_type else None
+                    out.append(make_paragraph(ids, pseudo, block_type="list_item", extra_attrs=list_attrs))
             prev_major_type = "list"
             i += 1
             continue

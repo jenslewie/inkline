@@ -28,18 +28,19 @@ from typing import Any, Dict, List, Optional, Tuple
 from inkline.canonical import SCHEMA_VERSION
 
 from ..analysis.note_gap_report import build_note_ref_gap_report
-from ..extraction.text import normalize_note_marker
+from ..extraction.text import normalize_note_marker, normalize_ws
 from ..analysis.layout import infer_layout_stats
 from ..analysis.pdf_page_metrics import PdfPageCache
 from ..analysis.text_style import TextStyleAnalyzer
 from ..schema.models import IdFactory, RawBlock
-from .output_schema import normalize_display_blocks_for_layout_schema
+from .output_schema import normalize_display_blocks_for_layout_schema, remove_internal_note_ref_indexes
 from .page_processing import build_toc_from_blocks, extend_table_source_pages, process_page
 from ..reconcile import (
     merge_continuation_footnotes,
     merge_cross_page_paragraphs,
     promote_cross_page_footnote_continuation_paragraphs,
     promote_page_reference_list_footnotes,
+    recover_unmarked_page_footnote_markers,
     recover_missing_note_refs,
     reconcile_cjk_numbered_display_quotes,
     reconcile_display_quotes,
@@ -85,6 +86,7 @@ def build_canonical(
     reconcile_table_continuations(blocks)
     promote_page_reference_list_footnotes(blocks)
     split_page_footnote_blocks(blocks)
+    recover_unmarked_page_footnote_markers(blocks)
     promote_cross_page_footnote_continuation_paragraphs(blocks)
     merge_continuation_footnotes(blocks)
     merge_cross_page_paragraphs(blocks, args.source_pdf, layout, allow_missing_pdf_text=getattr(args, "allow_missing_pdf_text", False))
@@ -119,6 +121,7 @@ def build_canonical(
     reconcile_cjk_numbered_display_quotes(blocks, layout)
     reconcile_generic_display_quote_structures(blocks, layout)
     normalize_display_blocks_for_layout_schema(blocks)
+    remove_internal_note_ref_indexes(blocks)
 
     block_types = ["heading", "paragraph", "toc_item", "display_block", "figure", "caption", "table", "table_continuation", "list_item"]
     if any(b.get("type") == "footnote" for b in blocks):
@@ -163,7 +166,7 @@ def build_canonical(
                     "qwen_marker_locator": {
                         "enabled": marker_locator_enabled,
                         "repair_enabled": marker_locator_enabled,
-                        "model": getattr(args, "marker_locator_model", "qwen3.6:35b-a3b"),
+                        "model": getattr(args, "marker_locator_model", "qwen3.5:9b"),
                         "keep_alive": getattr(args, "marker_locator_keep_alive", "2h"),
                         "body_mode": getattr(args, "marker_locator_body_mode", "page_then_block"),
                         "page_dpi": _marker_locator_page_dpi(args),
@@ -284,12 +287,25 @@ def _missing_or_unreliable_body_ref_pages(blocks: List[Dict[str, Any]], *, qwen_
 
 
 def _has_reliable_inline_ref(block: Dict[str, Any], ref: Dict[str, Any]) -> bool:
-    if ref.get("inline_position") != "exact":
+    attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+    runs = attrs.get("inline_runs")
+    if not isinstance(runs, list):
         return False
-    offset = ref.get("inline_offset")
-    if not isinstance(offset, int):
+    reconstructed = "".join(
+        str(run.get("text") or "")
+        for run in runs
+        if isinstance(run, dict) and run.get("type") == "text"
+    )
+    if normalize_ws(reconstructed) != normalize_ws(str(block.get("text") or "")):
         return False
-    return 0 <= offset <= len(str(block.get("text") or ""))
+    marker = normalize_note_marker(ref.get("marker", ""))
+    return any(
+        isinstance(run, dict)
+        and run.get("type") == "note_ref"
+        and normalize_note_marker(run.get("marker", "")) == marker
+        and run.get("source_page") == ref.get("source_page")
+        for run in runs
+    )
 
 
 def _qwen_body_ref_markers_by_page(qwen_marker_pages: List[Any]) -> Dict[int, set[str]]:
@@ -336,7 +352,7 @@ def _qwen_marker_locator_config(args: argparse.Namespace) -> QwenMarkerLocatorCo
     return QwenMarkerLocatorConfig(
         source_pdf=Path(source_pdf),
         artifact_dir=_qwen_marker_locator_artifact_dir(args),
-        model=getattr(args, "marker_locator_model", "qwen3.6:35b-a3b"),
+        model=getattr(args, "marker_locator_model", "qwen3.5:9b"),
         api_url=getattr(args, "marker_locator_api_url", "http://127.0.0.1:11434/api/chat"),
         keep_alive=str(getattr(args, "marker_locator_keep_alive", "2h")),
         dpi=_marker_locator_page_dpi(args),
@@ -356,7 +372,7 @@ def _marker_locator_page_dpi(args: argparse.Namespace) -> int:
     legacy = getattr(args, "marker_locator_dpi", None)
     if legacy is not None:
         return int(legacy)
-    return 150
+    return 300
 
 
 def _marker_locator_block_dpi(args: argparse.Namespace) -> int:

@@ -108,7 +108,7 @@ class _TableContinuationDetector:
         right = blocks[candidate.right_idx]
         right_page = _block_page(right)
         right_bbox = _bbox(right)
-        if right_page != left_page + 1 or not right_bbox:
+        if right_page is None or right_page != left_page + 1 or not right_bbox:
             return None
         if not self._is_table_near_page_top(right_page, right_bbox):
             return None
@@ -176,7 +176,6 @@ def reconcile_table_continuations(blocks: List[Dict[str, Any]]) -> None:
             continue
         right_idx = match.right_idx
         marker_idxs = match.marker_idxs
-        skipped_footnote_idxs = match.skipped_footnote_idxs
         right = blocks[right_idx]
         right_page = _block_page(right)
         right_bbox = _bbox(right)
@@ -195,11 +194,6 @@ def reconcile_table_continuations(blocks: List[Dict[str, Any]]) -> None:
         for footnote in right_attrs.get("footnotes") or []:
             if footnote and footnote not in footnotes:
                 footnotes.append(footnote)
-        for idx in skipped_footnote_idxs:
-            footnote = blocks[idx]
-            text = normalize_ws(str(footnote.get("text", "")))
-            if text and text not in footnotes:
-                footnotes.append(text)
         left_attrs["footnotes"] = footnotes
         left_attrs["continued"] = True
         left_attrs["continuation_block_ids"] = [right.get("block_id")]
@@ -219,7 +213,7 @@ def reconcile_table_continuations(blocks: List[Dict[str, Any]]) -> None:
             spans.append({"page": left_page, "bbox": left_bbox, "block_id": left.get("block_id")})
         spans.append({"page": right_page, "bbox": right_bbox, "block_id": right.get("block_id")})
 
-        remove_idxs = sorted([right_idx, *marker_idxs, *skipped_footnote_idxs], reverse=True)
+        remove_idxs = sorted([right_idx, *marker_idxs], reverse=True)
         for idx in remove_idxs:
             del blocks[idx]
         i += 1

@@ -7,7 +7,13 @@ from .display_quotes import reconcile_display_quotes
 from .cjk import reconcile_cjk_numbered_display_quotes
 from .display import reconcile_generic_display_quote_structures
 from .figures import reconcile_figure_captions
-from .footnotes import merge_continuation_footnotes, promote_cross_page_footnote_continuation_paragraphs, promote_page_reference_list_footnotes, split_page_footnote_blocks
+from .footnotes import (
+    merge_continuation_footnotes,
+    promote_cross_page_footnote_continuation_paragraphs,
+    promote_page_reference_list_footnotes,
+    recover_unmarked_page_footnote_markers,
+    split_page_footnote_blocks,
+)
 from .notes import recover_missing_note_refs
 from .notes import resolve_note_links
 from .tables import reconcile_table_continuations
@@ -21,6 +27,7 @@ __all__ = [
     "reconcile_figure_captions",
     "reconcile_table_continuations",
     "promote_page_reference_list_footnotes",
+    "recover_unmarked_page_footnote_markers",
     "promote_cross_page_footnote_continuation_paragraphs",
     "merge_continuation_footnotes",
     "split_page_footnote_blocks",

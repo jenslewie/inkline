@@ -20,6 +20,7 @@ monkeypatching the definition module namespace works correctly.
 
 from __future__ import annotations
 
+from copy import deepcopy
 import time
 from dataclasses import replace
 from typing import Any, Callable, Dict, List, Sequence, cast
@@ -29,6 +30,7 @@ from . import qwen_evidence
 from . import qwen_page_plan
 from . import qwen_prompt
 from . import qwen_types
+from ...extraction.text import normalize_ws
 from ...schema.models import CanonicalBlock
 
 
@@ -187,8 +189,126 @@ def apply_qwen_footnote_markers(blocks: List[CanonicalBlock], evidence_pages: Se
         defs = [item for item in defs if item is not None]
         if not defs:
             continue
+        if len(defs) > len(page_blocks):
+            _split_merged_footnote_blocks(blocks, page, defs)
+            page_blocks = qwen_page_plan._page_footnotes_by_page(blocks).get(page, [])
         if len(defs) == len(page_blocks) and qwen_prompt._footnote_defs_match_blocks(defs, page_blocks):
             for block, item in zip(page_blocks, defs):
                 qwen_prompt._apply_qwen_footnote_marker(block, item["marker"], page, evidence=evidence)
             continue
         qwen_prompt._apply_unique_near_text_matches(page_blocks, defs, page, evidence)
+
+
+def _split_merged_footnote_blocks(
+    blocks: List[CanonicalBlock],
+    page: int,
+    defs: Sequence[Dict[str, Any]],
+) -> None:
+    page_blocks = qwen_page_plan._page_footnotes_by_page(blocks).get(page, [])
+    deficit = len(defs) - len(page_blocks)
+    if deficit <= 0:
+        return
+
+    for block in page_blocks:
+        parts = _footnote_parts_from_qwen_hints(str(block.get("text") or ""), defs, deficit + 1)
+        if len(parts) <= 1:
+            continue
+        block_index = next((index for index, item in enumerate(blocks) if item is block), None)
+        if block_index is None:
+            continue
+        split_blocks = _make_qwen_split_blocks(block, parts, blocks)
+        blocks[block_index : block_index + 1] = split_blocks
+        deficit -= len(split_blocks) - 1
+        if deficit <= 0:
+            return
+
+
+def _footnote_parts_from_qwen_hints(
+    text: str,
+    defs: Sequence[Dict[str, Any]],
+    max_parts: int,
+) -> List[str]:
+    lines = [normalize_ws(line) for line in text.splitlines() if normalize_ws(line)]
+    if len(lines) <= 1 or max_parts <= 1:
+        return [text]
+
+    boundaries: List[int] = []
+    for line_index, line in enumerate(lines[1:], 1):
+        if any(_near_text_starts_line(item.get("near_text"), line) for item in defs[1:]):
+            boundaries.append(line_index)
+    if not boundaries and max_parts == len(lines):
+        boundaries = list(range(1, len(lines)))
+    if not boundaries:
+        return [text]
+
+    boundaries = boundaries[: max_parts - 1]
+    cuts = [0, *boundaries, len(lines)]
+    return [
+        "\n".join(lines[cuts[index] : cuts[index + 1]])
+        for index in range(len(cuts) - 1)
+        if cuts[index] < cuts[index + 1]
+    ]
+
+
+def _near_text_starts_line(near_text: Any, line: str) -> bool:
+    needle = _compact_match_text(str(near_text or ""))
+    haystack = _compact_match_text(line)
+    if not needle or not haystack:
+        return False
+    prefix = needle[: min(16, len(needle))]
+    return len(prefix) >= 4 and prefix in haystack[: max(32, len(prefix) + 8)]
+
+
+def _compact_match_text(text: str) -> str:
+    return "".join(normalize_ws(text).lstrip("*＊0123456789.．。、)） ").split()).lower()
+
+
+def _make_qwen_split_blocks(
+    block: CanonicalBlock,
+    parts: Sequence[str],
+    all_blocks: Sequence[CanonicalBlock],
+) -> List[CanonicalBlock]:
+    source = block.get("source") or {}
+    bbox = source.get("bbox")
+    boxes = _split_bbox_vertically(bbox, len(parts))
+    split_from = str(block.get("block_id") or "")
+    existing_ids = {str(item.get("block_id") or "") for item in all_blocks}
+    out: List[CanonicalBlock] = []
+    for index, part in enumerate(parts):
+        item = deepcopy(block)
+        if index:
+            item["block_id"] = _unique_split_block_id(split_from, index + 1, existing_ids)
+            existing_ids.add(str(item["block_id"]))
+        item["text"] = part
+        item["source"]["bbox"] = boxes[index]
+        attrs = item.setdefault("attrs", {})
+        attrs.pop("note_id", None)
+        attrs.pop("referenced_by", None)
+        attrs.pop("note_marker", None)
+        attrs.pop("note_marker_source", None)
+        attrs["split_from"] = split_from
+        attrs["split_index"] = index + 1
+        attrs["split_count"] = len(parts)
+        attrs["split_reason"] = "qwen_footnote_definition_count"
+        out.append(item)
+    return out
+
+
+def _unique_split_block_id(base: str, suffix: int, existing_ids: set[str]) -> str:
+    candidate = f"{base}_{suffix}"
+    serial = suffix
+    while candidate in existing_ids:
+        serial += 1
+        candidate = f"{base}_{serial}"
+    return candidate
+
+
+def _split_bbox_vertically(bbox: Sequence[float] | None, count: int) -> List[List[float] | None]:
+    if not bbox or len(bbox) < 4:
+        return [None] * count
+    x0, y0, x1, y1 = [float(value) for value in bbox[:4]]
+    step = max(1.0, y1 - y0) / count
+    return [
+        [x0, y0 + step * index, x1, y1 if index == count - 1 else y0 + step * (index + 1)]
+        for index in range(count)
+    ]

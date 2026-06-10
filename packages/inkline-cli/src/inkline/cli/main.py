@@ -29,13 +29,13 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_pdf.add_argument(
         "--marker-locator-repair",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Use Qwen visual marker repair (enabled by default).",
+        default=False,
+        help="Use Qwen visual marker repair (disabled by default).",
     )
     ingest_pdf.add_argument(
         "--marker-locator-page-dpi",
         type=int,
-        default=150,
+        default=300,
         help="DPI for Qwen full-page marker location.",
     )
     ingest_pdf.add_argument("--output", required=True)

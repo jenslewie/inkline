@@ -78,3 +78,21 @@ def normalize_display_blocks_for_layout_schema(blocks: List[Dict[str, Any]]) -> 
         for key in INTERNAL_DISPLAY_ATTR_KEYS:
             attrs.pop(key, None)
         b["type"] = "display_block"
+
+
+def remove_internal_note_ref_indexes(blocks: List[Dict[str, Any]]) -> None:
+    """Remove pipeline-only note ref indexes from the public canonical output.
+
+    Inline note refs in ``inline_runs`` are the persisted representation. The
+    parallel ``note_refs`` lists exist only while the normalization pipeline is
+    resolving and reconciling links.
+    """
+    for block in blocks:
+        attrs = block.get("attrs")
+        if not isinstance(attrs, dict):
+            continue
+        attrs.pop("note_refs", None)
+        attrs.pop("_middle_page_inline_markers", None)
+        for item in attrs.get("items") or []:
+            if isinstance(item, dict):
+                item.pop("note_refs", None)

@@ -37,7 +37,7 @@ def test_marker_locator_page_and_block_dpi_config() -> None:
         marker_locator_block_dpi=None,
     )
 
-    assert _marker_locator_page_dpi(default_args) == 150
+    assert _marker_locator_page_dpi(default_args) == 300
     assert _marker_locator_block_dpi(default_args) == 200
 
     legacy_args = Namespace(marker_locator_dpi=250, marker_locator_page_dpi=None, marker_locator_block_dpi=None)
@@ -115,7 +115,7 @@ def test_page_then_block_retries_missing_pages_with_block_dpi(monkeypatch, tmp_p
     ]
 
 
-def test_missing_pages_include_resolved_refs_without_reliable_inline_position() -> None:
+def test_missing_pages_include_resolved_refs_without_inline_run() -> None:
     blocks = [
         {
             "block_id": "b_body",
@@ -157,15 +157,54 @@ def test_missing_pages_include_resolved_refs_without_reliable_inline_position() 
 
     assert _missing_or_unreliable_body_ref_pages(blocks, qwen_marker_pages=evidence) == [76]
 
-    blocks[0]["attrs"]["note_refs"][0].update(
+    blocks[0]["attrs"]["inline_runs"] = [
+        {"type": "text", "text": "正文里有一个"},
         {
-            "inline_position": "exact",
-            "inline_position_source": "qwen_marker_locator",
-            "inline_offset": 9,
-        }
-    )
+            "type": "note_ref",
+            "marker": "1",
+            "source": "equation_inline",
+            "source_page": 76,
+            "target_note_id": "note_1",
+        },
+        {"type": "text", "text": "脚注引用位置。"},
+    ]
 
     assert _missing_or_unreliable_body_ref_pages(blocks, qwen_marker_pages=evidence) == []
+
+
+def test_qwen_definition_hints_split_merged_middle_footnote() -> None:
+    blocks = [
+        {
+            "block_id": "b_note",
+            "type": "footnote",
+            "text": "1 Times of London, December 24, 1948.\nVia Appia, 古罗马时期的大路。",
+            "source": {"page": 22, "bbox": [100, 800, 900, 900]},
+            "attrs": {"raw_type": "page_footnote", "role": "page_footnote"},
+        }
+    ]
+    evidence = [
+        QwenMarkerPageEvidence(
+            page=22,
+            image="page_22.png",
+            crop_bbox_pdf=[],
+            dpi=150,
+            raw_json={},
+            footnote_defs=[
+                {"marker": "1", "near_text": "Times of London", "confidence": "medium"},
+                {"marker": "*", "near_text": "Via Appia", "confidence": "medium"},
+            ],
+        )
+    ]
+
+    qwen_marker_locator.apply_qwen_footnote_markers(blocks, evidence)
+
+    assert [block["block_id"] for block in blocks] == ["b_note", "b_note_2"]
+    assert [block["text"] for block in blocks] == [
+        "1 Times of London, December 24, 1948.",
+        "*Via Appia, 古罗马时期的大路。",
+    ]
+    assert [block["attrs"]["note_marker"] for block in blocks] == ["1", "*"]
+    assert blocks[1]["attrs"]["split_reason"] == "qwen_footnote_definition_count"
 
 
 def test_single_marker_retry_merges_missing_marker(monkeypatch, tmp_path: Path) -> None:

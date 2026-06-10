@@ -11,7 +11,6 @@ BBox = List[float]
 @dataclass
 class NoteRef:
     marker: str
-    position: str = "after_text"
     source: str = "inline"
     raw_marker: str = ""
 

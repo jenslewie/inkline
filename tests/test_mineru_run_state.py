@@ -61,9 +61,10 @@ def test_run_mineru_raw_writes_run_state(tmp_path, monkeypatch):
     assert state["started_at"]
     assert state["finished_at"]
     assert state["duration_seconds"] >= 0
-    assert not (output_dir / "mineru_local_config.json").exists()
-    assert "MINERU_MODEL_SOURCE" not in os.environ
-    assert "MINERU_TOOLS_CONFIG_JSON" not in os.environ
+    config_path = output_dir / "mineru_local_config.json"
+    assert config_path.exists()
+    assert os.environ["MINERU_MODEL_SOURCE"] == "local"
+    assert os.environ["MINERU_TOOLS_CONFIG_JSON"] == str(config_path.resolve())
 
 
 def test_find_mineru_run_version_info_from_nested_raw_file(tmp_path):

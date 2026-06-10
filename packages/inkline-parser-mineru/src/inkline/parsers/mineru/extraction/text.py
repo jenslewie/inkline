@@ -151,10 +151,10 @@ def merge_note_refs(blocks: Sequence[RawBlock]) -> List[Dict[str, Any]]:
     seen = set()
     out = []
     for r, page in refs:
-        key = (r.marker, r.position, r.source, page)
+        key = (r.marker, r.source, page)
         if key not in seen:
             seen.add(key)
-            item = {"marker": r.marker, "position": r.position, "source": r.source, "source_page": page}
+            item = {"marker": r.marker, "source": r.source, "source_page": page}
             if r.raw_marker:
                 item["raw_marker"] = r.raw_marker
             out.append(item)
@@ -176,14 +176,13 @@ def merge_inline_runs(blocks: Sequence[RawBlock], separator: str = "\n") -> List
 
 def _inline_runs_for_raw_block(block: RawBlock) -> List[Dict[str, Any]]:
     text, extra = strip_trailing_text_note(block.text)
-    runs = [dict(run) for run in block.inline_runs] if block.inline_runs else [{"type": "text", "text": text}]
+    runs: List[Dict[str, Any]] = [dict(run) for run in block.inline_runs] if block.inline_runs else [{"type": "text", "text": text}]
     if extra and not any(run.get("type") == "note_ref" for run in runs):
         runs = [{"type": "text", "text": text}]
         for ref in extra:
             runs.append(_inline_run_from_note_ref(ref, block.page))
     for run in runs:
         if run.get("type") == "note_ref":
-            run.setdefault("position", "after_text")
             run.setdefault("source_page", block.page)
     return runs
 
@@ -195,7 +194,6 @@ def _inline_run_from_note_ref(ref: NoteRef, page: int) -> Dict[str, Any]:
         "marker": ref.marker,
         "raw_marker": raw_marker,
         "source": ref.source,
-        "position": ref.position,
         "source_page": page,
     }
 

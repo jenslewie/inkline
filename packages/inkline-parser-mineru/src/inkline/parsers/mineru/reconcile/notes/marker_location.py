@@ -80,16 +80,12 @@ def _locate_qwen_body_ref(
                     source="qwen_marker_locator",
                     confidence=str(item.get("confidence") or "candidate"),
                     evidence={
-                        "inline_position_source": "qwen_marker_locator",
-                        "inline_position_confidence": str(item.get("confidence") or "candidate"),
-                        "inline_position_offset": offset,
                         "qwen_marker": marker,
                         "qwen_quote": quote,
                         **_qwen_body_ref_source_evidence(item),
                         **_qwen_matching_context_evidence(before, after, before_for_match, after_for_match),
                         **(
                             {
-                                "qwen_visible_marker_offset": offset,
                                 "qwen_visible_marker_text": visible_marker,
                                 "qwen_visible_marker_stripped": True,
                             }
@@ -206,9 +202,6 @@ def _locate_qwen_cross_block_body_ref(
                     source="qwen_marker_locator",
                     confidence=str(item.get("confidence") or "candidate"),
                     evidence={
-                        "inline_position_source": "qwen_marker_locator",
-                        "inline_position_confidence": str(item.get("confidence") or "candidate"),
-                        "inline_position_offset": offset,
                         "qwen_marker": marker,
                         "qwen_quote": str(item.get("quote") or ""),
                         "qwen_cross_block_after_text": after,

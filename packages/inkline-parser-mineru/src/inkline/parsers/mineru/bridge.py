@@ -38,8 +38,8 @@ class MinerUParser:
     def parse(self, request: ParseRequest) -> ParseResult:
         backend = str(request.options.get("backend", self.backend))
         method = str(request.options.get("method", self.method))
-        marker_locator_repair = bool(request.options.get("marker_locator_repair", True))
-        marker_locator_page_dpi = int(request.options.get("marker_locator_page_dpi", 150))
+        marker_locator_repair = bool(request.options.get("marker_locator_repair", False))
+        marker_locator_page_dpi = int(request.options.get("marker_locator_page_dpi", 300))
         document = ingest_pdf_with_mineru(
             request.input_path,
             backend=backend,
@@ -69,8 +69,8 @@ def normalize_mineru_outputs(
     mineru_version: str | None = None,
     mineru_vl_utils_version: str | None = None,
     vlm_model: dict[str, Any] | None = None,
-    marker_locator_repair: bool = True,
-    marker_locator_page_dpi: int = 150,
+    marker_locator_repair: bool = False,
+    marker_locator_page_dpi: int = 300,
 ) -> dict[str, Any]:
     """Run the MinerU normalization pipeline programmatically.
 
@@ -96,7 +96,7 @@ def normalize_mineru_outputs(
         language=language,
         marker_locator_repair=marker_locator_repair,
         marker_locator_artifact_dir=None,
-        marker_locator_model="qwen3.6:35b-a3b",
+        marker_locator_model="qwen3.5:9b",
         marker_locator_api_url="http://127.0.0.1:11434/api/chat",
         marker_locator_keep_alive="2h",
         marker_locator_dpi=None,
@@ -134,8 +134,8 @@ def ingest_pdf_with_mineru(
     method: str = DEFAULT_MINERU_METHOD,
     output: str | Path,
     language: str = "zh-CN",
-    marker_locator_repair: bool = True,
-    marker_locator_page_dpi: int = 150,
+    marker_locator_repair: bool = False,
+    marker_locator_page_dpi: int = 300,
 ) -> dict[str, Any]:
     if engine != "mineru":
         raise ValueError(f"Unsupported PDF engine: {engine}")
@@ -145,7 +145,7 @@ def ingest_pdf_with_mineru(
     raw_dir = output_path.parent / "mineru_raw"
     raw_output_dir = run_mineru_raw(pdf_path, raw_dir, backend=backend, method=method)
     raw_files = find_mineru_raw_files(raw_output_dir)
-    version_info = find_mineru_run_version_info(raw_output_dir) or get_mineru_version_info()
+    version_info = find_mineru_run_version_info(raw_output_dir) or get_mineru_version_info(backend)
     return normalize_mineru_outputs(
         content_list_v2=raw_files["content_list_v2"],
         middle=raw_files["middle"],
@@ -185,8 +185,8 @@ def run_mineru_raw(
     pdf = Path(pdf_path).expanduser().resolve()
     raw_root = Path(output_dir).expanduser().resolve()
     raw_root.mkdir(parents=True, exist_ok=True)
-    _configure_mineru_runtime_env(raw_root)
-    version_info = get_mineru_version_info()
+    _configure_mineru_env(raw_root, backend)
+    version_info = get_mineru_version_info(backend)
     state_path = raw_root / "run_state.json"
     started_at = _now_iso()
     started_monotonic = time.monotonic()
@@ -233,8 +233,6 @@ def run_mineru_raw(
         kwargs["p_table_enable"] = True
 
     try:
-        if _backend_uses_local_vlm_model(backend):
-            version_info["vlm_model"] = _resolve_mineru_vlm_model_info()
         do_parse(**kwargs)
     except Exception as exc:
         write_run_state(
@@ -308,7 +306,7 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def _configure_mineru_runtime_env(work_dir: Path) -> None:
+def _configure_mineru_env(work_dir: Path, backend: str) -> None:
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
     os.environ.setdefault("NO_ALBUMENTATIONS_UPDATE", "1")
     os.environ.setdefault("MPLCONFIGDIR", str(work_dir / "cache" / "matplotlib"))
@@ -316,9 +314,66 @@ def _configure_mineru_runtime_env(work_dir: Path) -> None:
     Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
     Path(os.environ["YOLO_CONFIG_DIR"]).mkdir(parents=True, exist_ok=True)
 
+    if backend in {"vlm-auto-engine", "vlm-mlx-engine", "hybrid-auto-engine"}:
+        config_path = _write_local_config(work_dir)
+        os.environ["MINERU_MODEL_SOURCE"] = "local"
+        os.environ["MINERU_TOOLS_CONFIG_JSON"] = str(config_path.resolve())
+        os.environ.pop("MINERU_DEVICE_MODE", None)
 
-def get_mineru_version_info() -> dict[str, Any]:
-    """Collect installed MinerU package versions without resolving a model."""
+
+def _write_local_config(work_dir: Path) -> Path:
+    config_path = work_dir / "mineru_local_config.json"
+    models_dir: dict[str, str] = {}
+    pipeline_model = _cached_pipeline_model_root(required=False)
+    vlm_model = _cached_vlm_model_root(required=False)
+    if pipeline_model is not None:
+        models_dir["pipeline"] = str(pipeline_model)
+    if vlm_model is not None:
+        models_dir["vlm"] = str(vlm_model)
+    config_path.write_text(json.dumps({"models-dir": models_dir}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return config_path
+
+
+def _cached_pipeline_model_root(*, required: bool) -> Path | None:
+    candidates = (
+        Path.home() / ".cache/modelscope/hub/models/OpenDataLab/PDF-Extract-Kit-1___0",
+        Path.home() / ".cache/modelscope/hub/models/OpenDataLab/PDF-Extract-Kit-1.0",
+    )
+    for path in candidates:
+        if (path / "models" / "Layout" / "PP-DocLayoutV2" / "config.json").exists():
+            return path
+    if required:
+        raise FileNotFoundError("MinerU pipeline model cache was not found.")
+    return None
+
+
+def _cached_vlm_model_root(*, required: bool) -> Path | None:
+    candidates = (
+        Path.home() / ".cache/modelscope/hub/models/OpenDataLab/MinerU2___5-Pro-2604-1___2B",
+        Path.home() / ".cache/modelscope/hub/models/OpenDataLab/MinerU2.5-Pro-2604-1.2B",
+    )
+    for path in candidates:
+        if (path / "config.json").exists() and any(path.glob("*.safetensors")):
+            return path
+    hf_cache = Path.home() / ".cache/huggingface/hub/models--opendatalab--MinerU2.5-Pro-2604-1.2B/snapshots"
+    if hf_cache.exists():
+        snapshots = sorted((path for path in hf_cache.iterdir() if path.is_dir()), key=lambda path: path.stat().st_mtime)
+        for snapshot in reversed(snapshots):
+            if (snapshot / "config.json").exists() and any(snapshot.glob("*.safetensors")):
+                return snapshot
+    if required:
+        raise FileNotFoundError("MinerU VLM model cache was not found.")
+    return None
+
+
+def get_mineru_version_info(backend: str = DEFAULT_MINERU_BACKEND) -> dict[str, Any]:
+    """Collect MinerU package version and VLM model metadata.
+
+    Returns a dict with keys:
+      - mineru_version: str | None  — pip-installed MinerU package version
+      - mineru_vl_utils_version: str | None  — mineru-vl-utils package version
+      - vlm_model: dict | None  — VLM model identity when backend is VLM-based
+    """
     from importlib.metadata import PackageNotFoundError, version as pkg_version
 
     info: dict[str, Any] = {}
@@ -331,7 +386,12 @@ def get_mineru_version_info() -> dict[str, Any]:
     except PackageNotFoundError:
         info["mineru_vl_utils_version"] = None
 
-    info["vlm_model"] = None
+    is_vlm_backend = backend.startswith("vlm") or backend == "hybrid-auto-engine"
+    if not is_vlm_backend:
+        info["vlm_model"] = None
+        return info
+
+    info["vlm_model"] = _resolve_mineru_vlm_model_info()
     return info
 
 
@@ -365,21 +425,8 @@ def find_mineru_run_version_info(*paths: str | Path | None) -> dict[str, Any] | 
 
 
 def _resolve_mineru_vlm_model_info() -> dict[str, Any] | None:
-    from mineru.utils.models_download_utils import (  # pyright: ignore[reportMissingImports]
-        auto_download_and_get_model_root_path,
-    )
-
-    model_root = Path(
-        auto_download_and_get_model_root_path("/", repo_mode="vlm")
-    ).expanduser().resolve()
-    return _model_info_from_path(model_root)
-
-
-def _backend_uses_local_vlm_model(backend: str) -> bool:
-    return (
-        backend.startswith(("vlm-", "hybrid-"))
-        and not backend.endswith("http-client")
-    )
+    model_root = _cached_vlm_model_root(required=False)
+    return _model_info_from_path(model_root) if model_root is not None else None
 
 
 def _model_info_from_path(model_root: Path) -> dict[str, Any]:

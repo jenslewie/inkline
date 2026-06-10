@@ -15,7 +15,7 @@ from .scopes import (
     _NoteResolutionStrategy,
     _pages_for_block,
 )
-from .marker_inline import _fallback_raw_marker, _inline_note_run_from_ref, _rebuild_inline_note_runs_from_exact_refs, _ref_requires_inline_run
+from .marker_inline import _fallback_raw_marker
 
 __all__ = ["resolve_note_links"]
 
@@ -294,13 +294,6 @@ def _sync_inline_note_refs(blocks: List[CanonicalBlock]) -> None:
             continue
         runs = attrs.get("inline_runs")
         refs = [ref for ref in attrs.get("note_refs") or [] if isinstance(ref, dict)]
-        if refs and all(
-            not _ref_requires_inline_run(ref)
-            or (isinstance(ref.get("inline_offset"), int) and 0 <= int(ref.get("inline_offset")) <= len(str(block.get("text") or "")))
-            for ref in refs
-        ):
-            _rebuild_inline_note_runs_from_exact_refs(block)
-            runs = attrs.get("inline_runs")
         if not isinstance(runs, list):
             continue
         buckets: Dict[tuple[str, str, int | None], List[Dict[str, Any]]] = {}
@@ -319,12 +312,9 @@ def _sync_inline_note_refs(blocks: List[CanonicalBlock]) -> None:
             if not matches:
                 continue
             ref = matches.pop(0)
-            if not _ref_requires_inline_run(ref):
-                continue
             synced = dict(run)
             for key in (
                 "marker",
-                "position",
                 "source",
                 "source_page",
                 "raw_marker",
@@ -334,10 +324,6 @@ def _sync_inline_note_refs(blocks: List[CanonicalBlock]) -> None:
                 "resolution_confidence",
                 "confidence",
                 "recovery_reason",
-                "inline_position",
-                "inline_position_source",
-                "inline_position_confidence",
-                "inline_offset",
             ):
                 if key in ref:
                     synced[key] = ref[key]
@@ -348,12 +334,6 @@ def _sync_inline_note_refs(blocks: List[CanonicalBlock]) -> None:
                     ref.setdefault("raw_marker", raw_marker)
             synced_runs.append(synced)
             ordered_refs.append(ref)
-        for remaining in buckets.values():
-            for ref in remaining:
-                if not _ref_requires_inline_run(ref):
-                    continue
-                synced_runs.append(_inline_note_run_from_ref(ref))
-                ordered_refs.append(ref)
         if ordered_refs:
             seen = {id(ref) for ref in ordered_refs}
             attrs["note_refs"] = ordered_refs + [ref for ref in refs if id(ref) not in seen]

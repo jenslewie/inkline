@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from ...extraction.text import normalize_note_marker
+from ...extraction.text import normalize_note_marker, normalize_ws
 from ...schema.models import CanonicalBlock
 from .marker_patterns import _marker_int
 
@@ -34,7 +34,6 @@ def _append_note_ref(
     refs = list(attrs.get("note_refs") or [])
     ref: Dict[str, Any] = {
         "marker": marker,
-        "position": "after_text",
         "source": source,
         "source_page": source_page if source_page is not None else _last_page(block),
         "confidence": confidence,
@@ -44,55 +43,12 @@ def _append_note_ref(
         ref["raw_marker"] = raw_marker
     else:
         ref["inferred"] = True
-        ref["inline_position"] = "unknown"
-    if inline_location:
-        ref["inline_position"] = "exact"
-        ref["inline_position_source"] = inline_location.source
-        ref["inline_position_confidence"] = inline_location.confidence
-        ref["inline_offset"] = inline_location.char_index
     if evidence:
         ref["evidence"] = evidence
     refs.append(ref)
     attrs["note_refs"] = refs
     if inline_location:
         _insert_inline_note_run(block, ref, inline_location.char_index)
-
-
-def _rebuild_inline_note_runs_from_exact_refs(block: CanonicalBlock) -> None:
-    text = str(block.get("text") or "")
-    attrs = block.setdefault("attrs", {})
-    refs = [ref for ref in attrs.get("note_refs") or [] if isinstance(ref, dict)]
-    exact_refs = [
-        ref
-        for ref in refs
-        if _ref_requires_inline_run(ref)
-        and isinstance(ref.get("inline_offset"), int)
-        and 0 <= int(ref.get("inline_offset")) <= len(text)
-    ]
-    if not exact_refs:
-        attrs.pop("inline_runs", None)
-        return
-    exact_refs.sort(
-        key=lambda ref: (
-            int(ref.get("inline_offset")),
-            int(ref.get("source_page")) if isinstance(ref.get("source_page"), int) else 10**9,
-            _inline_marker_sort_value(ref.get("marker")),
-            str(ref.get("marker") or ""),
-        )
-    )
-    runs: List[Dict[str, Any]] = []
-    cursor = 0
-    for ref in exact_refs:
-        offset = int(ref.get("inline_offset"))
-        if offset < cursor:
-            continue
-        if offset > cursor:
-            runs.append({"type": "text", "text": text[cursor:offset]})
-        runs.append(_inline_note_run_from_ref(ref))
-        cursor = offset
-    if cursor < len(text):
-        runs.append({"type": "text", "text": text[cursor:]})
-    attrs["inline_runs"] = _coalesce_text_runs(runs)
 
 
 def _inline_note_run_from_ref(ref: Dict[str, Any]) -> Dict[str, Any]:
@@ -110,16 +66,11 @@ def _inline_note_run_from_ref(ref: Dict[str, Any]) -> Dict[str, Any]:
     run: Dict[str, Any] = {}
     for key in (
         "marker",
-        "position",
         "source",
         "source_page",
         "raw_marker",
         "confidence",
         "recovery_reason",
-        "inline_position",
-        "inline_position_source",
-        "inline_position_confidence",
-        "inline_offset",
         "target_block_id",
         "target_note_id",
         "note_strategy",
@@ -136,22 +87,30 @@ def _inline_note_run_from_ref(ref: Dict[str, Any]) -> Dict[str, Any]:
     return run
 
 
-def _ref_requires_inline_run(ref: Dict[str, Any]) -> bool:
-    source = str(ref.get("source") or "")
-    if source in {"equation_inline", "equation_interline", "trailing_text"}:
-        return True
-    return ref.get("inline_position") == "exact"
-
-
 def _insert_inline_note_run(block: CanonicalBlock, ref: Dict[str, Any], char_index: int) -> None:
     text = str(block.get("text") or "")
     if char_index < 0 or char_index > len(text):
         return
     attrs = block.setdefault("attrs", {})
     runs = attrs.get("inline_runs")
-    if not _inline_runs_reconstruct_text(runs, text):
+    run_char_index = char_index
+    if isinstance(runs, list):
+        reconstructed = _inline_runs_text(runs)
+        if reconstructed != text:
+            run_char_index = _raw_index_for_normalized_text(reconstructed, text, char_index)
+    if not isinstance(runs, list) or run_char_index is None:
         runs = [{"type": "text", "text": text}]
+        run_char_index = char_index
     assert isinstance(runs, list)
+    runs = [
+        dict(run)
+        for run in runs
+        if isinstance(run, dict)
+        and not (
+            run.get("type") == "note_ref"
+            and _same_inline_note_ref(run, ref)
+        )
+    ]
     note_run = _inline_note_run_from_ref(ref)
 
     out: List[Dict[str, Any]] = []
@@ -165,8 +124,8 @@ def _insert_inline_note_run(block: CanonicalBlock, ref: Dict[str, Any], char_ind
             continue
         run_text = str(run.get("text") or "")
         next_consumed = consumed + len(run_text)
-        if not inserted and consumed <= char_index <= next_consumed:
-            split_at = char_index - consumed
+        if not inserted and consumed <= run_char_index <= next_consumed:
+            split_at = run_char_index - consumed
             if split_at > 0:
                 left = dict(run)
                 left["text"] = run_text[:split_at]
@@ -185,15 +144,47 @@ def _insert_inline_note_run(block: CanonicalBlock, ref: Dict[str, Any], char_ind
     attrs["inline_runs"] = _coalesce_text_runs(out)
 
 
-def _inline_runs_reconstruct_text(runs: Any, text: str) -> bool:
+def _same_inline_note_ref(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+    return (
+        normalize_note_marker(left.get("marker", "")) == normalize_note_marker(right.get("marker", ""))
+        and str(left.get("source") or "") == str(right.get("source") or "")
+        and left.get("source_page") == right.get("source_page")
+    )
+
+
+def _inline_note_run_char_index(block: CanonicalBlock, ref: Dict[str, Any]) -> Optional[int]:
+    runs = (block.get("attrs") or {}).get("inline_runs")
     if not isinstance(runs, list):
-        return False
-    reconstructed = "".join(
+        return None
+    raw_prefix = ""
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        if run.get("type") == "text":
+            raw_prefix += str(run.get("text") or "")
+        elif run.get("type") == "note_ref" and _same_inline_note_ref(run, ref):
+            return len(normalize_ws(raw_prefix))
+    return None
+
+
+def _inline_runs_text(runs: List[Any]) -> str:
+    return "".join(
         str(run.get("text") or "")
         for run in runs
         if isinstance(run, dict) and run.get("type") == "text"
     )
-    return reconstructed == text
+
+
+def _raw_index_for_normalized_text(raw_text: str, text: str, char_index: int) -> Optional[int]:
+    if normalize_ws(raw_text) != normalize_ws(text):
+        return None
+    target_prefix = normalize_ws(text[:char_index])
+    candidates = [
+        raw_index
+        for raw_index in range(len(raw_text) + 1)
+        if normalize_ws(raw_text[:raw_index]) == target_prefix
+    ]
+    return max(candidates) if candidates else None
 
 
 def _coalesce_text_runs(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -205,15 +196,15 @@ def _coalesce_text_runs(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             out[-1]["text"] = str(out[-1].get("text") or "") + str(run.get("text") or "")
         else:
             out.append(run)
-    return _order_same_offset_note_runs(out)
+    return _order_adjacent_note_runs(out)
 
 
-def _order_same_offset_note_runs(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _order_adjacent_note_runs(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     index = 0
     while index < len(runs):
         run = runs[index]
-        if run.get("type") != "note_ref" or "inline_offset" not in run:
+        if run.get("type") != "note_ref":
             out.append(run)
             index += 1
             continue
@@ -222,7 +213,6 @@ def _order_same_offset_note_runs(runs: List[Dict[str, Any]]) -> List[Dict[str, A
         while (
             index < len(runs)
             and runs[index].get("type") == "note_ref"
-            and runs[index].get("inline_offset") == group[0].get("inline_offset")
             and runs[index].get("source_page") == group[0].get("source_page")
         ):
             group.append(runs[index])
@@ -244,9 +234,8 @@ def _fallback_raw_marker(ref: Dict[str, Any]) -> Optional[str]:
 
     Returns the marker itself for star markers (``*``-family).  For numeric
     markers, returns ``^{marker}`` only when the source is an equation type
-    (``equation_inline``, ``equation_interline``, ``trailing_text``) or
-    ``inline_position`` is ``"exact"``.  Otherwise returns ``None`` —
-    meaning no raw_marker should be emitted.
+    (``equation_inline``, ``equation_interline``, ``trailing_text``).
+    Otherwise returns ``None``.
     """
     marker = normalize_note_marker(ref.get("marker", ""))
     if not marker:
@@ -254,7 +243,7 @@ def _fallback_raw_marker(ref: Dict[str, Any]) -> Optional[str]:
     if marker.startswith("*"):
         return marker
     source = str(ref.get("source") or "")
-    if source in {"equation_inline", "equation_interline", "trailing_text"} or ref.get("inline_position") == "exact":
+    if source in {"equation_inline", "equation_interline", "trailing_text"}:
         return f"^{{{marker}}}"
     return None
 

@@ -59,12 +59,12 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     assert document["metadata"]["mineru"]["vlm_model"]["model_name"] == "MinerU2.5-Pro-2605-1.2B"
     marker_config = document["metadata"]["mineru"]["auxiliary_ocr"]["qwen_marker_locator"]
     assert marker_config["enabled"] is False
-    assert marker_config["model"] == "qwen3.6:35b-a3b"
-    assert marker_config["page_dpi"] == 150
+    assert marker_config["model"] == "qwen3.5:9b"
+    assert marker_config["page_dpi"] == 300
     assert output.exists()
 
 
-def test_mineru_parser_enables_qwen_marker_repair_at_150_dpi_by_default(
+def test_mineru_parser_disables_qwen_marker_repair_at_300_dpi_by_default(
     tmp_path, monkeypatch
 ) -> None:
     captured = {}
@@ -93,5 +93,5 @@ def test_mineru_parser_enables_qwen_marker_repair_at_150_dpi_by_default(
 
     MinerUParser().parse(request)
 
-    assert captured["marker_locator_repair"] is True
-    assert captured["marker_locator_page_dpi"] == 150
+    assert captured["marker_locator_repair"] is False
+    assert captured["marker_locator_page_dpi"] == 300

@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional, Tuple
+import re
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from ..schema.models import NoteRef, RawBlock
-from .text import extract_list_item_text, extract_text_notes_and_runs, normalize_ws
+from .text import extract_text_notes_and_runs, normalize_note_marker, normalize_ws
+
+_CONTENT_COORD_SIZE = 1000.0
+_NOTE_MARKER_RE = re.compile(r"^(?:\d{1,3}|[*＊]{1,3})$")
 
 def load_json(path: Optional[str]) -> Any:
     if not path:
@@ -34,13 +38,15 @@ def load_inputs(args: Any) -> tuple[Dict[int, List[RawBlock]], Dict[int, Tuple[f
     if content_list_v2 is not None:
         if not isinstance(content_list_v2, list):
             raise ValueError("content_list_v2 must be a list of page item lists")
-        return flatten_content_list_v2(content_list_v2), page_sizes
+        pages = flatten_content_list_v2(content_list_v2)
+        return replace_footnote_sources_from_middle(pages, middle, page_sizes), page_sizes
 
     content_list = load_json(getattr(args, "content_list", None))
     if content_list is not None:
         if not isinstance(content_list, list):
             raise ValueError("content_list must be a list")
-        return flatten_content_list_legacy(content_list), page_sizes
+        pages = flatten_content_list_legacy(content_list)
+        return replace_footnote_sources_from_middle(pages, middle, page_sizes), page_sizes
 
     raise ValueError("Either content_list_v2 or content_list is required")
 
@@ -82,3 +88,164 @@ def flatten_content_list_legacy(content_list: List[Any]) -> Dict[int, List[RawBl
         text = normalize_ws(str(item.get("text", "")))
         pages[p].append(RawBlock(page=p, index=len(pages[p]), raw_type=typ, text=text, bbox=item.get("bbox"), raw=item, note_refs=[]))
     return pages
+
+
+def replace_footnote_sources_from_middle(
+    pages: Dict[int, List[RawBlock]],
+    middle: Any,
+    page_sizes: Dict[int, Tuple[float, float]],
+) -> Dict[int, List[RawBlock]]:
+    """Use middle.json as the authoritative source for page-footnote blocks."""
+
+    if not isinstance(middle, dict) or not isinstance(middle.get("pdf_info"), list):
+        return pages
+
+    middle_footnotes = footnote_blocks_from_middle(middle, page_sizes)
+    out: Dict[int, List[RawBlock]] = {}
+    all_pages = set(pages) | set(middle_footnotes)
+    for page in sorted(all_pages):
+        body_blocks = [
+            block
+            for block in pages.get(page, [])
+            if not _is_content_list_footnote_source(block)
+        ]
+        body_blocks.extend(middle_footnotes.get(page, []))
+        body_blocks.sort(key=_raw_block_reading_key)
+        out[page] = body_blocks
+    return out
+
+
+def footnote_blocks_from_middle(
+    middle: Any,
+    page_sizes: Dict[int, Tuple[float, float]],
+) -> Dict[int, List[RawBlock]]:
+    """Collect discarded page_footnote and para ref_text blocks from middle.json."""
+
+    out: Dict[int, List[RawBlock]] = {}
+    if not isinstance(middle, dict) or not isinstance(middle.get("pdf_info"), list):
+        return out
+
+    for fallback_page, page_info in enumerate(middle["pdf_info"], 1):
+        if not isinstance(page_info, dict):
+            continue
+        raw_page_idx = page_info.get("page_idx")
+        page = int(raw_page_idx) + 1 if isinstance(raw_page_idx, int) else fallback_page
+        page_size = page_sizes.get(page)
+        page_markers = inline_note_markers_from_middle_page(page_info)
+        definitions: List[Dict[str, Any]] = []
+
+        for block in page_info.get("discarded_blocks") or []:
+            if isinstance(block, dict) and block.get("type") == "page_footnote":
+                definitions.append(block)
+
+        for block in page_info.get("para_blocks") or []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "ref_text":
+                definitions.append(block)
+                continue
+            if block.get("type") == "list" and block.get("sub_type") == "ref_text":
+                definitions.extend(
+                    child
+                    for child in block.get("blocks") or []
+                    if isinstance(child, dict) and child.get("type") == "ref_text"
+                )
+
+        page_blocks: List[RawBlock] = []
+        for fallback_index, block in enumerate(definitions):
+            text = _middle_block_text(block)
+            if not text:
+                continue
+            raw = dict(block)
+            raw["_middle_page_inline_markers"] = page_markers
+            raw_index = block.get("index")
+            index = int(raw_index) if isinstance(raw_index, int) else fallback_index
+            page_blocks.append(
+                RawBlock(
+                    page=page,
+                    index=index,
+                    raw_type=str(block.get("type") or "page_footnote"),
+                    text=text,
+                    bbox=_middle_bbox_to_content_bbox(block.get("bbox"), page_size),
+                    raw=raw,
+                )
+            )
+        if page_blocks:
+            page_blocks.sort(key=_raw_block_reading_key)
+            out[page] = page_blocks
+    return out
+
+
+def inline_note_markers_from_middle_page(page_info: Dict[str, Any]) -> List[str]:
+    """Return note-like inline-equation markers in MinerU para-block order."""
+
+    markers: List[str] = []
+    for item in _walk_dicts(page_info.get("para_blocks") or []):
+        if item.get("type") not in {"inline_equation", "equation_inline"}:
+            continue
+        marker = normalize_note_marker(item.get("content", "")).replace("＊", "*")
+        if marker and _NOTE_MARKER_RE.fullmatch(marker):
+            markers.append(marker)
+    return markers
+
+
+def _walk_dicts(obj: Any) -> Iterable[Dict[str, Any]]:
+    if isinstance(obj, dict):
+        yield obj
+        for value in obj.values():
+            yield from _walk_dicts(value)
+    elif isinstance(obj, list):
+        for value in obj:
+            yield from _walk_dicts(value)
+
+
+def _middle_block_text(block: Dict[str, Any]) -> str:
+    lines: List[str] = []
+    for line in block.get("lines") or []:
+        if not isinstance(line, dict):
+            continue
+        parts: List[str] = []
+        for span in line.get("spans") or []:
+            if not isinstance(span, dict):
+                continue
+            content = str(span.get("content") or "")
+            if span.get("type") in {"inline_equation", "equation_inline"}:
+                marker = normalize_note_marker(content).replace("＊", "*")
+                parts.append(marker if _NOTE_MARKER_RE.fullmatch(marker) else content)
+            else:
+                parts.append(content)
+        text = normalize_ws("".join(parts))
+        if text:
+            lines.append(text)
+    return "\n".join(lines)
+
+
+def _middle_bbox_to_content_bbox(
+    bbox: Any,
+    page_size: Optional[Tuple[float, float]],
+) -> Optional[List[float]]:
+    if not isinstance(bbox, list) or len(bbox) < 4:
+        return None
+    if not page_size or page_size[0] <= 0 or page_size[1] <= 0:
+        return [float(value) for value in bbox[:4]]
+    x_scale = _CONTENT_COORD_SIZE / page_size[0]
+    y_scale = _CONTENT_COORD_SIZE / page_size[1]
+    return [
+        round(float(bbox[0]) * x_scale, 3),
+        round(float(bbox[1]) * y_scale, 3),
+        round(float(bbox[2]) * x_scale, 3),
+        round(float(bbox[3]) * y_scale, 3),
+    ]
+
+
+def _is_content_list_footnote_source(block: RawBlock) -> bool:
+    if block.raw_type in {"page_footnote", "ref_text"}:
+        return True
+    if block.raw_type != "list":
+        return False
+    content = block.raw.get("content") or {}
+    return isinstance(content, dict) and content.get("list_type") == "reference_list"
+
+
+def _raw_block_reading_key(block: RawBlock) -> Tuple[float, float, int]:
+    return (block.y0, block.x0, block.index)

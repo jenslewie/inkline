@@ -416,6 +416,9 @@ def merge_cross_page_paragraphs(blocks: List[Dict[str, Any]], source_pdf: Option
             if left.get("type") not in MERGEABLE_TEXT_TYPES:
                 i += 1
                 continue
+            if (left.get("attrs") or {}).get("list_type") == "reference_list":
+                i += 1
+                continue
             lp_list = _block_pages(left)
             if not lp_list:
                 i += 1
@@ -430,6 +433,9 @@ def merge_cross_page_paragraphs(blocks: List[Dict[str, Any]], source_pdf: Option
                 continue
             right = blocks[j]
             if right.get("type") not in MERGEABLE_TEXT_TYPES:
+                i += 1
+                continue
+            if (right.get("attrs") or {}).get("list_type") == "reference_list":
                 i += 1
                 continue
             # Do not let paragraph-continuation merging cross a set-off display
