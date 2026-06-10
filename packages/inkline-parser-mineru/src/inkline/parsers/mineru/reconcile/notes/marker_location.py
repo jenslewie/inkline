@@ -40,6 +40,12 @@ def _qwen_marker_page_items(qwen_marker_pages: Any) -> List[Dict[str, Any]]:
             converted = item.to_json()
             if isinstance(converted, dict):
                 out.append(converted)
+    out.sort(
+        key=lambda evidence: not any(
+            isinstance(item, dict) and item.get("block_id")
+            for item in evidence.get("body_refs") or []
+        )
+    )
     return out
 
 
@@ -51,14 +57,14 @@ def _locate_qwen_body_ref(
     item: Dict[str, Any],
     *,
     allow_existing: bool = False,
-) -> Optional[Tuple[Dict[str, Any], _InlineMarkerLocation]]:
+) -> Optional[Tuple[CanonicalBlock, _InlineMarkerLocation]]:
     before = str(item.get("before_text") or "")
     after = str(item.get("after_text") or "")
     before_for_match = _qwen_context_without_neighbor_markers(before)
     after_for_match = _qwen_context_without_neighbor_markers(after)
     quote = str(item.get("quote") or "")
     requested_block_id = str(item.get("block_id") or "")
-    candidates: List[Tuple[int, Dict[str, Any], _InlineMarkerLocation]] = []
+    candidates: List[Tuple[int, CanonicalBlock, _InlineMarkerLocation]] = []
     for block_index, block in enumerate(blocks):
         if block.get("type") not in BODY_TYPES or page not in context.pages_for(block):
             continue
@@ -68,9 +74,15 @@ def _locate_qwen_body_ref(
             continue
         text = str(block.get("text") or "")
         offset = _qwen_marker_offset_in_text(text, marker, before_for_match, after_for_match, quote)
+        visible_marker = _qwen_visible_marker_at(text, marker, offset) if offset is not None else ""
+        used_visible_fallback = False
+        if requested_block_id and not visible_marker:
+            fallback = _unique_distinctive_visible_marker(text, marker)
+            if fallback is not None:
+                offset, visible_marker = fallback
+                used_visible_fallback = True
         if offset is None:
             continue
-        visible_marker = _qwen_visible_marker_at(text, marker, offset)
         candidates.append(
             (
                 block_index,
@@ -88,6 +100,7 @@ def _locate_qwen_body_ref(
                             {
                                 "qwen_visible_marker_text": visible_marker,
                                 "qwen_visible_marker_stripped": True,
+                                **({"qwen_unique_visible_marker_fallback": True} if used_visible_fallback else {}),
                             }
                             if visible_marker
                             else {}
@@ -104,6 +117,32 @@ def _locate_qwen_body_ref(
     if requested_block_id:
         return None
     return _locate_qwen_cross_block_body_ref(blocks, context, page, marker, item, allow_existing=allow_existing)
+
+
+def _unique_distinctive_visible_marker(text: str, marker: str) -> Optional[Tuple[int, str]]:
+    matches = _distinctive_visible_markers(text, marker)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _distinctive_visible_markers(text: str, marker: str) -> List[Tuple[int, str]]:
+    marker_texts = [marker] if marker.startswith("*") else [
+        variant for variant in _qwen_marker_text_variants(marker) if variant != marker
+    ]
+    matches: List[Tuple[int, str]] = []
+    for marker_text in marker_texts:
+        start = 0
+        while marker_text:
+            offset = text.find(marker_text, start)
+            if offset < 0:
+                break
+            start = offset + 1
+            if marker_text.startswith("*") and (
+                (offset > 0 and text[offset - 1] == "*")
+                or (offset + len(marker_text) < len(text) and text[offset + len(marker_text)] == "*")
+            ):
+                continue
+            matches.append((offset, marker_text))
+    return matches
 
 
 def _qwen_block_id(block: CanonicalBlock) -> str:
@@ -170,7 +209,7 @@ def _locate_qwen_cross_block_body_ref(
     item: Dict[str, Any],
     *,
     allow_existing: bool = False,
-) -> Optional[Tuple[Dict[str, Any], _InlineMarkerLocation]]:
+) -> Optional[Tuple[CanonicalBlock, _InlineMarkerLocation]]:
     before = normalize_ws(_qwen_context_without_neighbor_markers(str(item.get("before_text") or "")))
     after = normalize_ws(_qwen_context_without_neighbor_markers(str(item.get("after_text") or "")))
     quote = normalize_ws(str(item.get("quote") or ""))
@@ -183,7 +222,7 @@ def _locate_qwen_cross_block_body_ref(
         and page in context.pages_for(block)
         and normalize_ws(str(block.get("text") or ""))
     ]
-    matches: List[Tuple[Dict[str, Any], _InlineMarkerLocation]] = []
+    matches: List[Tuple[CanonicalBlock, _InlineMarkerLocation]] = []
     for left, right in zip(page_blocks, page_blocks[1:]):
         if not allow_existing and _existing_ref_marker_on_page(left, marker, page, context):
             continue

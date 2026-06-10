@@ -4,7 +4,14 @@ from inkline.parsers.mineru.reconcile.notes.markers import (
     _update_existing_qwen_ref_inline_location,
     recover_missing_note_refs,
 )
-from inkline.parsers.mineru.reconcile.notes.marker_inline import _InlineMarkerLocation
+from inkline.parsers.mineru.reconcile.notes.marker_inline import (
+    _InlineMarkerLocation,
+    _inline_runs_text,
+    _insert_inline_note_run,
+)
+from inkline.parsers.mineru.reconcile.notes.marker_recovery import (
+    _strip_qwen_visible_marker,
+)
 from inkline.parsers.mineru.reconcile.notes.resolver import _NoteContext, resolve_note_links
 
 
@@ -193,6 +200,40 @@ def test_qwen_insertion_preserves_other_mineru_inline_runs() -> None:
     runs = block["attrs"]["inline_runs"]
     assert [run.get("marker") for run in runs if run.get("type") == "note_ref"] == ["*", "1"]
     assert "".join(run.get("text", "") for run in runs if run.get("type") == "text") == "甲   乙 丙"
+
+
+def test_qwen_insertion_does_not_relocate_unmappable_existing_inline_ref() -> None:
+    block = {
+        "text": "abcdef",
+        "attrs": {
+            "inline_runs": [
+                {"type": "text", "text": "abcX"},
+                {
+                    "type": "note_ref",
+                    "marker": "1",
+                    "source": "equation_inline",
+                    "source_page": 1,
+                    "raw_marker": "^{1}",
+                },
+                {"type": "text", "text": "def"},
+            ]
+        },
+    }
+
+    _insert_inline_note_run(
+        block,
+        {
+            "marker": "2",
+            "source": "qwen_marker_locator",
+            "source_page": 1,
+            "raw_marker": "^{2}",
+        },
+        2,
+    )
+
+    runs = block["attrs"]["inline_runs"]
+    assert [run.get("marker") for run in runs if run.get("type") == "note_ref"] == ["2"]
+    assert _inline_runs_text(runs) == block["text"]
 
 
 def test_qwen_symbol_marker_before_omitted_comma_with_normalized_spacing() -> None:
@@ -446,3 +487,254 @@ def test_qwen_recovers_scoped_chapter_endnote_ref() -> None:
     assert refs[0]["target_block_id"] == "b_note_1"
     assert refs[0]["note_strategy"] == "chapter_endnote"
     assert blocks[1]["attrs"]["inline_runs"][1]["type"] == "note_ref"
+
+
+def test_qwen_recovers_adjacent_visible_symbol_and_numeric_markers() -> None:
+    blocks = [
+        {
+            "block_id": "b_body",
+            "type": "paragraph",
+            "text": "在763年击败了叛军*。3作为奖赏。",
+            "source": {"page": 212},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_note_star",
+            "type": "footnote",
+            "text": "*星号脚注。",
+            "source": {"page": 212},
+            "attrs": {"role": "page_footnote", "note_marker": "*"},
+        },
+        {
+            "block_id": "b_note_3",
+            "type": "footnote",
+            "text": "3 数字脚注。",
+            "source": {"page": 212},
+            "attrs": {"role": "page_footnote", "note_marker": "3"},
+        },
+    ]
+
+    recover_missing_note_refs(
+        blocks,
+        qwen_marker_pages={
+            "pages": [
+                {
+                    "page": 212,
+                    "body_refs": [
+                        {
+                            "marker": "*",
+                            "block_id": "b_body",
+                            "before_text": "击败了叛军",
+                            "after_text": "。3作为",
+                            "quote": "击败了叛军*。3作为",
+                            "confidence": "high",
+                        },
+                        {
+                            "marker": "3",
+                            "block_id": "b_body",
+                            "before_text": "叛军*。",
+                            "after_text": "作为奖赏",
+                            "quote": "叛军*。3作为奖赏",
+                            "confidence": "high",
+                        },
+                    ],
+                }
+            ]
+        },
+        recovery_mode="qwen",
+    )
+
+    assert blocks[0]["text"] == "在763年击败了叛军。作为奖赏。"
+    refs = blocks[0]["attrs"]["note_refs"]
+    assert [ref["marker"] for ref in refs] == ["3", "*"]
+    runs = blocks[0]["attrs"]["inline_runs"]
+    assert [run["marker"] for run in runs if run["type"] == "note_ref"] == ["*", "3"]
+    assert "".join(run.get("text", "") for run in runs if run["type"] == "text") == blocks[0]["text"]
+
+
+def test_qwen_uses_unique_visible_star_in_requested_block_when_ocr_context_differs() -> None:
+    blocks = [
+        {
+            "block_id": "b_body",
+            "type": "paragraph",
+            "text": "藏经洞中共有三件汉语摩尼教文献*。",
+            "source": {"page": 244, "pages": [244, 245]},
+            "attrs": {},
+        }
+    ]
+
+    located = _locate_qwen_body_ref(
+        blocks,
+        _NoteContext(blocks),
+        245,
+        "*",
+        {
+            "marker": "*",
+            "block_id": "b_body",
+            "before_text": "摩尼教",
+            "after_text": "。",
+            "quote": "摩尼教*。",
+            "confidence": "high",
+        },
+    )
+
+    assert located is not None
+    block, inline_location = located
+    assert block["block_id"] == "b_body"
+    assert inline_location.char_index == blocks[0]["text"].index("*")
+    assert inline_location.evidence["qwen_unique_visible_marker_fallback"] is True
+
+
+def test_qwen_does_not_use_page_unique_star_without_block_or_context_match() -> None:
+    blocks = [
+        {
+            "block_id": "b_body",
+            "type": "paragraph",
+            "text": "公式 2 * 3 等于 6。",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_note",
+            "type": "footnote",
+            "text": "* 脚注内容。",
+            "source": {"page": 1},
+            "attrs": {"role": "page_footnote", "note_marker": "*"},
+        },
+    ]
+
+    recover_missing_note_refs(
+        blocks,
+        qwen_marker_pages={
+            "pages": [
+                {
+                    "page": 1,
+                    "body_refs": [
+                        {
+                            "marker": "*",
+                            "before_text": "完全不存在",
+                            "after_text": "也不存在",
+                            "quote": "完全不存在*也不存在",
+                            "confidence": "high",
+                        }
+                    ],
+                }
+            ]
+        },
+        recovery_mode="qwen",
+    )
+
+    assert blocks[0]["text"] == "公式 2 * 3 等于 6。"
+    assert "note_refs" not in blocks[0]["attrs"]
+
+
+def test_qwen_visible_marker_removal_spans_adjacent_text_runs() -> None:
+    block = {
+        "text": "a¹²b",
+        "attrs": {
+            "inline_runs": [
+                {"type": "text", "text": "a¹"},
+                {"type": "text", "text": "²b"},
+            ]
+        },
+    }
+
+    _strip_qwen_visible_marker(
+        block,
+        _InlineMarkerLocation(
+            char_index=1,
+            source="qwen_marker_locator",
+            confidence="high",
+            evidence={"qwen_visible_marker_text": "¹²"},
+        ),
+    )
+
+    assert block["text"] == "ab"
+    assert _inline_runs_text(block["attrs"]["inline_runs"]) == block["text"]
+
+
+def test_qwen_visible_marker_removal_spans_runs_after_structured_ref() -> None:
+    block = {
+        "text": "1a¹²b",
+        "attrs": {
+            "inline_runs": [
+                {
+                    "type": "note_ref",
+                    "marker": "1",
+                    "source": "equation_inline",
+                    "source_page": 1,
+                    "raw_marker": "1",
+                },
+                {"type": "text", "text": "a¹"},
+                {"type": "text", "text": "²b"},
+            ]
+        },
+    }
+
+    _strip_qwen_visible_marker(
+        block,
+        _InlineMarkerLocation(
+            char_index=2,
+            source="qwen_marker_locator",
+            confidence="high",
+            evidence={"qwen_visible_marker_text": "¹²"},
+        ),
+    )
+
+    assert block["text"] == "1ab"
+    assert _inline_runs_text(block["attrs"]["inline_runs"]) == "ab"
+
+
+def test_qwen_refinement_strips_visible_marker_for_existing_ref() -> None:
+    blocks = [
+        {
+            "block_id": "b_body",
+            "type": "paragraph",
+            "text": "若言有苦无是处”。²摩尼鼓励。",
+            "source": {"page": 245},
+            "attrs": {
+                "note_refs": [
+                    {
+                        "marker": "2",
+                        "source": "qwen_marker_locator",
+                        "source_page": 245,
+                        "raw_marker": "^{2}",
+                    }
+                ]
+            },
+        },
+        {
+            "block_id": "b_note",
+            "type": "footnote",
+            "text": "2 脚注内容。",
+            "source": {"page": 245},
+            "attrs": {"role": "page_footnote", "note_marker": "2"},
+        },
+    ]
+
+    recover_missing_note_refs(
+        blocks,
+        qwen_marker_pages={
+            "pages": [
+                {
+                    "page": 245,
+                    "body_refs": [
+                        {
+                            "marker": "2",
+                            "block_id": "b_body",
+                            "before_text": "无是处”。",
+                            "after_text": "摩尼鼓励",
+                            "quote": "无是处”。2摩尼鼓励",
+                            "confidence": "high",
+                        }
+                    ],
+                }
+            ]
+        },
+        recovery_mode="qwen",
+    )
+
+    assert blocks[0]["text"] == "若言有苦无是处”。摩尼鼓励。"
+    runs = blocks[0]["attrs"]["inline_runs"]
+    assert [run["marker"] for run in runs if run["type"] == "note_ref"] == ["2"]
+    assert "".join(run.get("text", "") for run in runs if run["type"] == "text") == blocks[0]["text"]

@@ -207,6 +207,59 @@ def test_qwen_definition_hints_split_merged_middle_footnote() -> None:
     assert blocks[1]["attrs"]["split_reason"] == "qwen_footnote_definition_count"
 
 
+def test_qwen_footnote_markers_keep_full_page_defs_when_block_evidence_follows() -> None:
+    blocks = [
+        {
+            "block_id": "b_note_star",
+            "type": "footnote",
+            "text": "星号脚注内容。",
+            "source": {"page": 22},
+            "attrs": {"raw_type": "page_footnote", "role": "page_footnote"},
+        },
+        {
+            "block_id": "b_note_1",
+            "type": "footnote",
+            "text": "1 数字脚注内容。",
+            "source": {"page": 22},
+            "attrs": {"raw_type": "page_footnote", "role": "page_footnote", "note_marker": "1"},
+        },
+    ]
+    evidence = [
+        QwenMarkerPageEvidence(
+            page=22,
+            image="page_22_150dpi.png",
+            crop_bbox_pdf=[],
+            dpi=150,
+            raw_json={},
+            footnote_defs=[
+                {"marker": "*", "near_text": "星号脚注内容", "confidence": "high"},
+                {"marker": "1", "near_text": "数字脚注内容", "confidence": "high"},
+            ],
+        ),
+        QwenMarkerPageEvidence(
+            page=22,
+            image="page_22_200dpi.png",
+            crop_bbox_pdf=[],
+            dpi=200,
+            raw_json={},
+            body_refs=[
+                {
+                    "marker": "*",
+                    "block_id": "b_body",
+                    "before_text": "正文",
+                    "after_text": "继续",
+                    "quote": "正文*继续",
+                    "confidence": "high",
+                }
+            ],
+        ),
+    ]
+
+    qwen_marker_locator.apply_qwen_footnote_markers(blocks, evidence)
+
+    assert [block["attrs"]["note_marker"] for block in blocks] == ["*", "1"]
+
+
 def test_single_marker_retry_merges_missing_marker(monkeypatch, tmp_path: Path) -> None:
     prompts = []
 

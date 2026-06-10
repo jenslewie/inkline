@@ -180,7 +180,11 @@ def _body_pass_config(config: qwen_types.QwenMarkerLocatorConfig, body_mode: str
 
 
 def apply_qwen_footnote_markers(blocks: List[CanonicalBlock], evidence_pages: Sequence[qwen_types.QwenMarkerPageEvidence]) -> None:
-    evidence_by_page = {item.page: item for item in evidence_pages}
+    evidence_by_page: Dict[int, qwen_types.QwenMarkerPageEvidence] = {}
+    for item in evidence_pages:
+        existing = evidence_by_page.get(item.page)
+        if existing is None or len(item.footnote_defs) > len(existing.footnote_defs):
+            evidence_by_page[item.page] = item
     for page, page_blocks in qwen_page_plan._page_footnotes_by_page(blocks).items():
         evidence = evidence_by_page.get(page)
         if evidence is None:

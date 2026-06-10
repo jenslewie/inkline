@@ -18,6 +18,11 @@ def _qwen_marker_offset_in_text(text: str, marker: str, before_text: str, after_
     quote = normalize_ws(quote_text)
     if not text or (not before and not after):
         return None
+    visible_candidates = _qwen_visible_marker_offsets_with_context(text, marker, before, after)
+    if len(visible_candidates) == 1:
+        return visible_candidates[0]
+    if visible_candidates:
+        return None
     candidates: List[int] = []
     if after:
         start = 0
@@ -61,6 +66,36 @@ def _qwen_marker_offset_in_text(text: str, marker: str, before_text: str, after_
     if candidates:
         return None
     return _qwen_marker_offset_in_normalized_text(text, marker, before, after, quote)
+
+
+def _qwen_visible_marker_offsets_with_context(text: str, marker: str, before: str, after: str) -> List[int]:
+    candidates: List[int] = []
+    for marker_text in _qwen_marker_text_variants(marker):
+        start = 0
+        while True:
+            offset = text.find(marker_text, start)
+            if offset < 0:
+                break
+            start = offset + 1
+            if marker_text.startswith("*") and (
+                (offset > 0 and text[offset - 1] == "*")
+                or (offset + len(marker_text) < len(text) and text[offset + len(marker_text)] == "*")
+            ):
+                continue
+            prefix = _qwen_text_without_neighbor_markers(text[:offset])
+            suffix = _qwen_text_without_neighbor_markers(text[offset + len(marker_text) :])
+            if before and not _qwen_prefix_matches_before(prefix, before):
+                continue
+            if after and not normalize_ws(suffix).startswith(after):
+                continue
+            candidates.append(offset)
+    return sorted(set(candidates))
+
+
+def _qwen_text_without_neighbor_markers(text: str) -> str:
+    for marker_text in ("***", "**", "*"):
+        text = text.replace(marker_text, "")
+    return text.translate(str.maketrans("", "", "⁰¹²³⁴⁵⁶⁷⁸⁹"))
 
 
 def _qwen_marker_offset_in_normalized_text(text: str, marker: str, before: str, after: str, quote: str) -> Optional[int]:
