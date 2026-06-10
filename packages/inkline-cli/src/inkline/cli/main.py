@@ -26,6 +26,18 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_pdf.add_argument("--parser", "--engine", dest="parser_name", default="mineru")
     ingest_pdf.add_argument("--backend", default="vlm-auto-engine", help="Parser backend option.")
     ingest_pdf.add_argument("--method", default="auto", help="Parser method option.")
+    ingest_pdf.add_argument(
+        "--marker-locator-repair",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use Qwen visual marker repair (enabled by default).",
+    )
+    ingest_pdf.add_argument(
+        "--marker-locator-page-dpi",
+        type=int,
+        default=150,
+        help="DPI for Qwen full-page marker location.",
+    )
     ingest_pdf.add_argument("--output", required=True)
     ingest_pdf.set_defaults(handler=_ingest_pdf)
 
@@ -88,7 +100,12 @@ def _ingest_pdf(args: argparse.Namespace) -> int:
     request = ParseRequest(
         input_path=Path(args.input),
         output_path=Path(args.output),
-        options={"backend": args.backend, "method": args.method},
+        options={
+            "backend": args.backend,
+            "method": args.method,
+            "marker_locator_repair": args.marker_locator_repair,
+            "marker_locator_page_dpi": args.marker_locator_page_dpi,
+        },
     )
     result = parse_document(request, args.parser_name)
     write_canonical(args.output, result.document)

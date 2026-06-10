@@ -1,3 +1,4 @@
+from argparse import Namespace
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,12 +26,21 @@ from inkline.parsers.mineru.reconcile.notes.qwen_types import _PROMPT_VERSION
 
 
 def test_marker_locator_page_and_block_dpi_config() -> None:
-    args = SimpleNamespace(marker_locator_dpi=None, marker_locator_page_dpi=300, marker_locator_block_dpi=200)
+    args = Namespace(marker_locator_dpi=None, marker_locator_page_dpi=300, marker_locator_block_dpi=200)
 
     assert _marker_locator_page_dpi(args) == 300
     assert _marker_locator_block_dpi(args) == 200
 
-    legacy_args = SimpleNamespace(marker_locator_dpi=250, marker_locator_page_dpi=None, marker_locator_block_dpi=None)
+    default_args = Namespace(
+        marker_locator_dpi=None,
+        marker_locator_page_dpi=None,
+        marker_locator_block_dpi=None,
+    )
+
+    assert _marker_locator_page_dpi(default_args) == 150
+    assert _marker_locator_block_dpi(default_args) == 200
+
+    legacy_args = Namespace(marker_locator_dpi=250, marker_locator_page_dpi=None, marker_locator_block_dpi=None)
 
     assert _marker_locator_page_dpi(legacy_args) == 250
     assert _marker_locator_block_dpi(legacy_args) == 250

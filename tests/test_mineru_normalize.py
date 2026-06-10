@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 
 from inkline.canonical import validate_document
+from inkline.parse import ParseRequest
 from inkline.parsers.mineru import normalize_mineru_outputs
+import inkline.parsers.mineru.bridge as mineru_bridge
+from inkline.parsers.mineru.bridge import MinerUParser
 
 
 def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
@@ -46,6 +49,7 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
             "model_type": "qwen2_vl",
             "architectures": ["Qwen2VLForConditionalGeneration"],
         },
+        marker_locator_repair=False,
     )
 
     validate_document(document)
@@ -53,4 +57,41 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     assert document["metadata"]["schema_version"] == "1.0"
     assert document["metadata"]["mineru"]["version"] == "3.2.3"
     assert document["metadata"]["mineru"]["vlm_model"]["model_name"] == "MinerU2.5-Pro-2605-1.2B"
+    marker_config = document["metadata"]["mineru"]["auxiliary_ocr"]["qwen_marker_locator"]
+    assert marker_config["enabled"] is False
+    assert marker_config["model"] == "qwen3.6:35b-a3b"
+    assert marker_config["page_dpi"] == 150
     assert output.exists()
+
+
+def test_mineru_parser_enables_qwen_marker_repair_at_150_dpi_by_default(
+    tmp_path, monkeypatch
+) -> None:
+    captured = {}
+
+    def fake_ingest(input_pdf, **kwargs):
+        captured.update(kwargs)
+        return {
+            "metadata": {
+                "schema_version": "1.0",
+                "doc_id": "sample",
+                "title": "Sample",
+                "language": "en",
+                "source_file": str(input_pdf),
+                "parser_name": "mineru",
+            },
+            "blocks": [],
+            "toc": [],
+        }
+
+    monkeypatch.setattr(mineru_bridge, "ingest_pdf_with_mineru", fake_ingest)
+    request = ParseRequest(
+        tmp_path / "sample.pdf",
+        tmp_path / "canonical.json",
+        language="en",
+    )
+
+    MinerUParser().parse(request)
+
+    assert captured["marker_locator_repair"] is True
+    assert captured["marker_locator_page_dpi"] == 150

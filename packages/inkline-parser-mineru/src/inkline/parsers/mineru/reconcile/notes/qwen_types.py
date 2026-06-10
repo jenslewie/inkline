@@ -50,10 +50,10 @@ _PARAGRAPH_CROP_PADDING_PDF = 12.0
 class QwenMarkerLocatorConfig:
     source_pdf: Path
     artifact_dir: Path
-    model: str = "qwen3.5:9b"
+    model: str = "qwen3.6:35b-a3b"
     api_url: str = "http://127.0.0.1:11434/api/chat"
     dpi: int = 200
-    page_dpi: int = 300
+    page_dpi: int = 150
     block_dpi: int = 200
     max_megapixels: float = 0.0
     body_prompt: str = _BODY_REFS_PROMPT
