@@ -85,6 +85,11 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     assert marker_config["page_dpi"] == 150
     assert marker_config["block_dpi"] == 200
     assert output.exists()
+    report_path = tmp_path / "canonical_note_ref_gaps.json"
+    assert report_path.exists()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["canonical"] == "canonical.json"
+    assert report["summary"]["missing_body_ref_notes"] == 0
 
 
 def test_snapshot_front_matter_does_not_replace_following_body_text_page(tmp_path) -> None:

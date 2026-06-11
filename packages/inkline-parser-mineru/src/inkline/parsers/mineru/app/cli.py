@@ -8,7 +8,7 @@ from pathlib import Path
 
 from inkline.canonical import validate_document
 
-from ..analysis.note_gap_report import build_note_ref_gap_report, note_ref_gap_report_path
+from ..analysis.note_gap_report import write_note_ref_gap_report
 from ..normalize.assets import materialize_image_assets
 from ..normalize.core import build_canonical
 from ..extraction.io import load_inputs
@@ -82,10 +82,7 @@ def main() -> None:
     validate_document(canonical)
     with open(out, "w", encoding="utf-8") as f:
         json.dump(canonical, f, ensure_ascii=False, indent=2)
-    report_path = note_ref_gap_report_path(out)
-    report = build_note_ref_gap_report(canonical, canonical_path=out)
-    with report_path.open("w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
+    report_path, report = write_note_ref_gap_report(canonical, out)
     print(f"Wrote {out} with {len(canonical['blocks'])} blocks and {len(canonical['toc'])} toc entries")
     print(
         f"Wrote {report_path} with "

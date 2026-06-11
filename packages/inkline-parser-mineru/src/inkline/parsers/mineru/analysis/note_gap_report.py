@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from ..extraction.text import normalize_note_marker, normalize_ws
 
-__all__ = ["build_note_ref_gap_report", "note_ref_gap_report_path"]
+__all__ = ["build_note_ref_gap_report", "note_ref_gap_report_path", "write_note_ref_gap_report"]
 
 
 def note_ref_gap_report_path(canonical_path: Path) -> Path:
@@ -35,7 +36,7 @@ def build_note_ref_gap_report(document: Dict[str, Any], *, canonical_path: Optio
     independent_notes = [block for block in blocks if _is_independent_note(block)]
     referenced_notes = [block for block in independent_notes if _has_body_ref(block, referenced_note_ids)]
 
-    metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+    metadata = _dict_value(document.get("metadata"))
     report: Dict[str, Any] = {
         "canonical": canonical_path.name if canonical_path else None,
         "doc_id": metadata.get("doc_id"),
@@ -57,13 +58,21 @@ def build_note_ref_gap_report(document: Dict[str, Any], *, canonical_path: Optio
     return report
 
 
+def write_note_ref_gap_report(document: Dict[str, Any], canonical_path: Path) -> tuple[Path, Dict[str, Any]]:
+    report_path = note_ref_gap_report_path(canonical_path)
+    report = build_note_ref_gap_report(document, canonical_path=canonical_path)
+    with report_path.open("w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+    return report_path, report
+
+
 def _is_independent_note(block: Dict[str, Any]) -> bool:
-    attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+    attrs = _dict_value(block.get("attrs"))
     return bool(attrs.get("note_id"))
 
 
 def _referenced_by(block: Dict[str, Any]) -> List[Dict[str, Any]]:
-    attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+    attrs = _dict_value(block.get("attrs"))
     refs = attrs.get("referenced_by")
     return refs if isinstance(refs, list) else []
 
@@ -73,7 +82,7 @@ def _is_independent_note_without_body_ref(block: Dict[str, Any], referenced_note
 
 
 def _has_body_ref(block: Dict[str, Any], referenced_note_ids: set[str]) -> bool:
-    attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+    attrs = _dict_value(block.get("attrs"))
     note_id = str(attrs.get("note_id") or "")
     return bool(_referenced_by(block)) or bool(note_id and note_id in referenced_note_ids)
 
@@ -90,8 +99,8 @@ def _referenced_note_ids(blocks: List[Dict[str, Any]]) -> set[str]:
 
 
 def _missing_note_entry(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
-    source = block.get("source") if isinstance(block.get("source"), dict) else {}
+    attrs = _dict_value(block.get("attrs"))
+    source = _dict_value(block.get("source"))
     note_id = attrs.get("note_id")
     if not note_id:
         return None
@@ -154,7 +163,7 @@ def _unresolved_body_note_refs(blocks: List[Dict[str, Any]]) -> List[Dict[str, A
 
 
 def _body_note_refs(block: Dict[str, Any]) -> List[Dict[str, Any]]:
-    attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+    attrs = _dict_value(block.get("attrs"))
     runs = attrs.get("inline_runs")
     inline_refs = [
         run
@@ -168,7 +177,7 @@ def _body_note_refs(block: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _body_ref_entry(block: Dict[str, Any], ref: Dict[str, Any]) -> Dict[str, Any]:
-    source = block.get("source") if isinstance(block.get("source"), dict) else {}
+    source = _dict_value(block.get("source"))
     text = str(block.get("text") or "")
     return {
         "ref_block_id": block.get("block_id"),
@@ -186,3 +195,7 @@ def _body_ref_entry(block: Dict[str, Any], ref: Dict[str, Any]) -> Dict[str, Any
 def _preview(text: str, limit: int = 180) -> str:
     text = normalize_ws(text)
     return text if len(text) <= limit else text[:limit] + "..."
+
+
+def _dict_value(value: Any) -> Dict[str, Any]:
+    return cast(Dict[str, Any], value) if isinstance(value, dict) else {}

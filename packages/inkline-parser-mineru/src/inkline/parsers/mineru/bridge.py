@@ -81,6 +81,7 @@ def normalize_mineru_outputs(
     from inkline.parsers.mineru.normalize.core import build_canonical
     from inkline.parsers.mineru.normalize.assets import materialize_image_assets
     from inkline.parsers.mineru.extraction.io import load_inputs
+    from inkline.parsers.mineru.analysis.note_gap_report import write_note_ref_gap_report
 
     args = Namespace(
         content_list=None,
@@ -123,6 +124,7 @@ def normalize_mineru_outputs(
     import json
 
     out.write_text(json.dumps(canonical, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_note_ref_gap_report(canonical, out)
     return canonical
 
 
