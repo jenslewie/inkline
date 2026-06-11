@@ -60,6 +60,7 @@ def run_qwen_marker_locator_repairs(
     plan = qwen_page_plan._problem_page_plan(typed_blocks)
     pages = set(plan.footnote_pages) | set(plan.body_ref_pages)
     if not pages:
+        qwen_evidence._log_info("Qwen marker locator skipped: no problem pages found")
         return []
 
     # Init run: create artifact dir, start timing, log run_start
@@ -110,6 +111,17 @@ def _init_marker_locator_run(
     qwen_evidence._reset_timing_log(config)
     run_started = qwen_evidence._now_iso()
     run_timer = time.perf_counter()
+    qwen_evidence._log_info(
+        "Qwen marker locator started: pages={} footnote_pages={} body_ref_pages={} model={} body_mode={} page_dpi={} block_dpi={} artifact_dir={}",
+        len(pages),
+        len(plan.footnote_pages),
+        len(plan.body_ref_pages),
+        config.model,
+        config.body_mode,
+        config.page_dpi,
+        config.block_dpi,
+        config.artifact_dir,
+    )
     qwen_evidence._write_timing_event(
         config,
         {
@@ -140,11 +152,14 @@ def _missing_body_ref_pages(
 ) -> List[int]:
     """Determine which pages need a retry pass for body refs."""
     if config.body_mode == "page_then_block":
-        return (
+        missing_pages = (
             sorted({int(page) for page in missing_body_ref_pages_after_page(evidence)})
             if missing_body_ref_pages_after_page is not None
             else []
         )
+        log = qwen_evidence._log_info if missing_pages else qwen_evidence._log_debug
+        log("Qwen marker locator retry planning: {} page(s) still need body refs", len(missing_pages))
+        return missing_pages
     body_plan = qwen_page_plan._problem_page_plan(blocks)
     return sorted(set(body_plan.body_ref_pages) - set(plan.body_ref_pages))
 
@@ -156,18 +171,41 @@ def _finish_marker_locator_run(
     run_timer: float,
 ) -> None:
     """Write evidence JSON and emit run_end timing event."""
+    run_finished = qwen_evidence._now_iso()
+    run_duration = qwen_evidence._duration(run_timer)
+    unique_pages = sorted({item.page for item in evidence})
+    footnote_defs = sum(len(item.footnote_defs) for item in evidence)
+    body_refs = sum(len(item.body_refs) for item in evidence)
     qwen_evidence._write_evidence(config.artifact_dir / "qwen_marker_evidence.json", evidence)
     qwen_evidence._write_timing_event(
         config,
         {
             "event": "run_end",
             "started_at": run_started,
-            "finished_at": qwen_evidence._now_iso(),
-            "duration_seconds": qwen_evidence._duration(run_timer),
+            "finished_at": run_finished,
+            "duration_seconds": run_duration,
             "evidence_items": len(evidence),
-            "unique_pages": sorted({item.page for item in evidence}),
+            "unique_pages": unique_pages,
+            "summary": {
+                "unique_page_count": len(unique_pages),
+                "footnote_defs": footnote_defs,
+                "body_refs": body_refs,
+                "avg_page_seconds": qwen_evidence._avg_seconds(run_duration, len(unique_pages)),
+            },
             "evidence_path": str(config.artifact_dir / "qwen_marker_evidence.json"),
         },
+    )
+    qwen_evidence._log_info(
+        "Qwen marker locator finished: started_at={} finished_at={} evidence_items={} unique_pages={} footnote_defs={} body_refs={} seconds={} avg_page_seconds={} evidence_path={}",
+        run_started,
+        run_finished,
+        len(evidence),
+        len(unique_pages),
+        footnote_defs,
+        body_refs,
+        run_duration,
+        qwen_evidence._avg_seconds(run_duration, len(unique_pages)),
+        config.artifact_dir / "qwen_marker_evidence.json",
     )
 
 

@@ -12,7 +12,7 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, cast
 
 from ...analysis.page_geometry import PageGeometry
 from ...extraction.text import normalize_ws
@@ -42,28 +42,47 @@ def _collect_qwen_marker_evidence(
     cache = _read_existing_evidence(config.artifact_dir / "qwen_marker_evidence.json") if config.reuse_evidence else {}
     evidence: List[qwen_types.QwenMarkerPageEvidence] = []
     use_block_body_refs = config.body_mode == "block"
-    geometry = PageGeometry.from_canonical_blocks(blocks) if use_block_body_refs else None
+    geometry = PageGeometry.from_canonical_blocks(cast(Sequence[Dict[str, Any]], blocks)) if use_block_body_refs else None
     body_blocks_by_page = qwen_prompt._body_blocks_by_page(blocks) if use_block_body_refs else {}
     body_ref_source = "paragraph_crops" if use_block_body_refs else "full_page"
     footnote_pages = set() if footnote_pages is None else footnote_pages
     body_ref_pages = set(pages) if body_ref_pages is None else body_ref_pages
     expected_body_markers_by_page = expected_body_markers_by_page or {}
+    page_list = list(pages)
     pass_started = _now_iso()
     pass_timer = time.perf_counter()
+    pass_stats = _new_collect_stats()
+    _log_debug(
+        "Qwen marker locator pass `{}`: pages={} body_mode={} dpi={} footnote_pages={} body_ref_pages={}",
+        pass_name,
+        len(page_list),
+        config.body_mode,
+        config.dpi,
+        len(footnote_pages),
+        len(body_ref_pages),
+    )
     _write_timing_event(
         config,
         {
             "event": "collect_pass_start",
             "pass": pass_name,
             "started_at": pass_started,
-            "pages": list(pages),
+            "pages": page_list,
             "footnote_pages": sorted(footnote_pages),
             "body_ref_pages": sorted(body_ref_pages),
         },
     )
     with fitz.open(config.source_pdf) as doc:
-        for page in pages:
+        for page_index, page in enumerate(page_list, start=1):
             if page < 1 or page > doc.page_count:
+                _log_warning(
+                    "Qwen marker locator pass `{}` page {}/{} skipped: page {} outside PDF page_count={}",
+                    pass_name,
+                    page_index,
+                    len(page_list),
+                    page,
+                    doc.page_count,
+                )
                 _write_timing_event(
                     config,
                     {
@@ -81,6 +100,16 @@ def _collect_qwen_marker_evidence(
             render_timer = time.perf_counter()
             pdf_page = doc[page - 1]
             image_path = config.artifact_dir / f"page_{page:04d}_{config.dpi}dpi_qwen_full_page.png"
+            _log_debug(
+                "Qwen marker locator pass `{}` page {}/{} (pdf page {}): footnote_defs={} body_refs={} mode={}",
+                pass_name,
+                page_index,
+                len(page_list),
+                page,
+                page in footnote_pages,
+                page in body_ref_pages,
+                config.body_mode,
+            )
             try:
                 qwen_prompt._render_full_page(pdf_page, image_path, config)
             except Exception as exc:
@@ -141,6 +170,23 @@ def _collect_qwen_marker_evidence(
                 # Complete cache hit — reuse cached item directly
                 item = cached_item
             evidence.append(item)
+            page_duration = _duration(page_timer)
+            _update_collect_stats(pass_stats, cache_hit, model_calls, len(item.footnote_defs), len(item.body_refs), page_duration)
+            _log_info(
+                "Qwen marker locator pass `{}` page {}/{} done: page={} started_at={} finished_at={} seconds={} render_seconds={} cache_hit={} model_calls={} footnote_defs={} body_refs={}",
+                pass_name,
+                page_index,
+                len(page_list),
+                page,
+                page_started,
+                _now_iso(),
+                page_duration,
+                render_duration,
+                cache_hit,
+                len(model_calls),
+                len(item.footnote_defs),
+                len(item.body_refs),
+            )
             _write_timing_event(
                 config,
                 {
@@ -149,7 +195,7 @@ def _collect_qwen_marker_evidence(
                     "page": page,
                     "started_at": page_started,
                     "finished_at": _now_iso(),
-                    "duration_seconds": _duration(page_timer),
+                    "duration_seconds": page_duration,
                     "render_seconds": render_duration,
                     "cache_hit": cache_hit,
                     "image": str(image_path),
@@ -161,6 +207,7 @@ def _collect_qwen_marker_evidence(
                     "body_ref_count": len(item.body_refs),
                 },
             )
+    pass_duration = _duration(pass_timer)
     _write_timing_event(
         config,
         {
@@ -168,9 +215,24 @@ def _collect_qwen_marker_evidence(
             "pass": pass_name,
             "started_at": pass_started,
             "finished_at": _now_iso(),
-            "duration_seconds": _duration(pass_timer),
+            "duration_seconds": pass_duration,
             "evidence_items": len(evidence),
+            "summary": _collect_summary(pass_stats, pass_duration),
         },
+    )
+    _log_info(
+        "Qwen marker locator pass `{}` finished: started_at={} finished_at={} pages={} evidence_items={} cache_hits={} model_calls={} footnote_defs={} body_refs={} seconds={} avg_page_seconds={}",
+        pass_name,
+        pass_started,
+        _now_iso(),
+        len(page_list),
+        len(evidence),
+        pass_stats["cache_hits"],
+        pass_stats["model_calls"],
+        pass_stats["footnote_defs"],
+        pass_stats["body_refs"],
+        pass_duration,
+        _avg_seconds(pass_stats["page_seconds"], pass_stats["pages"]),
     )
     return evidence
 
@@ -190,6 +252,7 @@ def _collect_footnote_defs_for_page(
     """Call Qwen for footnote definitions on a single page; update raw_parts and model_calls."""
     call_timer = time.perf_counter()
     call_started = _now_iso()
+    _log_debug("Qwen marker locator page {}: calling model for footnote definitions", page)
     try:
         footnote_raw = qwen_api._call_qwen_marker_locator(image_path, config, prompt=config.footnote_prompt)
     except Exception as exc:
@@ -231,6 +294,12 @@ def _collect_footnote_defs_for_page(
             "raw_item_count": len(footnote_raw.get("footnote_defs") or []) if isinstance(footnote_raw, dict) else 0,
         }
     )
+    _log_debug(
+        "Qwen marker locator page {}: footnote definitions returned {} item(s) in {}s",
+        page,
+        len(footnote_raw.get("footnote_defs") or []) if isinstance(footnote_raw, dict) else 0,
+        _duration(call_timer),
+    )
     raw_parts["footnote_defs"] = footnote_raw.get("footnote_defs") if isinstance(footnote_raw, dict) else []
     return raw_parts, model_calls
 
@@ -261,8 +330,16 @@ def _collect_body_refs_for_page(
     call_finished: str | None = None
     call_duration: float | None = None
     retry_calls: List[Dict[str, Any]] = []
+    body_refs: List[Dict[str, Any]] = []
     try:
         if use_block_body_refs:
+            if geometry is None:
+                raise RuntimeError("Qwen paragraph body-ref collection requires page geometry.")
+            _log_debug(
+                "Qwen marker locator page {}: scanning paragraph crops for body refs markers={}",
+                page,
+                markers,
+            )
             body_raw = _collect_paragraph_body_refs(
                 pdf_page,
                 page,
@@ -272,10 +349,16 @@ def _collect_body_refs_for_page(
                 markers,
             )
         else:
+            _log_debug(
+                "Qwen marker locator page {}: calling model for full-page body refs markers={}",
+                page,
+                markers,
+            )
             body_raw = qwen_api._call_qwen_marker_locator(image_path, config, prompt=qwen_prompt._body_prompt_for_markers(config.body_prompt, markers))
             call_finished = _now_iso()
             call_duration = _duration(call_timer)
-            body_refs = body_raw.get("body_refs") if isinstance(body_raw, dict) else []
+            raw_body_refs = body_raw.get("body_refs") if isinstance(body_raw, dict) else []
+            body_refs = raw_body_refs if isinstance(raw_body_refs, list) else []
             body_refs, retry_calls = _retry_missing_single_marker_body_refs(
                 image_path,
                 config,
@@ -323,6 +406,12 @@ def _collect_body_refs_for_page(
             "raw_item_count": len(body_raw) if use_block_body_refs else (len(body_raw.get("body_refs") or []) if isinstance(body_raw, dict) else 0),
         }
     )
+    _log_debug(
+        "Qwen marker locator page {}: body refs returned {} item(s) in {}s",
+        page,
+        len(body_raw) if use_block_body_refs else (len(body_raw.get("body_refs") or []) if isinstance(body_raw, dict) else 0),
+        call_duration if call_duration is not None else _duration(call_timer),
+    )
     model_calls.extend(retry_calls)
     raw_parts["body_refs"] = body_raw if use_block_body_refs else body_refs
     raw_parts["body_ref_source"] = body_ref_source
@@ -346,6 +435,7 @@ def _retry_missing_single_marker_body_refs(
     for marker in missing_markers:
         call_timer = time.perf_counter()
         call_started = _now_iso()
+        _log_debug("Qwen marker locator retry: calling model for single marker {}", marker)
         single_raw = qwen_api._call_qwen_marker_locator(image_path, config, prompt=qwen_prompt._single_marker_body_prompt(marker))
         single_refs = single_raw.get("body_refs") if isinstance(single_raw, dict) else []
         refs = qwen_prompt._merge_body_ref_raw_items(refs, single_refs)
@@ -358,6 +448,12 @@ def _retry_missing_single_marker_body_refs(
                 "duration_seconds": _duration(call_timer),
                 "raw_item_count": len(single_refs) if isinstance(single_refs, list) else 0,
             }
+        )
+        _log_debug(
+            "Qwen marker locator retry: marker {} returned {} item(s) in {}s",
+            marker,
+            len(single_refs) if isinstance(single_refs, list) else 0,
+            _duration(call_timer),
         )
     return refs, model_calls
 
@@ -420,6 +516,12 @@ def _collect_single_paragraph_body_refs(
     render_seconds = _duration(render_timer)
     model_timer = time.perf_counter()
     model_started = _now_iso()
+    _log_debug(
+        "Qwen marker locator page {} block {}: calling model for paragraph crop markers={}",
+        page,
+        block_id(block),
+        markers,
+    )
     try:
         raw = qwen_api._call_qwen_marker_locator(image_path, config, prompt=qwen_prompt._paragraph_body_prompt_for_markers(markers, block))
     except Exception as exc:
@@ -470,11 +572,92 @@ def _collect_single_paragraph_body_refs(
             "body_ref_count": len(cleaned_refs),
         },
     )
+    block_duration = _duration(block_timer)
+    _log_info(
+        "Qwen marker locator page {} block {} done: started_at={} finished_at={} seconds={} render_seconds={} model_seconds={} body_refs={}",
+        page,
+        block_id(block),
+        block_started,
+        _now_iso(),
+        block_duration,
+        render_seconds,
+        _duration(model_timer),
+        len(cleaned_refs),
+    )
     return cleaned_refs
 
 
 def _page_footnote_markers_by_page(blocks: List[CanonicalBlock]) -> Dict[int, List[str]]:
     return qwen_page_plan._page_footnote_markers_by_page(blocks)
+
+
+def _log_info(message: str, *args: Any) -> None:
+    try:
+        from loguru import logger  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        return
+    logger.info(message, *args)
+
+
+def _log_debug(message: str, *args: Any) -> None:
+    try:
+        from loguru import logger  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        return
+    logger.debug(message, *args)
+
+
+def _log_warning(message: str, *args: Any) -> None:
+    try:
+        from loguru import logger  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        return
+    logger.warning(message, *args)
+
+
+def _new_collect_stats() -> Dict[str, Any]:
+    return {
+        "pages": 0,
+        "cache_hits": 0,
+        "model_calls": 0,
+        "footnote_defs": 0,
+        "body_refs": 0,
+        "page_seconds": 0.0,
+    }
+
+
+def _update_collect_stats(
+    stats: Dict[str, Any],
+    cache_hit: bool,
+    model_calls: List[Dict[str, Any]],
+    footnote_def_count: int,
+    body_ref_count: int,
+    page_seconds: float,
+) -> None:
+    stats["pages"] += 1
+    stats["cache_hits"] += int(cache_hit)
+    stats["model_calls"] += len(model_calls)
+    stats["footnote_defs"] += footnote_def_count
+    stats["body_refs"] += body_ref_count
+    stats["page_seconds"] += page_seconds
+
+
+def _collect_summary(stats: Dict[str, Any], pass_seconds: float) -> Dict[str, Any]:
+    return {
+        "pages": stats["pages"],
+        "cache_hits": stats["cache_hits"],
+        "cache_misses": stats["pages"] - stats["cache_hits"],
+        "model_calls": stats["model_calls"],
+        "footnote_defs": stats["footnote_defs"],
+        "body_refs": stats["body_refs"],
+        "total_page_seconds": round(float(stats["page_seconds"]), 6),
+        "avg_page_seconds": _avg_seconds(stats["page_seconds"], stats["pages"]),
+        "pass_seconds": pass_seconds,
+    }
+
+
+def _avg_seconds(total: float, count: int) -> float:
+    return round(total / count, 6) if count else 0.0
 
 
 def _read_existing_evidence(path: Path) -> Dict[tuple[int, str], qwen_types.QwenMarkerPageEvidence]:

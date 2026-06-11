@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import sys
 import time
 from argparse import Namespace
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from inkline.parse.types import ParseRequest, ParseResult
 
 DEFAULT_MINERU_BACKEND = "vlm-auto-engine"
 DEFAULT_MINERU_METHOD = "auto"
+_MINERU_LOGGING_CONFIGURED = False
 
 
 class MinerURawFiles(TypedDict):
@@ -310,6 +312,7 @@ def _now_iso() -> str:
 
 
 def _configure_mineru_env(work_dir: Path, backend: str) -> None:
+    _configure_mineru_logging()
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
     os.environ.setdefault("NO_ALBUMENTATIONS_UPDATE", "1")
     os.environ.setdefault("MPLCONFIGDIR", str(work_dir / "cache" / "matplotlib"))
@@ -325,6 +328,24 @@ def _configure_mineru_env(work_dir: Path, backend: str) -> None:
         _clear_inkline_local_model_config()
 
     os.environ.pop("MINERU_DEVICE_MODE", None)
+
+
+def _configure_mineru_logging() -> None:
+    global _MINERU_LOGGING_CONFIGURED
+    if _MINERU_LOGGING_CONFIGURED:
+        return
+    if os.environ.get("INKLINE_PRESERVE_LOGURU", "").lower() in {"1", "true", "yes"}:
+        _MINERU_LOGGING_CONFIGURED = True
+        return
+    try:
+        from loguru import logger  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        _MINERU_LOGGING_CONFIGURED = True
+        return
+    level = os.environ.get("INKLINE_MINERU_LOG_LEVEL", "INFO").upper()
+    logger.remove()
+    logger.add(sys.stderr, level=level)
+    _MINERU_LOGGING_CONFIGURED = True
 
 
 def _clear_inkline_local_model_config() -> None:
