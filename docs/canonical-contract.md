@@ -5,6 +5,7 @@
 - `metadata`: document identity and parser/source metadata.
 - `blocks`: ordered reading-flow blocks.
 - `toc`: nested table-of-contents entries.
+- `pages`: optional physical-page metadata.
 - `assets`: extracted assets such as images.
 - `source_map`: block-to-source references for traceability.
 
@@ -27,6 +28,19 @@ equation page_break
 ```
 
 Downstream packages must consume canonical fields instead of parser-private raw outputs. Parser-specific evidence can live under `block.attrs`.
+
+`pages` describes physical pages without replacing reading-flow `blocks`.
+Page metadata uses two coarse axes:
+
+- `region`: `front_matter`, `content`, `back_matter`, or `unknown`.
+- `page_role`: `cover`, `title_page`, `copyright_page`, `back_cover`,
+  `generic`, or `unknown`.
+
+When a page should preserve its visual presentation, `pages[*].snapshot` may
+point to an image in `assets.images`. A snapshot asset is a rendition of the
+page; it must not replace extractable text blocks. `figure` blocks represent
+actual visual content in the book, such as diagrams, maps, and charts, not
+generic page snapshots.
 
 Canonical JSON written before `schema_version` was introduced is treated as the
 implicit v0 format. `read_canonical()` migrates it to `1.0` in memory; validation

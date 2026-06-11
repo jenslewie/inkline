@@ -40,3 +40,30 @@ def test_export_chunks_keeps_traceability_fields(tmp_path):
     assert chunk["page_start"] == 7
     assert chunk["page_end"] == 7
     assert chunk["bbox_refs"] == [{"page": 7, "bbox": [1, 2, 3, 4]}]
+
+
+def test_export_chunks_indexes_layout_text_blocks(tmp_path):
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b000010",
+            "type": "display_block",
+            "text": "版式化文本。",
+            "source": {"page": 2, "bbox": None},
+            "attrs": {},
+        },
+        {
+            "block_id": "b000011",
+            "type": "list_item",
+            "text": "列表文本。",
+            "source": {"page": 2, "bbox": None},
+            "attrs": {},
+        },
+    ]
+    output = tmp_path / "chunks.jsonl"
+
+    export_chunks(document, output)
+
+    chunk = json.loads(output.read_text(encoding="utf-8").splitlines()[0])
+    assert chunk["text"] == "版式化文本。\n\n列表文本。"
+    assert chunk["block_ids"] == ["b000010", "b000011"]

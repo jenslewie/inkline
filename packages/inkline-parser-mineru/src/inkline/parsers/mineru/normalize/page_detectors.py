@@ -1,9 +1,14 @@
-"""Page-level classification helpers. Detects full-page images, title-only pages, snapshot/layout pages, and dominant blocks. Provides the coord_page_size heuristic shared by display quote detection."""
+"""Page-level classification helpers.
+
+Detects full-page images, title-only pages, snapshot/layout pages, and dominant
+blocks. Provides the coord_page_size heuristic shared by display quote
+detection.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Sequence, Tuple
+from typing import Sequence, Tuple
 
 from .builders import union_bbox
 from ..extraction.text import block_text
@@ -28,14 +33,40 @@ def dominant_block(b: RawBlock, blocks: Sequence[RawBlock], layout: LayoutStats)
     return (width_ratio >= 0.6 and height_ratio >= 0.45) or area_ratio >= 0.35
 
 
+def body_text_like_page(blocks: Sequence[RawBlock], layout: LayoutStats) -> bool:
+    """Return True when a page is normal flowing prose, not a visual layout page."""
+
+    meaningful = [
+        b
+        for b in blocks
+        if b.raw_type not in {"page_number", "page_header", "page_footer"} and (block_text(b) or b.raw_type in {"image", "chart", "table"})
+    ]
+    if any(b.raw_type in {"image", "chart", "table"} for b in meaningful):
+        return False
+    text_like = [b for b in meaningful if b.raw_type in {"paragraph", "title"} and block_text(b)]
+    if not text_like:
+        return False
+    page_width, _page_height = coord_page_size(meaningful, layout)
+    long_body_paragraphs = [
+        b
+        for b in text_like
+        if b.raw_type == "paragraph"
+        and len(block_text(b)) > 80
+        and b.width / max(1.0, page_width) >= 0.55
+    ]
+    return len(long_body_paragraphs) >= 2
+
+
 @dataclass(frozen=True)
 class _LayoutSnapshotPageDetector:
     """Detect pages better represented as a single visual snapshot."""
 
     layout: LayoutStats
-    prev_major_type: Optional[str]
 
     def detect(self, blocks: Sequence[RawBlock]) -> Tuple[bool, str]:
+        if body_text_like_page(blocks, self.layout):
+            return False, ""
+
         page_edge_blocks = [b for b in blocks if b.raw_type in {"page_header", "page_footer"}]
         content_blocks = [b for b in blocks if b.raw_type not in {"page_number", "page_header", "page_footer"}]
         meaningful = [
@@ -50,10 +81,13 @@ class _LayoutSnapshotPageDetector:
         media_like = [b for b in meaningful if b.raw_type in {"image", "chart", "table"}]
         short_texts = [b for b in text_like if len(block_text(b)) <= 40]
         dense_metadata_layout = len(text_like) >= 18 and len(short_texts) >= max(14, int(len(text_like) * 0.8))
+        page_width, _page_height = coord_page_size(meaningful, self.layout)
         body_width_long_text = [
             b
             for b in text_like
-            if b.raw_type == "paragraph" and len(block_text(b)) > 80 and b.width >= self.layout.body_width * 0.75
+            if b.raw_type == "paragraph"
+            and len(block_text(b)) > 80
+            and b.width / max(1.0, page_width) >= 0.55
         ]
 
         if any(b.raw_type == "chart" and dominant_block(b, meaningful, self.layout) for b in meaningful):
@@ -62,13 +96,11 @@ class _LayoutSnapshotPageDetector:
             return True, "page_diagram"
         if self._is_visual_label_page(meaningful, text_like, media_like, body_width_long_text):
             return True, "visual_label_page"
-        if media_like and len(page_edge_blocks) >= 4 and not body_width_long_text:
+        if media_like and len(page_edge_blocks) >= 4:
             return True, "designed_media_page"
-        if self.prev_major_type == "full_page_image" and (
-            dense_metadata_layout
-            or len(page_edge_blocks) >= 3
-            or (not body_width_long_text and 2 <= len(text_like) <= 8 and any(b.raw_type == "title" for b in text_like))
-        ):
+        if dense_metadata_layout:
+            return True, "designed_text_page"
+        if len(page_edge_blocks) >= 3 and not body_width_long_text and 1 <= len(text_like) <= 12:
             return True, "designed_text_page"
         return False, ""
 
@@ -125,5 +157,5 @@ class _LayoutSnapshotPageDetector:
         return has_media or (len(text_like) >= 12 and coverage_width >= 0.65 and coverage_height >= 0.55)
 
 
-def should_snapshot_layout_page(blocks: Sequence[RawBlock], layout: LayoutStats, prev_major_type: Optional[str]) -> Tuple[bool, str]:
-    return _LayoutSnapshotPageDetector(layout=layout, prev_major_type=prev_major_type).detect(blocks)
+def should_snapshot_layout_page(blocks: Sequence[RawBlock], layout: LayoutStats) -> Tuple[bool, str]:
+    return _LayoutSnapshotPageDetector(layout=layout).detect(blocks)

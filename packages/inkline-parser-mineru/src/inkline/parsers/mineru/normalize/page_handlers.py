@@ -7,6 +7,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from .builders import (
     make_epigraph_group,
+    make_chart_table,
     make_figure,
     make_full_page_figure,
     make_heading,
@@ -241,10 +242,25 @@ def _try_process_snapshot_page(
     prev_major_type: Optional[str],
     in_toc: bool,
 ) -> Optional[_PageResult]:
-    snapshot_page, snapshot_role = should_snapshot_layout_page(blocks, layout, prev_major_type)
-    if snapshot_page:
+    snapshot_page, snapshot_role = should_snapshot_layout_page(blocks, layout)
+    if not snapshot_page:
+        return None
+    if snapshot_role == "page_chart":
+        out: List[Dict[str, Any]] = []
+        for b in content_blocks:
+            if b.raw_type == "title" and block_text(b):
+                out.append(make_heading(ids, [b], level=1, role="front_matter_title"))
+            elif b.raw_type == "chart":
+                out.append(make_chart_table(ids, b))
+        if out:
+            return _PageResult(out, "table", in_toc)
+    if snapshot_role in {"page_diagram", "visual_label_page"}:
         page_num = blocks[0].page
-        return _PageResult([make_page_snapshot_figure(ids, page_num, content_blocks, snapshot_role)], "full_page_image", in_toc)
+        return _PageResult([make_page_snapshot_figure(ids, page_num, content_blocks, snapshot_role)], "figure", in_toc)
+    if snapshot_role in {"designed_media_page", "designed_text_page"}:
+        text_blocks = [b for b in content_blocks if b.raw_type in {"paragraph", "title", "list"}]
+        out, prev, in_toc = process_normal_flow(ids, text_blocks, layout, prev_major_type, in_toc, text_style=None)
+        return _PageResult(out, prev, in_toc)
     return None
 
 

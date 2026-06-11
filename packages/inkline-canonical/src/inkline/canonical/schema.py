@@ -117,6 +117,7 @@ def make_document(
     blocks: list[dict[str, Any]],
     author: str | None = None,
     assets: dict[str, Any] | None = None,
+    pages: list[dict[str, Any]] | None = None,
     toc: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     document = {
@@ -132,6 +133,7 @@ def make_document(
         },
         "blocks": blocks,
         "toc": toc or [],
+        "pages": pages or [],
         "assets": assets or {"images": []},
         "source_map": [
             {
@@ -197,6 +199,11 @@ def validate_document(document: dict[str, Any]) -> None:
     images = document["assets"].get("images", [])
     if not isinstance(images, list):
         raise ValidationError("assets.images must be a list")
+    pages = document.get("pages", [])
+    if not isinstance(pages, list):
+        raise ValidationError("pages must be a list")
+    for index, page in enumerate(pages):
+        _validate_page(page, index)
     if not isinstance(document["source_map"], list):
         raise ValidationError("source_map must be a list")
 
@@ -228,6 +235,20 @@ def _validate_toc_entry(entry: dict[str, Any], index: int) -> None:
         raise ValidationError(f"toc[{index}].children must be a list")
     for child_index, child in enumerate(children):
         _validate_toc_entry(child, child_index)
+
+
+def _validate_page(page: dict[str, Any], index: int) -> None:
+    if not isinstance(page, dict):
+        raise ValidationError(f"pages[{index}] must be object")
+    if not isinstance(page.get("physical_page"), int):
+        raise ValidationError(f"pages[{index}].physical_page must be int")
+    if page.get("region") not in {"front_matter", "content", "back_matter", "unknown"}:
+        raise ValidationError(f"pages[{index}].region is invalid: {page.get('region')}")
+    if page.get("page_role") not in {"cover", "title_page", "copyright_page", "back_cover", "generic", "unknown"}:
+        raise ValidationError(f"pages[{index}].page_role is invalid: {page.get('page_role')}")
+    snapshot = page.get("snapshot", {})
+    if snapshot is not None and not isinstance(snapshot, dict):
+        raise ValidationError(f"pages[{index}].snapshot must be object")
 
 
 def sample_document() -> dict[str, Any]:

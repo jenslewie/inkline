@@ -35,6 +35,7 @@ from ..analysis.text_style import TextStyleAnalyzer
 from ..schema.models import IdFactory, RawBlock
 from .output_schema import normalize_display_blocks_for_layout_schema, remove_internal_note_ref_indexes
 from .page_processing import build_toc_from_blocks, extend_table_source_pages, process_page
+from .page_roles import build_page_metadata
 from ..reconcile import (
     merge_continuation_footnotes,
     merge_cross_page_paragraphs,
@@ -141,6 +142,7 @@ def build_canonical(
         or getattr(args, "content_list", None)
         or ""
     )
+    page_metadata = build_page_metadata(pages, layout, title=args.title, blocks=blocks)
     canonical = {
         "metadata": {
             "schema_version": SCHEMA_VERSION,
@@ -191,6 +193,7 @@ def build_canonical(
             },
         },
         "toc": [],
+        "pages": page_metadata,
         "blocks": blocks,
         "assets": {"images": []},
         "source_map": [

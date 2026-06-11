@@ -240,3 +240,14 @@ def make_table(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
         "image_path": (content.get("image_source") or {}).get("path") if isinstance(content, dict) else None,
     }
     return canonical_block(ids.next(), "table", caption_text, b.page, b.bbox, attrs=attrs)
+
+
+def make_chart_table(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
+    content = b.raw.get("content", {})
+    chart_text = normalize_ws(content.get("content", "")) if isinstance(content, dict) else ""
+    attrs = {
+        "source_type": "chart",
+        "chart_type": b.raw.get("sub_type"),
+        "image_path": (content.get("image_source") or {}).get("path") if isinstance(content, dict) else None,
+    }
+    return canonical_block(ids.next(), "table", chart_text, b.page, b.bbox, attrs=attrs)

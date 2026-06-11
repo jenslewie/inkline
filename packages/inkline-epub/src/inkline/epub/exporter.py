@@ -95,7 +95,7 @@ def export_epub(document: dict[str, Any], output_path: str | Path) -> None:
             path = Path(asset["path"])
             if not path.exists():
                 continue
-            archive.write(path, f"EPUB/images/{path.name}")
+            archive.write(path, f"EPUB/images/{_asset_image_name(asset)}")
 
 
 def _chapter_documents(
@@ -214,7 +214,7 @@ def _figure_html(block: dict[str, Any], *, image_assets: dict[str, dict[str, Any
 
     caption = text or fallback
     if image_asset:
-        image_name = Path(image_asset["path"]).name
+        image_name = _asset_image_name(image_asset)
         alt = text or fallback
         return (
             "<figure>"
@@ -286,6 +286,7 @@ def _opf(
     title = escape(metadata.get("title") or metadata["doc_id"])
     language = escape(metadata.get("language") or "zh-CN")
     author = escape(metadata.get("author") or "Unknown")
+    cover_image_id = _cover_image_id(image_assets)
     manifest_items = [
         '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
         '<item id="css" href="styles/book.css" media-type="text/css"/>',
@@ -301,11 +302,13 @@ def _opf(
         if not path.exists():
             continue
         media_type = asset.get("media_type") or mimetypes.guess_type(path.name)[0] or "image/png"
-        href = posixpath.join("images", path.name)
+        href = posixpath.join("images", _asset_image_name(asset))
+        properties = ' properties="cover-image"' if image_id == cover_image_id else ""
         manifest_items.append(
-            f'<item id="{escape(image_id, quote=True)}" href="{escape(href, quote=True)}" media-type="{escape(media_type, quote=True)}"/>'
+            f'<item id="{escape(image_id, quote=True)}" href="{escape(href, quote=True)}" media-type="{escape(media_type, quote=True)}"{properties}/>'
         )
 
+    cover_meta = f'<meta name="cover" content="{escape(cover_image_id, quote=True)}"/>' if cover_image_id else ""
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -313,6 +316,7 @@ def _opf(
     <dc:title>{title}</dc:title>
     <dc:language>{language}</dc:language>
     <dc:creator>{author}</dc:creator>
+    {cover_meta}
     <meta property="dcterms:modified">2026-06-03T00:00:00Z</meta>
   </metadata>
   <manifest>
@@ -323,6 +327,18 @@ def _opf(
   </spine>
 </package>
 """
+
+
+def _cover_image_id(image_assets: dict[str, dict[str, Any]]) -> str | None:
+    for image_id, asset in image_assets.items():
+        if asset.get("role") == "cover":
+            return image_id
+    return None
+
+
+def _asset_image_name(asset: dict[str, Any]) -> str:
+    image_id = str(asset.get("image_id") or "image")
+    return f"{image_id}_{Path(asset['path']).name}"
 
 
 def _format_number(value: Any) -> str:

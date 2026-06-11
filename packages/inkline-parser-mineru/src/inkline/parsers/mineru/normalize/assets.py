@@ -15,8 +15,61 @@ def materialize_image_assets(
     page_sizes: Optional[Dict[int, Tuple[float, float]]] = None,
     dpi: int = 150,
 ) -> None:
+    materialize_page_snapshot_assets(canonical, source_pdf, output_dir, dpi=dpi)
     materialize_full_page_image_assets(canonical, source_pdf, output_dir, dpi=dpi)
     materialize_repaired_figure_image_assets(canonical, source_pdf, output_dir, page_sizes=page_sizes, dpi=dpi)
+
+
+def materialize_page_snapshot_assets(canonical: Dict[str, Any], source_pdf: Optional[str], output_dir: Path, dpi: int = 150) -> None:
+    pages = [
+        p for p in canonical.get("pages", [])
+        if isinstance(p, dict) and isinstance(p.get("snapshot"), dict) and p["snapshot"].get("required")
+    ]
+    if not pages or not source_pdf:
+        return
+    try:
+        import fitz  # type: ignore
+    except Exception as exc:
+        for page in pages:
+            page.setdefault("snapshot", {})["render_error"] = f"PyMuPDF unavailable: {exc}"
+        return
+
+    pdf_path = Path(source_pdf)
+    asset_dir = output_dir / "images" / "pages"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    related_by_page = _related_block_ids_by_page(canonical)
+    doc = fitz.open(pdf_path)
+    try:
+        matrix = fitz.Matrix(dpi / 72.0, dpi / 72.0)
+        for page in pages:
+            page_num = page.get("physical_page")
+            if not isinstance(page_num, int) or page_num < 1 or page_num > len(doc):
+                continue
+            image_id = f"page-{page_num:04d}-snapshot"
+            image_name = f"page_{page_num:04d}.png"
+            image_path = asset_dir / image_name
+            if not image_path.exists():
+                pix = doc[page_num - 1].get_pixmap(matrix=matrix, alpha=False)
+                pix.save(str(image_path))
+            snapshot = page.setdefault("snapshot", {})
+            snapshot["asset_id"] = image_id
+            snapshot["image_render_source"] = "source_pdf"
+            snapshot["image_render_dpi"] = dpi
+            role = page.get("page_role") if page.get("page_role") in {"cover", "back_cover"} else "page_snapshot"
+            _upsert_image_asset(
+                canonical,
+                {
+                    "image_id": image_id,
+                    "path": str(image_path),
+                    "media_type": "image/png",
+                    "role": role,
+                    "snapshot_role": snapshot.get("role"),
+                    "source": {"page": page_num},
+                    "related_block_ids": related_by_page.get(page_num, []),
+                },
+            )
+    finally:
+        doc.close()
 
 
 def materialize_full_page_image_assets(canonical: Dict[str, Any], source_pdf: Optional[str], output_dir: Path, dpi: int = 150) -> None:
@@ -51,12 +104,25 @@ def materialize_full_page_image_assets(canonical: Dict[str, Any], source_pdf: Op
                 pix = doc[page - 1].get_pixmap(matrix=matrix, alpha=False)
                 pix.save(str(image_path))
             attrs = b.setdefault("attrs", {})
+            image_id = f"page-{page:04d}-full"
             original = attrs.get("image_path")
             if original:
                 attrs["cropped_image_path"] = original
             attrs["image_path"] = str(Path("images") / "full_page" / image_name)
+            attrs["image_id"] = image_id
             attrs["image_render_source"] = "source_pdf"
             attrs["image_render_dpi"] = dpi
+            _upsert_image_asset(
+                canonical,
+                {
+                    "image_id": image_id,
+                    "path": str(image_path),
+                    "media_type": "image/png",
+                    "role": "figure",
+                    "source": {"page": page},
+                    "related_block_ids": [b.get("block_id")] if b.get("block_id") else [],
+                },
+            )
     finally:
         doc.close()
 
@@ -108,13 +174,26 @@ def materialize_repaired_figure_image_assets(
                 pix = doc[page - 1].get_pixmap(matrix=matrix, clip=rect, alpha=False)
                 pix.save(str(image_path))
             attrs = b.setdefault("attrs", {})
+            image_id = f"{block_id}-image"
             original = attrs.get("image_path")
             if original:
                 attrs.setdefault("original_image_path", original)
             attrs["image_path"] = str(Path("images") / "repaired" / image_name)
+            attrs["image_id"] = image_id
             attrs["image_render_source"] = "source_pdf_crop"
             attrs["image_render_dpi"] = dpi
             attrs["image_render_bbox"] = _pdf_rect_to_coord_bbox(page, doc[page - 1].rect, rect, geometry)
+            _upsert_image_asset(
+                canonical,
+                {
+                    "image_id": image_id,
+                    "path": str(image_path),
+                    "media_type": "image/png",
+                    "role": "figure",
+                    "source": {"page": page, "bbox": attrs.get("image_render_bbox")},
+                    "related_block_ids": [b.get("block_id")] if b.get("block_id") else [],
+                },
+            )
     finally:
         doc.close()
 
@@ -124,6 +203,37 @@ def _needs_repaired_figure_asset(block: Dict[str, Any]) -> bool:
     if attrs.get("layout_role") == "full_page_image":
         return False
     return bool(attrs.get("fragment_block_ids") or attrs.get("embedded_text_absorb_reason"))
+
+
+def _related_block_ids_by_page(canonical: Dict[str, Any]) -> Dict[int, list[str]]:
+    related: Dict[int, list[str]] = {}
+    for block in canonical.get("blocks", []):
+        block_id = block.get("block_id")
+        if not block_id:
+            continue
+        source = block.get("source") or {}
+        pages = source.get("pages")
+        if isinstance(pages, list):
+            block_pages = [p for p in pages if isinstance(p, int)]
+        else:
+            page = source.get("page")
+            block_pages = [page] if isinstance(page, int) else []
+        for page in block_pages:
+            related.setdefault(page, []).append(block_id)
+    return related
+
+
+def _upsert_image_asset(canonical: Dict[str, Any], asset: Dict[str, Any]) -> None:
+    assets = canonical.setdefault("assets", {})
+    images = assets.setdefault("images", [])
+    if not isinstance(images, list):
+        assets["images"] = images = []
+    image_id = asset.get("image_id")
+    for index, existing in enumerate(images):
+        if isinstance(existing, dict) and existing.get("image_id") == image_id:
+            images[index] = asset
+            return
+    images.append(asset)
 
 
 def _should_expand_repaired_figure_crop(block: Dict[str, Any]) -> bool:

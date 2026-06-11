@@ -18,6 +18,20 @@ def test_document_requires_core_top_level_fields():
         validate_document(document)
 
 
+def test_pages_metadata_validates_when_present():
+    document = sample_document()
+    document["pages"] = [
+        {
+            "physical_page": 1,
+            "region": "front_matter",
+            "page_role": "cover",
+            "snapshot": {"required": True, "role": "designed_media_page"},
+        }
+    ]
+
+    validate_document(document)
+
+
 def test_epigraph_blockquote_and_signature_blocks_validate():
     document = make_document(
         doc_id="sample",

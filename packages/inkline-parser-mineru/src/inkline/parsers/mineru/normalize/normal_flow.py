@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .builders import (
     make_flush_right_terminal_block,
+    make_chart_table,
     make_figure,
     make_heading,
     make_paragraph,
@@ -70,6 +71,11 @@ def process_normal_flow(
         if b.raw_type == "image":
             out.append(make_figure(ids, b))
             prev_major_type = "figure"
+            i += 1
+            continue
+        if b.raw_type == "chart":
+            out.append(make_chart_table(ids, b))
+            prev_major_type = "table"
             i += 1
             continue
         if b.raw_type == "table":
