@@ -255,6 +255,7 @@ def run_mineru_raw(
             },
         )
         raise
+    final_version_info = get_mineru_version_info(backend)
     write_run_state(
         state_path,
         {
@@ -263,9 +264,9 @@ def run_mineru_raw(
             "output_dir": str(raw_root),
             "backend": backend,
             "method": method,
-            "mineru_version": version_info.get("mineru_version"),
-            "mineru_vl_utils_version": version_info.get("mineru_vl_utils_version"),
-            "vlm_model": version_info.get("vlm_model"),
+            "mineru_version": final_version_info.get("mineru_version"),
+            "mineru_vl_utils_version": final_version_info.get("mineru_vl_utils_version"),
+            "vlm_model": final_version_info.get("vlm_model"),
             "started_at": started_at,
             "finished_at": _now_iso(),
             "duration_seconds": round(time.monotonic() - started_monotonic, 3),
@@ -314,22 +315,30 @@ def _configure_mineru_env(work_dir: Path, backend: str) -> None:
     Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
     Path(os.environ["YOLO_CONFIG_DIR"]).mkdir(parents=True, exist_ok=True)
 
-    if backend in {"vlm-auto-engine", "vlm-mlx-engine", "hybrid-auto-engine"}:
+    if backend == "pipeline":
         config_path = _write_local_config(work_dir)
         os.environ["MINERU_MODEL_SOURCE"] = "local"
         os.environ["MINERU_TOOLS_CONFIG_JSON"] = str(config_path.resolve())
-        os.environ.pop("MINERU_DEVICE_MODE", None)
+    elif backend in {"vlm-auto-engine", "vlm-mlx-engine", "hybrid-auto-engine"}:
+        _clear_inkline_local_model_config()
+
+    os.environ.pop("MINERU_DEVICE_MODE", None)
+
+
+def _clear_inkline_local_model_config() -> None:
+    if os.environ.get("MINERU_MODEL_SOURCE") == "local":
+        os.environ.pop("MINERU_MODEL_SOURCE", None)
+    config_path = os.environ.get("MINERU_TOOLS_CONFIG_JSON")
+    if config_path and Path(config_path).name == "mineru_local_config.json":
+        os.environ.pop("MINERU_TOOLS_CONFIG_JSON", None)
 
 
 def _write_local_config(work_dir: Path) -> Path:
     config_path = work_dir / "mineru_local_config.json"
     models_dir: dict[str, str] = {}
     pipeline_model = _cached_pipeline_model_root(required=False)
-    vlm_model = _cached_vlm_model_root(required=False)
     if pipeline_model is not None:
         models_dir["pipeline"] = str(pipeline_model)
-    if vlm_model is not None:
-        models_dir["vlm"] = str(vlm_model)
     config_path.write_text(json.dumps({"models-dir": models_dir}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return config_path
 
@@ -348,22 +357,56 @@ def _cached_pipeline_model_root(*, required: bool) -> Path | None:
 
 
 def _cached_vlm_model_root(*, required: bool) -> Path | None:
-    candidates = (
-        Path.home() / ".cache/modelscope/hub/models/OpenDataLab/MinerU2___5-Pro-2604-1___2B",
-        Path.home() / ".cache/modelscope/hub/models/OpenDataLab/MinerU2.5-Pro-2604-1.2B",
-    )
-    for path in candidates:
+    for path in _candidate_vlm_model_roots():
         if (path / "config.json").exists() and any(path.glob("*.safetensors")):
             return path
-    hf_cache = Path.home() / ".cache/huggingface/hub/models--opendatalab--MinerU2.5-Pro-2604-1.2B/snapshots"
-    if hf_cache.exists():
-        snapshots = sorted((path for path in hf_cache.iterdir() if path.is_dir()), key=lambda path: path.stat().st_mtime)
-        for snapshot in reversed(snapshots):
-            if (snapshot / "config.json").exists() and any(snapshot.glob("*.safetensors")):
-                return snapshot
+        snapshot_roots = [path] if path.name == "snapshots" else [path / "snapshots"]
+        for snapshot_root in snapshot_roots:
+            if not snapshot_root.exists():
+                continue
+            snapshots = sorted((path for path in snapshot_root.iterdir() if path.is_dir()), key=lambda path: path.stat().st_mtime)
+            for snapshot in reversed(snapshots):
+                if (snapshot / "config.json").exists() and any(snapshot.glob("*.safetensors")):
+                    return snapshot
     if required:
         raise FileNotFoundError("MinerU VLM model cache was not found.")
     return None
+
+
+def _candidate_vlm_model_roots() -> list[Path]:
+    repos = _mineru_vlm_repositories()
+    roots: list[Path] = []
+    for repo in repos:
+        roots.extend(_huggingface_cache_roots(repo))
+        roots.extend(_modelscope_cache_roots(repo))
+    return roots
+
+
+def _mineru_vlm_repositories() -> list[str]:
+    try:
+        from mineru.utils.enum_class import ModelPath  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        return []
+    repos = [ModelPath.vlm_root_hf, ModelPath.vlm_root_modelscope]
+    return [repo for repo in repos if repo]
+
+
+def _huggingface_cache_roots(repo: str) -> list[Path]:
+    if "/" not in repo:
+        return []
+    owner, name = repo.split("/", 1)
+    return [Path.home() / ".cache/huggingface/hub" / f"models--{owner}--{name}" / "snapshots"]
+
+
+def _modelscope_cache_roots(repo: str) -> list[Path]:
+    if "/" not in repo:
+        return []
+    owner, name = repo.split("/", 1)
+    escaped_name = name.replace(".", "___")
+    return [
+        Path.home() / ".cache/modelscope/hub/models" / owner / escaped_name,
+        Path.home() / ".cache/modelscope/hub/models" / owner / name,
+    ]
 
 
 def get_mineru_version_info(backend: str = DEFAULT_MINERU_BACKEND) -> dict[str, Any]:

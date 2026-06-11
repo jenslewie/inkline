@@ -6,7 +6,12 @@ import sys
 import types
 
 import inkline.parsers.mineru.bridge as mineru_bridge
-from inkline.parsers.mineru.bridge import _model_info_from_path, find_mineru_run_version_info, run_mineru_raw
+from inkline.parsers.mineru.bridge import (
+    _cached_vlm_model_root,
+    _model_info_from_path,
+    find_mineru_run_version_info,
+    run_mineru_raw,
+)
 
 
 def test_run_mineru_raw_writes_run_state(tmp_path, monkeypatch):
@@ -62,9 +67,9 @@ def test_run_mineru_raw_writes_run_state(tmp_path, monkeypatch):
     assert state["finished_at"]
     assert state["duration_seconds"] >= 0
     config_path = output_dir / "mineru_local_config.json"
-    assert config_path.exists()
-    assert os.environ["MINERU_MODEL_SOURCE"] == "local"
-    assert os.environ["MINERU_TOOLS_CONFIG_JSON"] == str(config_path.resolve())
+    assert not config_path.exists()
+    assert "MINERU_MODEL_SOURCE" not in os.environ
+    assert "MINERU_TOOLS_CONFIG_JSON" not in os.environ
 
 
 def test_find_mineru_run_version_info_from_nested_raw_file(tmp_path):
@@ -111,3 +116,24 @@ def test_model_info_uses_huggingface_repository_name(tmp_path):
 
     assert info["model_name"] == "MinerU2.5-Pro-2605-1.2B"
     assert info["model_type"] == "qwen2_vl"
+
+
+def test_cached_vlm_model_root_uses_mineru_default_repo(tmp_path, monkeypatch):
+    snapshot_root = (
+        tmp_path
+        / ".cache"
+        / "huggingface"
+        / "hub"
+        / "models--opendatalab--MinerU2.5-Pro-2605-1.2B"
+        / "snapshots"
+    )
+    model_root = (
+        snapshot_root
+        / "revision"
+    )
+    model_root.mkdir(parents=True)
+    (model_root / "config.json").write_text("{}", encoding="utf-8")
+    (model_root / "model.safetensors").write_bytes(b"weights")
+    monkeypatch.setattr(mineru_bridge, "_candidate_vlm_model_roots", lambda: [snapshot_root])
+
+    assert _cached_vlm_model_root(required=True) == model_root
