@@ -1,4 +1,4 @@
-"""Note link resolution orchestrator. The resolve_note_links() function is the main entry point: it collects candidates from page-footnote and endnote strategies, filters invalid note refs, annotates note definitions, resolves each ref to a candidate, and syncs inline run note_ref entries. Also contains _PageFootnoteStrategy for same-page footnote matching."""
+"""Resolve inline note runs to page-footnote and endnote definitions."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional, cast
 
 from ...extraction.text import normalize_note_marker
 from ..block_access import block_id as _block_id
-from ..notes.keys import leading_note_marker as _com_leading_note_marker, note_ref_key as _note_ref_key
+from ..notes.keys import leading_note_marker as _com_leading_note_marker
 from ...schema.models import CanonicalBlock
 from .scopes import (
     _EndnoteSectionStrategy,
@@ -15,14 +15,9 @@ from .scopes import (
     _NoteResolutionStrategy,
     _pages_for_block,
 )
-from .marker_inline import _fallback_raw_marker
+from .marker_inline import _note_refs
 
 __all__ = ["resolve_note_links"]
-
-# Re-export for backward compatibility
-_NoteContext = _NoteContext
-_EndnoteSectionStrategy = _EndnoteSectionStrategy
-
 
 class _PageFootnoteStrategy:
     name = "page_footnote"
@@ -93,7 +88,7 @@ def resolve_note_links(blocks: List[Dict[str, Any]]) -> None:
     _suppress_lower_confidence_duplicate_page_footnote_refs(typed_blocks, by_id)
     resolved_candidate_by_note: Dict[str, _NoteCandidate] = {}
     for block in typed_blocks:
-        refs = block.get("attrs", {}).get("note_refs") or []
+        refs = _note_refs(block)
         if not refs:
             continue
         for ref in refs:
@@ -138,7 +133,6 @@ def resolve_note_links(blocks: List[Dict[str, Any]]) -> None:
         refs = sorted({x for x in resolved_by_note.get(candidate.block_id, []) if x})
         if refs:
             attrs["referenced_by"] = refs
-    _sync_inline_note_refs(typed_blocks)
 
 
 def _resolved_note_indexes(
@@ -148,10 +142,7 @@ def _resolved_note_indexes(
     resolved_by_note: Dict[str, List[str]] = {}
     resolved_markers_by_note: Dict[str, set[str]] = {}
     for block in blocks:
-        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
-        for ref in attrs.get("note_refs") or []:
-            if not isinstance(ref, dict):
-                continue
+        for ref in _note_refs(block):
             target_id = ref.get("target_block_id")
             if isinstance(target_id, str) and target_id in by_id:
                 _record_resolved_note_ref(block, ref, target_id, resolved_by_note, resolved_markers_by_note)
@@ -159,14 +150,11 @@ def _resolved_note_indexes(
 
 
 def _suppress_lower_confidence_duplicate_page_footnote_refs(blocks: List[CanonicalBlock], by_id: Dict[str, CanonicalBlock]) -> None:
-    refs_by_target: Dict[str, List[tuple[Dict[str, Any], Dict[str, Any]]]] = {}
+    refs_by_target: Dict[str, List[tuple[CanonicalBlock, Dict[str, Any]]]] = {}
     for block in blocks:
         if block.get("type") == "footnote":
             continue
-        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
-        for ref in attrs.get("note_refs") or []:
-            if not isinstance(ref, dict):
-                continue
+        for ref in _note_refs(block):
             target_id = ref.get("target_block_id")
             target = by_id.get(str(target_id or ""))
             target_attrs = target.get("attrs") if isinstance(target, dict) and isinstance(target.get("attrs"), dict) else {}
@@ -205,21 +193,36 @@ def _note_ref_source_rank(ref: Dict[str, Any]) -> int:
 
 def _remove_note_ref(block: CanonicalBlock, ref_to_remove: Dict[str, Any]) -> None:
     attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+    runs = attrs.get("inline_runs")
+    if isinstance(runs, list) and any(run is ref_to_remove for run in runs):
+        kept_runs = [run for run in runs if run is not ref_to_remove]
+        if any(isinstance(run, dict) and run.get("type") == "note_ref" for run in kept_runs):
+            attrs["inline_runs"] = kept_runs
+        else:
+            attrs.pop("inline_runs", None)
+        legacy_refs = attrs.get("note_refs")
+        if isinstance(legacy_refs, list):
+            removed_legacy = False
+            kept_legacy = []
+            for legacy_ref in legacy_refs:
+                if (
+                    not removed_legacy
+                    and isinstance(legacy_ref, dict)
+                    and _same_note_ref(legacy_ref, ref_to_remove)
+                ):
+                    removed_legacy = True
+                    continue
+                kept_legacy.append(legacy_ref)
+            if kept_legacy:
+                attrs["note_refs"] = kept_legacy
+            else:
+                attrs.pop("note_refs", None)
+        return
     refs = [ref for ref in attrs.get("note_refs") or [] if ref is not ref_to_remove]
     if refs:
         attrs["note_refs"] = refs
     else:
         attrs.pop("note_refs", None)
-    key = _note_ref_key(ref_to_remove)
-    runs = []
-    for run in attrs.get("inline_runs") or []:
-        if isinstance(run, dict) and run.get("type") == "note_ref" and _note_ref_key(run) == key:
-            continue
-        runs.append(run)
-    if runs:
-        attrs["inline_runs"] = runs
-    else:
-        attrs.pop("inline_runs", None)
 
 
 def _record_resolved_note_ref(
@@ -235,6 +238,14 @@ def _record_resolved_note_ref(
     marker = normalize_note_marker(ref.get("marker", ""))
     if marker:
         resolved_markers_by_note.setdefault(target_block_id, set()).add(marker)
+
+
+def _same_note_ref(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+    return (
+        normalize_note_marker(left.get("marker", "")) == normalize_note_marker(right.get("marker", ""))
+        and str(left.get("source") or "") == str(right.get("source") or "")
+        and left.get("source_page") == right.get("source_page")
+    )
 
 
 def _single_resolved_marker_for_note(block_id: str, resolved_markers_by_note: Dict[str, set[str]]) -> Optional[str]:
@@ -267,80 +278,17 @@ def _filter_invalid_note_refs(blocks: List[CanonicalBlock]) -> None:
         attrs = block.get("attrs")
         if not isinstance(attrs, dict):
             continue
-        refs = attrs.get("note_refs")
-        if not isinstance(refs, list):
-            continue
-        kept = []
         suppressed = list(attrs.get("suppressed_note_refs") or [])
-        for ref in refs:
-            if isinstance(ref, dict) and _invalid_note_ref_marker(ref.get("marker")):
-                bad = dict(ref)
-                bad["suppress_reason"] = "not_a_note_marker"
-                suppressed.append(bad)
+        for ref in list(_note_refs(block)):
+            if not _invalid_note_ref_marker(ref.get("marker")):
                 continue
-            kept.append(ref)
-        if kept:
-            attrs["note_refs"] = kept
-        else:
-            attrs.pop("note_refs", None)
+            bad = dict(ref)
+            bad.pop("type", None)
+            bad["suppress_reason"] = "not_a_note_marker"
+            suppressed.append(bad)
+            _remove_note_ref(block, ref)
         if suppressed:
             attrs["suppressed_note_refs"] = suppressed
-
-
-def _sync_inline_note_refs(blocks: List[CanonicalBlock]) -> None:
-    for block in blocks:
-        attrs = block.get("attrs")
-        if not isinstance(attrs, dict):
-            continue
-        runs = attrs.get("inline_runs")
-        refs = [ref for ref in attrs.get("note_refs") or [] if isinstance(ref, dict)]
-        if not isinstance(runs, list):
-            continue
-        buckets: Dict[tuple[str, str, int | None], List[Dict[str, Any]]] = {}
-        for ref in refs:
-            buckets.setdefault(_note_ref_key(ref), []).append(ref)
-
-        synced_runs: List[Dict[str, Any]] = []
-        ordered_refs: List[Dict[str, Any]] = []
-        for run in runs:
-            if not isinstance(run, dict):
-                continue
-            if run.get("type") != "note_ref":
-                synced_runs.append(run)
-                continue
-            matches = buckets.get(_note_ref_key(run)) or []
-            if not matches:
-                continue
-            ref = matches.pop(0)
-            synced = dict(run)
-            for key in (
-                "marker",
-                "source",
-                "source_page",
-                "raw_marker",
-                "target_block_id",
-                "target_note_id",
-                "note_strategy",
-                "resolution_confidence",
-                "confidence",
-                "recovery_reason",
-            ):
-                if key in ref:
-                    synced[key] = ref[key]
-            if not synced.get("raw_marker"):
-                raw_marker = _fallback_raw_marker(synced)
-                if raw_marker:
-                    synced["raw_marker"] = raw_marker
-                    ref.setdefault("raw_marker", raw_marker)
-            synced_runs.append(synced)
-            ordered_refs.append(ref)
-        if ordered_refs:
-            seen = {id(ref) for ref in ordered_refs}
-            attrs["note_refs"] = ordered_refs + [ref for ref in refs if id(ref) not in seen]
-        if any(run.get("type") == "note_ref" for run in synced_runs):
-            attrs["inline_runs"] = synced_runs
-        else:
-            attrs.pop("inline_runs", None)
 
 
 def _invalid_note_ref_marker(marker: Any) -> bool:
@@ -380,7 +328,7 @@ def _leading_note_marker(text: str) -> Optional[str]:
 
 def _refs_for_page(ref_block: CanonicalBlock, context: _NoteContext, marker: str) -> List[Dict[str, Any]]:
     refs = []
-    for ref in ref_block.get("attrs", {}).get("note_refs") or []:
+    for ref in _note_refs(ref_block):
         if normalize_note_marker(ref.get("marker", "")) == marker:
             refs.append(ref)
     return refs

@@ -51,6 +51,7 @@ from ..reconcile import (
     split_page_footnote_blocks,
 )
 from ..reconcile.notes.qwen_marker_locator import QwenMarkerLocatorConfig, run_qwen_marker_locator_repairs
+from ..reconcile.notes.marker_inline import _note_refs
 from ..reconcile.notes.trace import trace_note_calls
 
 
@@ -260,10 +261,7 @@ def _missing_or_unreliable_body_ref_pages(blocks: List[Dict[str, Any]], *, qwen_
     qwen_markers_by_page = _qwen_body_ref_markers_by_page(qwen_marker_pages or [])
     refs_by_note_id: Dict[str, List[Tuple[Dict[str, Any], Dict[str, Any]]]] = {}
     for block in blocks:
-        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
-        for ref in attrs.get("note_refs") or []:
-            if not isinstance(ref, dict):
-                continue
+        for ref in _note_refs(block):
             note_id = str(ref.get("target_note_id") or "")
             if note_id:
                 refs_by_note_id.setdefault(note_id, []).append((block, ref))

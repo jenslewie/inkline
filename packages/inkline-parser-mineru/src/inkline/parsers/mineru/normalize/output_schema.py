@@ -81,11 +81,11 @@ def normalize_display_blocks_for_layout_schema(blocks: List[Dict[str, Any]]) -> 
 
 
 def remove_internal_note_ref_indexes(blocks: List[Dict[str, Any]]) -> None:
-    """Remove pipeline-only note ref indexes from the public canonical output.
+    """Remove legacy parallel note-ref indexes from public canonical output.
 
-    Inline note refs in ``inline_runs`` are the persisted representation. The
-    parallel ``note_refs`` lists exist only while the normalization pipeline is
-    resolving and reconciling links.
+    New pipeline code uses ``inline_runs`` as the sole writable representation.
+    The cleanup remains for older canonical inputs accepted by compatibility
+    paths.
     """
     for block in blocks:
         attrs = block.get("attrs")

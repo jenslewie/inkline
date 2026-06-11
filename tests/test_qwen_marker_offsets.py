@@ -83,7 +83,7 @@ def test_qwen_does_not_override_existing_equation_inline_run() -> None:
     )
 
     assert changed is False
-    ref = block["attrs"]["note_refs"][0]
+    ref = next(run for run in block["attrs"]["inline_runs"] if run["type"] == "note_ref")
     assert "inline_position_source" not in ref
     assert block["attrs"]["inline_runs"][0]["text"].endswith("硇砂  ")
 
@@ -137,20 +137,12 @@ def test_qwen_overrides_invalid_existing_equation_inline_run() -> None:
     )
 
     assert changed is True
-    ref = block["attrs"]["note_refs"][0]
+    ref = next(run for run in block["attrs"]["inline_runs"] if run["type"] == "note_ref")
     assert "inline_offset" not in ref
-    assert block["attrs"]["inline_runs"] == [
-        {"type": "text", "text": "正确"},
-        {
-            "type": "note_ref",
-            "marker": "*",
-            "source": "equation_inline",
-            "source_page": 1,
-            "raw_marker": "^{*}",
-            "target_note_id": "note_1",
-        },
-        {"type": "text", "text": "正文。"},
-    ]
+    assert ref["raw_marker"] == "^{*}"
+    assert ref["target_note_id"] == "note_1"
+    assert [run["type"] for run in block["attrs"]["inline_runs"]] == ["text", "note_ref", "text"]
+    assert _inline_runs_text(block["attrs"]["inline_runs"]) == block["text"]
 
 
 def test_qwen_insertion_preserves_other_mineru_inline_runs() -> None:
@@ -481,11 +473,16 @@ def test_qwen_recovers_scoped_chapter_endnote_ref() -> None:
     )
     resolve_note_links(blocks)
 
-    refs = blocks[1]["attrs"]["note_refs"]
+    refs = [
+        run
+        for run in blocks[1]["attrs"]["inline_runs"]
+        if run.get("type") == "note_ref"
+    ]
     assert len(refs) == 1
     assert refs[0]["source"] == "qwen_marker_locator"
     assert refs[0]["target_block_id"] == "b_note_1"
     assert refs[0]["note_strategy"] == "chapter_endnote"
+    assert "note_refs" not in blocks[1]["attrs"]
     assert blocks[1]["attrs"]["inline_runs"][1]["type"] == "note_ref"
 
 
@@ -545,9 +542,10 @@ def test_qwen_recovers_adjacent_visible_symbol_and_numeric_markers() -> None:
     )
 
     assert blocks[0]["text"] == "在763年击败了叛军。作为奖赏。"
-    refs = blocks[0]["attrs"]["note_refs"]
-    assert [ref["marker"] for ref in refs] == ["3", "*"]
     runs = blocks[0]["attrs"]["inline_runs"]
+    refs = [run for run in runs if run["type"] == "note_ref"]
+    assert {ref["marker"] for ref in refs} == {"*", "3"}
+    assert "note_refs" not in blocks[0]["attrs"]
     assert [run["marker"] for run in runs if run["type"] == "note_ref"] == ["*", "3"]
     assert "".join(run.get("text", "") for run in runs if run["type"] == "text") == blocks[0]["text"]
 

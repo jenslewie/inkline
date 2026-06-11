@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from ..schema.models import BBox, IdFactory, NoteRef, RawBlock, canonical_block
+from ..schema.models import BBox, IdFactory, RawBlock, canonical_block
 from ..schema.patterns import TOC_LINE_RE
-from ..extraction.text import block_text, extract_caption_list, merge_inline_runs, merge_note_refs, normalize_toc_number, normalize_ws, strip_trailing_text_note
+from ..extraction.text import block_text, extract_caption_list, merge_inline_runs, normalize_toc_number, normalize_ws, strip_trailing_text_note
 
 def _build_display_attrs(
     raw_lines: List[str],
@@ -14,10 +14,9 @@ def _build_display_attrs(
     role: str,
 ) -> Tuple[Dict[str, Any], List[str]]:
     inline_runs = merge_inline_runs(blocks)
-    attrs = {
+    attrs: Dict[str, Any] = {
         "role": role,
         "quote_text": "\n".join(raw_lines).strip(),
-        "note_refs": merge_note_refs(blocks),
         "raw_types": [b.raw_type for b in blocks],
     }
     if any(run.get("type") == "note_ref" for run in inline_runs):
@@ -83,10 +82,9 @@ def make_epigraph_group(ids: IdFactory, groups: List[List[RawBlock]]) -> Dict[st
         all_blocks.extend(g)
         raw_lines = [block_text(b) for b in g if block_text(b)]
         inline_runs = merge_inline_runs(g)
-        item = {
+        item: Dict[str, Any] = {
             "text": "\n".join(raw_lines),
             "quote_text": "\n".join(raw_lines),
-            "note_refs": merge_note_refs(g),
             "source": {"page": g[0].page, "bbox": union_bbox([b.bbox for b in g if b.bbox])},
         }
         if any(run.get("type") == "note_ref" for run in inline_runs):
@@ -109,26 +107,14 @@ def _unique_pages(blocks: Sequence[RawBlock]) -> List[int]:
 
 
 def make_paragraph(ids: IdFactory, b: RawBlock, block_type: str = "paragraph", extra_attrs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    text, extra = strip_trailing_text_note(b.text)
-    refs = b.note_refs + extra
-    attrs = {"raw_type": b.raw_type}
+    text, _ = strip_trailing_text_note(b.text)
+    attrs: Dict[str, Any] = {"raw_type": b.raw_type}
     inline_runs = merge_inline_runs([b], separator="")
-    if refs:
-        attrs["note_refs"] = [_note_ref_dict(r, b.page) for r in refs]
     if any(run.get("type") == "note_ref" for run in inline_runs):
         attrs["inline_runs"] = inline_runs
     if extra_attrs:
         attrs.update(extra_attrs)
     return canonical_block(ids.next(), block_type, text, b.page, b.bbox, attrs=attrs)
-
-
-def _note_ref_dict(ref: NoteRef, page: int) -> Dict[str, Any]:
-    out = {"marker": ref.marker, "source": ref.source, "source_page": page}
-    if ref.raw_marker:
-        out["raw_marker"] = ref.raw_marker
-    return out
-
-
 def make_flush_right_terminal_block(ids: IdFactory, blocks: Sequence[RawBlock]) -> Dict[str, Any]:
     lines = [block_text(b) for b in blocks if block_text(b)]
     text = "\n".join(lines)

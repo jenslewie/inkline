@@ -25,7 +25,6 @@ def test_merge_block_pair_rebases_right_inline_note_offset() -> None:
         "source": {"page": 17, "bbox": None},
         "attrs": {
             "raw_type": "paragraph",
-            "note_refs": [note_ref],
             "inline_runs": [
                 {"type": "text", "text": right_prefix + "  "},
                 {**note_ref, "type": "note_ref"},
@@ -43,6 +42,6 @@ def test_merge_block_pair_rebases_right_inline_note_offset() -> None:
     )
 
     assert left["text"] == left_text + right_text
-    assert "inline_offset" not in left["attrs"]["note_refs"][0]
+    assert "note_refs" not in left["attrs"]
     assert [run["type"] for run in left["attrs"]["inline_runs"]] == ["text", "note_ref", "text"]
     assert left["attrs"]["inline_runs"][0]["text"].endswith(right_prefix + "  ")

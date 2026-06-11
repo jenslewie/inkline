@@ -13,14 +13,6 @@ def _body_block(block_id: str, markers: list[str]) -> dict:
         "text": "正文",
         "source": {"page": 137, "bbox": [100, 100, 880, 700]},
         "attrs": {
-            "note_refs": [
-                {
-                    "marker": marker,
-                    "source": "equation_inline",
-                    "source_page": 137,
-                }
-                for marker in markers
-            ],
             "inline_runs": [
                 {
                     "type": "note_ref",
@@ -67,7 +59,12 @@ def test_reference_list_uses_body_marker_order_for_unmarked_item() -> None:
     assert [block["type"] for block in notes] == ["footnote"] * 4
     assert [block["attrs"]["note_marker"] for block in notes] == ["1", "*", "2", "3"]
     assert notes[1]["attrs"]["note_marker_source"] == "reference_list_order"
-    assert [ref["target_block_id"] for ref in blocks[0]["attrs"]["note_refs"]] == [
+    refs = [
+        run
+        for run in blocks[0]["attrs"]["inline_runs"]
+        if run.get("type") == "note_ref"
+    ]
+    assert [ref["target_block_id"] for ref in refs] == [
         "b_note_0",
         "b_note_1",
         "b_note_2",

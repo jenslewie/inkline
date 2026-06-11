@@ -19,9 +19,7 @@ def test_make_paragraph_preserves_equation_inline_run_order() -> None:
     )
 
     paragraph = make_paragraph(IdFactory(), block)
-    ref = paragraph["attrs"]["note_refs"][0]
-
-    assert "inline_offset" not in ref
+    assert "note_refs" not in paragraph["attrs"]
     assert paragraph["attrs"]["inline_runs"] == [
         {"type": "text", "text": "甲"},
         {
@@ -46,12 +44,12 @@ def test_make_paragraph_copies_trailing_text_offset_to_note_ref() -> None:
     )
 
     paragraph = make_paragraph(IdFactory(), block)
-    ref = paragraph["attrs"]["note_refs"][0]
+    ref = paragraph["attrs"]["inline_runs"][-1]
 
     assert paragraph["text"] == "正文。"
     assert ref["source"] == "trailing_text"
     assert "inline_offset" not in ref
-    assert paragraph["attrs"]["inline_runs"][-1]["type"] == "note_ref"
+    assert ref["type"] == "note_ref"
 
 
 def test_make_paragraph_keeps_mineru_runs_when_text_is_normalized() -> None:

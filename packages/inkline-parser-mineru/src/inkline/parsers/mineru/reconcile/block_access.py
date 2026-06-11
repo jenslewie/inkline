@@ -2,26 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Mapping, Optional
 
 from ..schema.models import BBox
 
 
-def block_id(b: Dict[str, Any]) -> str:
+def block_id(b: Mapping[str, Any]) -> str:
     return str(b.get("block_id") or b.get("id") or "")
 
 
-def block_page(b: Dict[str, Any]) -> Optional[int]:
+def block_page(b: Mapping[str, Any]) -> Optional[int]:
     return (b.get("source") or {}).get("page")
 
 
-def block_pages(b: Dict[str, Any]) -> List[int]:
+def block_pages(b: Mapping[str, Any]) -> List[int]:
     src = b.get("source") or {}
     pages = src.get("pages") or ([src.get("page")] if src.get("page") is not None else [])
     return [int(p) for p in pages if p is not None]
 
 
-def block_bbox(b: Dict[str, Any]) -> Optional[BBox]:
+def block_bbox(b: Mapping[str, Any]) -> Optional[BBox]:
     src = b.get("source") or {}
     box = src.get("bbox")
     if isinstance(box, list) and len(box) >= 4:

@@ -20,6 +20,7 @@ from .layout_helpers import (
     _is_near_page_top, _page_coord_heights, _page_coord_widths,
 )
 from .notes.keys import leading_note_marker as _leading_note_marker
+from .notes.marker_inline import _note_refs
 
 FLOAT_INTERRUPTION_TYPES = FLOAT_LIKE_TYPES | {"table"}
 
@@ -259,7 +260,7 @@ def _looks_like_body_resumption(block: Dict[str, Any], layout: LayoutStats) -> b
 def _left_refs_interrupted_footnote(left: Dict[str, Any], interruptions: List[Dict[str, Any]]) -> bool:
     ref_markers = {
         str(ref.get("marker", "")).strip()
-        for ref in (left.get("attrs") or {}).get("note_refs", [])
+        for ref in _note_refs(left)
         if str(ref.get("marker", "")).strip()
     }
     if not ref_markers:
@@ -503,7 +504,7 @@ def merge_cross_page_paragraphs(blocks: List[Dict[str, Any]], source_pdf: Option
                     reason = "cross_page_paragraph_continuation_after_terminal_across_float"
                     evidence["terminal_continuation_exception"] = "short_page_bottom_line_before_next_page_float"
                 elif (
-                    not (right.get("attrs") or {}).get("note_refs")
+                    not _note_refs(right)
                     and _right_layout_says_unindented_continuation(evidence)
                     and _left_refs_interrupted_footnote(
                         left, interruptions

@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 from ...extraction.text import normalize_note_marker, normalize_ws
 from ..block_access import block_bbox, block_page, block_pages
 from ...schema.models import CanonicalBlock
+from .marker_inline import _note_refs
 from .marker_patterns import BODY_TYPES, _marker_int
 from .keys import leading_note_marker
 from .scopes import _EndnoteSectionStrategy, _NoteContext
@@ -108,10 +109,7 @@ def _body_ref_items_by_page(blocks: List[CanonicalBlock]) -> Dict[int, List[tupl
         if block.get("type") not in BODY_TYPES:
             continue
         fallback_pages = block_pages(block)
-        attrs = block.get("attrs") or {}
-        for ref in attrs.get("note_refs") or []:
-            if not isinstance(ref, dict):
-                continue
+        for ref in _note_refs(block):
             marker = _marker_int(ref.get("marker"))
             if marker is None:
                 continue
@@ -195,10 +193,7 @@ def _body_ref_items_for_scope(
             continue
         if scope_key is not None and context.scope_for(block) != scope_key:
             continue
-        attrs = block.get("attrs") or {}
-        for ref in attrs.get("note_refs") or []:
-            if not isinstance(ref, dict):
-                continue
+        for ref in _note_refs(block):
             marker = _marker_int(ref.get("marker"))
             if marker is not None:
                 out.append((block_index, block, marker))
@@ -261,7 +256,7 @@ def _is_body_ref_candidate_block(block: CanonicalBlock, page: int) -> bool:
         return False
     if page not in block_pages(block):
         return False
-    if (block.get("attrs") or {}).get("note_refs"):
+    if _note_refs(block):
         return False
     if not normalize_ws(str(block.get("text") or "")):
         return False
@@ -273,7 +268,7 @@ def _is_scope_body_ref_candidate_block(block: CanonicalBlock, context: _NoteCont
         return False
     if scope_key is not None and context.scope_for(block) != scope_key:
         return False
-    if (block.get("attrs") or {}).get("note_refs"):
+    if _note_refs(block):
         return False
     if not normalize_ws(str(block.get("text") or "")):
         return False

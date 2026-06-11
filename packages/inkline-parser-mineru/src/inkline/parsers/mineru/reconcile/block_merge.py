@@ -61,10 +61,12 @@ def _merge_block_pair(
         attrs["merge_evidence"] = evidence
     if interruptions:
         attrs["interrupted_by"] = [x.get("block_id") for x in interruptions]
-    refs = attrs.setdefault("note_refs", [])
-    for ref in (right.get("attrs") or {}).get("note_refs", []):
-        if ref not in refs:
-            refs.append(ref)
+    right_legacy_refs = (right.get("attrs") or {}).get("note_refs")
+    if isinstance(right_legacy_refs, list) and right_legacy_refs:
+        refs = attrs.setdefault("note_refs", [])
+        for ref in right_legacy_refs:
+            if ref not in refs:
+                refs.append(ref)
     _merge_inline_runs(left, right, original_left_text, original_right_text)
     if left.get("type") in QUOTE_TYPES:
         _refresh_canonical_quote_attrs(left)

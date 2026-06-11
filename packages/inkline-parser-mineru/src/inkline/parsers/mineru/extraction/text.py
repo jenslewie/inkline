@@ -6,7 +6,26 @@ import re
 from typing import Any, Dict, List, Sequence, Tuple
 
 from ..schema.models import NoteRef, RawBlock
-from ..schema.patterns import ATTR_RE, CHINESE_RE, EQUATION_NOTE_RE, PAGE_NUM_RE, TOC_LINE_RE, TRAILING_NOTE_RE
+from ..schema.patterns import ATTR_RE, CHINESE_RE, EQUATION_NOTE_RE, NOTE_MARKER_RE, PAGE_NUM_RE, TOC_LINE_RE, TRAILING_NOTE_RE
+
+_LATEX_GREEK = {
+    r"\alpha": "α",
+    r"\beta": "β",
+    r"\gamma": "γ",
+    r"\delta": "δ",
+    r"\epsilon": "ε",
+    r"\theta": "θ",
+    r"\lambda": "λ",
+    r"\mu": "μ",
+    r"\pi": "π",
+    r"\rho": "ρ",
+    r"\sigma": "σ",
+    r"\tau": "τ",
+    r"\phi": "φ",
+    r"\chi": "χ",
+    r"\psi": "ψ",
+    r"\omega": "ω",
+}
 
 __all__ = [
     "block_text",
@@ -15,7 +34,6 @@ __all__ = [
     "extract_list_item_text",
     "extract_text_and_notes",
     "extract_text_notes_and_runs",
-    "merge_note_refs",
     "merge_inline_runs",
     "normalize_note_marker",
     "normalize_toc_number",
@@ -37,10 +55,16 @@ def chinese_len(text: str) -> int:
 
 
 def _equation_to_marker(s: str) -> str:
-    m = EQUATION_NOTE_RE.search(s or "")
+    text = str(s or "").strip()
+    m = EQUATION_NOTE_RE.fullmatch(text)
     if m:
         return normalize_note_marker(m.group(1))
-    return normalize_note_marker(s)
+    return normalize_note_marker(text)
+
+
+def _equation_text(s: str) -> str:
+    text = str(s or "").strip()
+    return _LATEX_GREEK.get(text, text)
 
 
 def normalize_note_marker(s: str) -> str:
@@ -78,7 +102,7 @@ def extract_text_notes_and_runs(obj: Any) -> Tuple[str, List[NoteRef], List[Dict
             elif typ in {"equation_inline", "equation_interline"}:
                 raw_marker = str(x.get("content", ""))
                 marker = _equation_to_marker(raw_marker)
-                if marker:
+                if marker and NOTE_MARKER_RE.fullmatch(marker):
                     notes.append(NoteRef(marker=marker, source=typ, raw_marker=raw_marker))
                     runs.append({
                         "type": "note_ref",
@@ -86,6 +110,8 @@ def extract_text_notes_and_runs(obj: Any) -> Tuple[str, List[NoteRef], List[Dict
                         "raw_marker": raw_marker,
                         "source": typ,
                     })
+                else:
+                    append_text(_equation_text(raw_marker))
             else:
                 # Avoid adding asset paths/html while traversing image/table content.
                 for k, v in x.items():
@@ -140,25 +166,6 @@ def block_text(block: RawBlock, clean: bool = True) -> str:
         return block.text
     t, _ = strip_trailing_text_note(block.text)
     return t
-
-
-def merge_note_refs(blocks: Sequence[RawBlock]) -> List[Dict[str, Any]]:
-    refs: List[Tuple[NoteRef, int]] = []
-    for b in blocks:
-        refs.extend((r, b.page) for r in b.note_refs)
-        _, extra = strip_trailing_text_note(b.text)
-        refs.extend((r, b.page) for r in extra)
-    seen = set()
-    out = []
-    for r, page in refs:
-        key = (r.marker, r.source, page)
-        if key not in seen:
-            seen.add(key)
-            item = {"marker": r.marker, "source": r.source, "source_page": page}
-            if r.raw_marker:
-                item["raw_marker"] = r.raw_marker
-            out.append(item)
-    return out
 
 
 def merge_inline_runs(blocks: Sequence[RawBlock], separator: str = "\n") -> List[Dict[str, Any]]:

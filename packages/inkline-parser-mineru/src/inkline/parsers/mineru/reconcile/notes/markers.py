@@ -28,8 +28,8 @@ def recover_missing_note_refs(blocks: List[Dict[str, Any]], source_pdf: Any = No
     MinerU sometimes preserves note bodies but flattens body-side markers into
     ordinary digits, or drops a single marker between two well-formed neighbors.
     This pass uses available note-definition sequences as guardrails and records
-    recovered refs in ``attrs.note_refs`` so ``resolve_note_links`` can treat
-    explicit, recovered, and inferred refs through the same path.
+    recovered refs directly in ``attrs.inline_runs`` so ``resolve_note_links``
+    can annotate the persisted representation in place.
 
     ``blocks`` arrives from the canonical pipeline as ``List[Dict[str, Any]]``.
     Internally the note subsystem uses ``List[CanonicalBlock]`` for type

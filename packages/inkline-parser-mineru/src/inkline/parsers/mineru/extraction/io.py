@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from ..schema.models import NoteRef, RawBlock
+from ..schema.patterns import NOTE_MARKER_RE
 from .text import extract_text_notes_and_runs, normalize_note_marker, normalize_ws
 
 _CONTENT_COORD_SIZE = 1000.0
-_NOTE_MARKER_RE = re.compile(r"^(?:\d{1,3}|[*＊]{1,3})$")
 
 def load_json(path: Optional[str]) -> Any:
     if not path:
@@ -184,7 +183,7 @@ def inline_note_markers_from_middle_page(page_info: Dict[str, Any]) -> List[str]
         if item.get("type") not in {"inline_equation", "equation_inline"}:
             continue
         marker = normalize_note_marker(item.get("content", "")).replace("＊", "*")
-        if marker and _NOTE_MARKER_RE.fullmatch(marker):
+        if marker and NOTE_MARKER_RE.fullmatch(marker):
             markers.append(marker)
     return markers
 
@@ -211,7 +210,7 @@ def _middle_block_text(block: Dict[str, Any]) -> str:
             content = str(span.get("content") or "")
             if span.get("type") in {"inline_equation", "equation_inline"}:
                 marker = normalize_note_marker(content).replace("＊", "*")
-                parts.append(marker if _NOTE_MARKER_RE.fullmatch(marker) else content)
+                parts.append(marker if NOTE_MARKER_RE.fullmatch(marker) else content)
             else:
                 parts.append(content)
         text = normalize_ws("".join(parts))

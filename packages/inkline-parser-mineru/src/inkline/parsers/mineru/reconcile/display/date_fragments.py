@@ -94,10 +94,11 @@ def reconcile_date_start_cross_page_paragraph_attrs(blocks: List[Dict[str, Any]]
             continue
         raw_type = attrs.get("raw_type", "paragraph")
         new_attrs: Dict[str, Any] = {
-            "note_refs": attrs.get("note_refs", []),
             "raw_types": attrs.get("raw_types") or [raw_type],
             "demoted_reason": "short_date_start_prose_fragment_not_display_quote",
         }
+        if attrs.get("note_refs"):
+            new_attrs["note_refs"] = attrs["note_refs"]
         if "inline_runs" in attrs:
             new_attrs["inline_runs"] = attrs["inline_runs"]
         if "merged_from" in attrs:

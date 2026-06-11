@@ -11,6 +11,7 @@ from ...extraction.text import normalize_ws
 from ..constants import _DEFAULT_PAGE_HEIGHT, _NEAR_PAGE_BOTTOM_RATIO
 from ..block_access import block_bbox as _bbox, block_page as _block_page
 from ..notes.keys import leading_note_marker as _leading_note_marker
+from ..notes.marker_inline import _note_refs
 
 _PAGE_HEIGHT_HINT_BBOX_W = 650
 _PAGE_HEIGHT_HINT_BBOX_H = 750
@@ -296,16 +297,7 @@ def _page_note_ref_markers_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, Li
     for block in blocks:
         if block.get("type") == "footnote":
             continue
-        attrs = block.get("attrs") or {}
-        run_refs = [
-            run
-            for run in attrs.get("inline_runs") or []
-            if isinstance(run, dict) and run.get("type") == "note_ref"
-        ]
-        refs = run_refs or attrs.get("note_refs") or []
-        for ref in refs:
-            if not isinstance(ref, dict):
-                continue
+        for ref in _note_refs(block):
             page = ref.get("source_page")
             if not isinstance(page, int):
                 page = _block_page(block)
@@ -407,16 +399,7 @@ def _page_note_ref_markers(blocks: List[Dict[str, Any]], page: int) -> List[str]
     for blk in blocks:
         if _block_page(blk) != page or blk.get("type") == "footnote":
             continue
-        attrs = blk.get("attrs") or {}
-        run_refs = [
-            run
-            for run in attrs.get("inline_runs") or []
-            if isinstance(run, dict) and run.get("type") == "note_ref"
-        ]
-        refs = run_refs or attrs.get("note_refs") or []
-        for ref in refs:
-            if not isinstance(ref, dict):
-                continue
+        for ref in _note_refs(blk):
             marker = str(ref.get("marker", "")).strip()
             if marker:
                 markers.append(marker)
@@ -456,7 +439,7 @@ def _has_matching_page_refs(blocks: List[Dict[str, Any]], page: int, markers: Li
             continue
         if blk.get("type") not in {"paragraph", "display_block", "caption", "blockquote", "list_item"}:
             continue
-        for ref in blk.get("attrs", {}).get("note_refs") or []:
+        for ref in _note_refs(blk):
             marker = str(ref.get("marker", "")).strip()
             if marker:
                 refs.add(marker)

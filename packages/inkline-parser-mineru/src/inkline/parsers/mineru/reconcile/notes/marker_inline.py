@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from ...extraction.text import normalize_note_marker, normalize_ws
 from ...schema.models import CanonicalBlock
@@ -28,10 +28,8 @@ def _append_note_ref(
     raw_marker: str,
     source_page: Optional[int] = None,
     evidence: Optional[Dict[str, Any]] = None,
-    inline_location: Optional[_InlineMarkerLocation] = None,
+    inline_location: _InlineMarkerLocation,
 ) -> None:
-    attrs = block.setdefault("attrs", {})
-    refs = list(attrs.get("note_refs") or [])
     ref: Dict[str, Any] = {
         "marker": marker,
         "source": source,
@@ -45,10 +43,7 @@ def _append_note_ref(
         ref["inferred"] = True
     if evidence:
         ref["evidence"] = evidence
-    refs.append(ref)
-    attrs["note_refs"] = refs
-    if inline_location:
-        _insert_inline_note_run(block, ref, inline_location.char_index)
+    _insert_inline_note_run(block, ref, inline_location.char_index)
 
 
 def _inline_note_run_from_ref(ref: Dict[str, Any]) -> Dict[str, Any]:
@@ -75,6 +70,7 @@ def _inline_note_run_from_ref(ref: Dict[str, Any]) -> Dict[str, Any]:
         "target_note_id",
         "note_strategy",
         "resolution_confidence",
+        "evidence",
     ):
         if key in ref:
             run[key] = ref[key]
@@ -248,9 +244,40 @@ def _fallback_raw_marker(ref: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _note_refs(block: CanonicalBlock) -> List[Dict[str, Any]]:
-    refs = (block.get("attrs") or {}).get("note_refs")
-    return [ref for ref in refs if isinstance(ref, dict)] if isinstance(refs, list) else []
+def _note_refs(block: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Return writable inline refs plus unmatched legacy compatibility refs."""
+    raw_attrs = block.get("attrs")
+    attrs: Mapping[str, Any] = raw_attrs if isinstance(raw_attrs, dict) else {}
+    runs = attrs.get("inline_runs")
+    inline_refs = [
+        run
+        for run in runs
+        if isinstance(run, dict) and run.get("type") == "note_ref"
+    ] if isinstance(runs, list) else []
+    refs = attrs.get("note_refs")
+    legacy_refs = [ref for ref in refs if isinstance(ref, dict)] if isinstance(refs, list) else []
+    if not inline_refs:
+        return legacy_refs
+    if not legacy_refs:
+        return inline_refs
+
+    unmatched_legacy = list(legacy_refs)
+    for inline_ref in inline_refs:
+        match_index = next(
+            (
+                index
+                for index, legacy_ref in enumerate(unmatched_legacy)
+                if _same_inline_note_ref(inline_ref, legacy_ref)
+            ),
+            None,
+        )
+        if match_index is None:
+            continue
+        legacy_ref = unmatched_legacy.pop(match_index)
+        for key, value in legacy_ref.items():
+            if key != "type":
+                inline_ref.setdefault(key, value)
+    return inline_refs + unmatched_legacy
 
 
 def _existing_ref_markers(block: CanonicalBlock) -> set[str]:
