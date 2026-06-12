@@ -1,11 +1,11 @@
-"""Raw set-off display run detection. Identifies spans of raw blocks that share a visual display lane (indented, set-off from body text). Used by the display quote collection logic during page processing."""
+"""Raw set-off display run detection. Identifies spans of raw blocks that share a visual display lane (indented, set-off from body text). Used by the display block collection logic during page processing."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from ..analysis.layout import is_display_quote_layout_raw
+from ..analysis.layout import is_display_block_layout_raw
 from ..extraction.text import block_text
 from ..schema.models import LayoutStats, RawBlock
 
@@ -33,7 +33,7 @@ class RawSetOffDisplayRunDetector:
             return False
         if block.width > self.layout.body_width * 0.96:
             return False
-        return is_display_quote_layout_raw(block, self.layout)
+        return is_display_block_layout_raw(block, self.layout)
 
     def _is_adjacent_to_run(self, previous: RawBlock, candidate: RawBlock) -> bool:
         if candidate.page != previous.page or not self._is_candidate(candidate):

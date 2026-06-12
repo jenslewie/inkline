@@ -6,10 +6,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
+from ...schema.block_types import FOOTNOTE, PARAGRAPH
 from ..constants import FLOAT_LIKE_TYPES
 from ..block_access import block_bbox as _bbox, block_page as _block_page
 from ..layout_helpers import _is_near_page_top, _page_coord_heights
-from .helpers import _force_generic_quote_attrs, _prev_text_non_float
+from .helpers import force_generic_display_block_attrs
+from ..block_nav import _prev_text_non_float
 
 
 @dataclass(frozen=True)
@@ -24,7 +26,7 @@ class _PageTopSetOffDisplayDetector:
         bb = _bbox(cur)
         page = _block_page(cur)
         text = str(cur.get("text", "")).strip()
-        if cur.get("type") != "paragraph" or page is None or not bb or not text:
+        if cur.get("type") != PARAGRAPH or page is None or not bb or not text:
             return False
         if not self._has_candidate_position_and_measure(cur, text, bb):
             return False
@@ -47,7 +49,7 @@ class _PageTopSetOffDisplayDetector:
     def _has_prior_same_page_content(self, blocks: List[Dict[str, Any]], idx: int, page: int, top: float) -> bool:
         for j in range(idx - 1, -1, -1):
             prev = blocks[j]
-            if prev.get("type") in FLOAT_LIKE_TYPES or prev.get("type") == "footnote":
+            if prev.get("type") in FLOAT_LIKE_TYPES or prev.get("type") == FOOTNOTE:
                 continue
             if self._block_has_span_above_on_page(prev, page, top):
                 return True
@@ -76,7 +78,7 @@ class _PageTopSetOffDisplayDetector:
             nxt = blocks[j]
             if _block_page(nxt) != page:
                 break
-            if nxt.get("type") in FLOAT_LIKE_TYPES or nxt.get("type") == "footnote":
+            if nxt.get("type") in FLOAT_LIKE_TYPES or nxt.get("type") == FOOTNOTE:
                 continue
             nbb = _bbox(nxt)
             if not nbb:
@@ -91,7 +93,7 @@ def reconcile_page_top_set_off_display_blocks(blocks: List[Dict[str, Any]], layo
     for i, cur in enumerate(blocks):
         if not detector.matches(blocks, i):
             continue
-        _force_generic_quote_attrs(
+        force_generic_display_block_attrs(
             cur,
             prev_text=_prev_text_non_float(blocks, i),
             evidence="page_top_set_off_display_layout",

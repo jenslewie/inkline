@@ -6,6 +6,7 @@ from copy import deepcopy
 import re
 from typing import Any, Dict, List, Optional
 
+from ...schema.block_types import CAPTION, DISPLAY_BLOCK, FOOTNOTE, LIST_ITEM, PARAGRAPH
 from ...schema.models import BBox
 from ...extraction.text import normalize_ws
 from ..constants import _DEFAULT_PAGE_HEIGHT, _NEAR_PAGE_BOTTOM_RATIO
@@ -72,7 +73,7 @@ def recover_unmarked_page_footnote_markers(blocks: List[Dict[str, Any]]) -> None
     for block in blocks:
         attrs = block.get("attrs") or {}
         page = _block_page(block)
-        if block.get("type") == "footnote" and attrs.get("role") == "page_footnote" and page is not None:
+        if block.get("type") == FOOTNOTE and attrs.get("role") == "page_footnote" and page is not None:
             footnotes_by_page.setdefault(page, []).append(block)
 
     for page, page_footnotes in footnotes_by_page.items():
@@ -108,10 +109,10 @@ def promote_page_reference_list_footnotes(blocks: List[Dict[str, Any]]) -> None:
             boxes = _split_bbox_vertically(_bbox(blocks[run[0]]), len(run))
             for offset, k in enumerate(run):
                 attrs = blocks[k].setdefault("attrs", {})
-                blocks[k]["type"] = "footnote"
+                blocks[k]["type"] = FOOTNOTE
                 blocks[k].setdefault("source", {})["bbox"] = boxes[offset] if offset < len(boxes) else _bbox(blocks[k])
                 attrs["role"] = "page_footnote"
-                attrs["promoted_from"] = attrs.get("raw_type", "list_item")
+                attrs["promoted_from"] = attrs.get("raw_type", LIST_ITEM)
                 attrs["promote_reason"] = "page_bottom_reference_list"
                 marker = markers[offset] if offset < len(markers) else None
                 if marker and _leading_note_marker(blocks[k].get("text", "")) is None:
@@ -121,7 +122,7 @@ def promote_page_reference_list_footnotes(blocks: List[Dict[str, Any]]) -> None:
 
 
 def promote_cross_page_footnote_continuation_paragraphs(blocks: List[Dict[str, Any]]) -> None:
-    TEXT_LIKE_TYPES = {"paragraph", "display_block", "list_item"}
+    TEXT_LIKE_TYPES = {PARAGRAPH, DISPLAY_BLOCK, LIST_ITEM}
     from .merge import _has_next_page_continuation, _has_previous_page_continuation
 
     i = 0
@@ -146,7 +147,7 @@ def promote_cross_page_footnote_continuation_paragraphs(blocks: List[Dict[str, A
             prev_bp = _block_page(prev_blk)
             if prev_bp is not None and prev_bp < prev_page:
                 break
-            if prev_blk.get("type") == "footnote" and prev_bp == prev_page and _has_next_page_continuation(prev_blk):
+            if prev_blk.get("type") == FOOTNOTE and prev_bp == prev_page and _has_next_page_continuation(prev_blk):
                 found_prev = True
                 break
 
@@ -162,7 +163,7 @@ def promote_cross_page_footnote_continuation_paragraphs(blocks: List[Dict[str, A
             cur_page = _block_page(cur)
             if cur_page is not None and cur_page != page:
                 break
-            if cur.get("type") == "footnote":
+            if cur.get("type") == FOOTNOTE:
                 break
             if cur.get("type") not in TEXT_LIKE_TYPES:
                 break
@@ -172,7 +173,7 @@ def promote_cross_page_footnote_continuation_paragraphs(blocks: List[Dict[str, A
 
 def _promote_text_block_to_page_footnote(blk: Dict[str, Any]) -> None:
     promoted_from = (blk.get("attrs") or {}).get("raw_type") or blk.get("type")
-    blk["type"] = "footnote"
+    blk["type"] = FOOTNOTE
     attrs = blk.setdefault("attrs", {})
     attrs["role"] = "page_footnote"
     attrs["promoted_from"] = promoted_from
@@ -182,7 +183,7 @@ def _promote_text_block_to_page_footnote(blk: Dict[str, Any]) -> None:
 def _is_splittable_page_footnote(blk: Dict[str, Any]) -> bool:
     attrs = blk.get("attrs") or {}
     return (
-        blk.get("type") == "footnote"
+        blk.get("type") == FOOTNOTE
         and attrs.get("role") == "page_footnote"
         and bool(normalize_ws(str(blk.get("text", ""))))
     )
@@ -287,7 +288,7 @@ def _page_footnote_definition_counts(blocks: List[Dict[str, Any]]) -> Dict[int, 
     for block in blocks:
         attrs = block.get("attrs") or {}
         page = _block_page(block)
-        if block.get("type") == "footnote" and attrs.get("role") == "page_footnote" and page is not None:
+        if block.get("type") == FOOTNOTE and attrs.get("role") == "page_footnote" and page is not None:
             counts[page] = counts.get(page, 0) + 1
     return counts
 
@@ -295,7 +296,7 @@ def _page_footnote_definition_counts(blocks: List[Dict[str, Any]]) -> Dict[int, 
 def _page_note_ref_markers_by_page(blocks: List[Dict[str, Any]]) -> Dict[int, List[str]]:
     markers: Dict[int, List[str]] = {}
     for block in blocks:
-        if block.get("type") == "footnote":
+        if block.get("type") == FOOTNOTE:
             continue
         for ref in _note_refs(block):
             page = ref.get("source_page")
@@ -363,14 +364,14 @@ def _collect_reference_list_run(blocks: List[Dict[str, Any]], start: int) -> Lis
 
 def _is_reference_list_item(blk: Dict[str, Any]) -> bool:
     attrs = blk.get("attrs") or {}
-    return blk.get("type") == "list_item" and attrs.get("raw_type") == "list_item" and _leading_note_marker(blk.get("text", "")) is not None
+    return blk.get("type") == LIST_ITEM and attrs.get("raw_type") == LIST_ITEM and _leading_note_marker(blk.get("text", "")) is not None
 
 
 def _is_mineru_reference_list_item(blk: Dict[str, Any]) -> bool:
     attrs = blk.get("attrs") or {}
     return (
-        blk.get("type") == "list_item"
-        and attrs.get("raw_type") == "list_item"
+        blk.get("type") == LIST_ITEM
+        and attrs.get("raw_type") == LIST_ITEM
         and attrs.get("list_type") == "reference_list"
     )
 
@@ -397,7 +398,7 @@ def _reference_list_markers(
 def _page_note_ref_markers(blocks: List[Dict[str, Any]], page: int) -> List[str]:
     markers: List[str] = []
     for blk in blocks:
-        if _block_page(blk) != page or blk.get("type") == "footnote":
+        if _block_page(blk) != page or blk.get("type") == FOOTNOTE:
             continue
         for ref in _note_refs(blk):
             marker = str(ref.get("marker", "")).strip()
@@ -437,7 +438,7 @@ def _has_matching_page_refs(blocks: List[Dict[str, Any]], page: int, markers: Li
     for blk in blocks:
         if _block_page(blk) != page:
             continue
-        if blk.get("type") not in {"paragraph", "display_block", "caption", "list_item"}:
+        if blk.get("type") not in {PARAGRAPH, DISPLAY_BLOCK, CAPTION, LIST_ITEM}:
             continue
         for ref in _note_refs(blk):
             marker = str(ref.get("marker", "")).strip()

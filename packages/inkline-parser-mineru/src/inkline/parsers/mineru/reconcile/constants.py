@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from ..schema.block_types import CAPTION, DISPLAY_BLOCK, FIGURE, LIST_ITEM, PARAGRAPH, TABLE_CONTINUATION
+
 TERMINAL_PUNCT = set('。？！!?；;：:.”’\"\'）】》」』')
-FLOAT_LIKE_TYPES = {"figure", "caption", "table_continuation"}
-MERGEABLE_TEXT_TYPES = {"paragraph", "list_item", "display_block"}
-DISPLAY_BLOCK_TYPES = {"display_block"}
+FLOAT_LIKE_TYPES = {FIGURE, CAPTION, TABLE_CONTINUATION}
+MERGEABLE_TEXT_TYPES = {PARAGRAPH, LIST_ITEM, DISPLAY_BLOCK}
+DISPLAY_BLOCK_TYPES = {DISPLAY_BLOCK}
 
 _DEFAULT_PAGE_HEIGHT = 1000.0
 _NEAR_PAGE_BOTTOM_RATIO = 0.82

@@ -5,11 +5,12 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
-from ..analysis.layout import LayoutStats
-from .block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
-from .block_merge import _merge_block_pair, _refresh_canonical_quote_attrs
-from .block_nav import _prev_text_non_float, _prev_text_non_float_idx, _next_text_non_float_idx
-from .notes.keys import chinese_to_int as _chinese_to_int
+from ...analysis.layout import LayoutStats
+from ...schema.block_types import DISPLAY_BLOCK, HEADING, LIST_ITEM, PARAGRAPH
+from ..block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
+from ..block_merge import _merge_block_pair, _refresh_display_block_attrs
+from ..block_nav import _prev_text_non_float, _prev_text_non_float_idx, _next_text_non_float_idx
+from ..notes.keys import chinese_to_int as _chinese_to_int
 
 def _cjk_list_marker_rank(text: str) -> Optional[int]:
     m = re.match(r"^\s*([一二三四五六七八九十百]+)、", text or "")
@@ -22,7 +23,7 @@ def _is_cjk_numbered_item_block(block: Dict[str, Any]) -> bool:
     return _cjk_list_marker_rank(str(block.get("text", ""))) is not None
 
 
-def reconcile_cjk_numbered_display_quotes(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_cjk_numbered_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
     """Treat visually displayed CJK-numbered clauses as display blocks, not lists.
 
     MinerU sometimes emits lines beginning with “一、二、三、...” as list blocks,
@@ -32,7 +33,7 @@ def reconcile_cjk_numbered_display_quotes(blocks: List[Dict[str, Any]], layout: 
     the run.
     """
 
-    def force_numbered_quote_attrs(b: Dict[str, Any], evidence: str) -> None:
+    def force_numbered_display_block_attrs(b: Dict[str, Any], evidence: str) -> None:
         attrs = b.setdefault("attrs", {})
         attrs["layout_role"] = "inline_display_block"
         ev = attrs.setdefault("classification_evidence", [])
@@ -43,12 +44,12 @@ def reconcile_cjk_numbered_display_quotes(blocks: List[Dict[str, Any]], layout: 
 
     def promote(idx: int, evidence: str) -> None:
         b = blocks[idx]
-        b["type"] = "display_block"
+        b["type"] = DISPLAY_BLOCK
         attrs = b.setdefault("attrs", {})
         if "raw_types" not in attrs:
             attrs["raw_types"] = [attrs.get("raw_type", b.get("type"))]
-        _refresh_canonical_quote_attrs(b, prev_text=_prev_text_non_float(blocks, idx))
-        force_numbered_quote_attrs(b, evidence)
+        _refresh_display_block_attrs(b, prev_text=_prev_text_non_float(blocks, idx))
+        force_numbered_display_block_attrs(b, evidence)
 
     # First promote explicit list_item blocks and paragraph/title blocks that are
     # part of an adjacent CJK-numbered run.  This catches cases where MinerU emits
@@ -57,14 +58,14 @@ def reconcile_cjk_numbered_display_quotes(blocks: List[Dict[str, Any]], layout: 
         if not _is_cjk_numbered_item_block(b):
             continue
         typ = b.get("type")
-        if typ == "list_item":
+        if typ == LIST_ITEM:
             promote(idx, "promoted_from_cjk_numbered_list_item_by_layout")
             continue
-        if typ in {"paragraph", "heading"}:
+        if typ in {PARAGRAPH, HEADING}:
             pi = _prev_text_non_float_idx(blocks, idx)
             ni = _next_text_non_float_idx(blocks, idx)
-            prev_is_item = pi is not None and _is_cjk_numbered_item_block(blocks[pi]) and blocks[pi].get("type") == "display_block"
-            next_is_item = ni is not None and _is_cjk_numbered_item_block(blocks[ni]) and blocks[ni].get("type") in {"list_item", "display_block", "paragraph"}
+            prev_is_item = pi is not None and _is_cjk_numbered_item_block(blocks[pi]) and blocks[pi].get("type") == DISPLAY_BLOCK
+            next_is_item = ni is not None and _is_cjk_numbered_item_block(blocks[ni]) and blocks[ni].get("type") in {LIST_ITEM, DISPLAY_BLOCK, PARAGRAPH}
             introduced = _prev_text_non_float(blocks, idx).rstrip().endswith(("：", ":"))
             if prev_is_item or next_is_item or introduced:
                 promote(idx, "promoted_from_cjk_numbered_paragraph_or_heading_by_layout")
@@ -75,13 +76,13 @@ def reconcile_cjk_numbered_display_quotes(blocks: List[Dict[str, Any]], layout: 
     i = 0
     while i < len(blocks):
         cur = blocks[i]
-        if cur.get("type") != "display_block" or not _is_cjk_numbered_item_block(cur):
+        if cur.get("type") != DISPLAY_BLOCK or not _is_cjk_numbered_item_block(cur):
             i += 1
             continue
         cur_rank = _cjk_list_marker_rank(cur.get("text", ""))
         while i + 1 < len(blocks):
             nxt = blocks[i + 1]
-            if nxt.get("type") != "display_block" or not _is_cjk_numbered_item_block(nxt):
+            if nxt.get("type") != DISPLAY_BLOCK or not _is_cjk_numbered_item_block(nxt):
                 break
             nxt_rank = _cjk_list_marker_rank(nxt.get("text", ""))
             if cur_rank is not None and nxt_rank is not None and nxt_rank < cur_rank:
@@ -105,7 +106,7 @@ def reconcile_cjk_numbered_display_quotes(blocks: List[Dict[str, Any]], layout: 
                 joiner="newline",
             )
             del blocks[i + 1]
-            _refresh_canonical_quote_attrs(cur, prev_text=_prev_text_non_float(blocks, i))
-            force_numbered_quote_attrs(cur, "merged_cjk_numbered_display_block")
+            _refresh_display_block_attrs(cur, prev_text=_prev_text_non_float(blocks, i))
+            force_numbered_display_block_attrs(cur, "merged_cjk_numbered_display_block")
             cur_rank = _cjk_list_marker_rank((cur.get("text") or "").split("\n")[-1]) or nxt_rank
         i += 1

@@ -1,8 +1,8 @@
-from inkline.parsers.mineru.reconcile.footnotes.promote import (
+from inkline.parsers.mineru.reconcile.footnote.promote import (
     promote_page_reference_list_footnotes,
     recover_unmarked_page_footnote_markers,
 )
-from inkline.parsers.mineru.reconcile.footnotes.merge import merge_continuation_footnotes
+from inkline.parsers.mineru.reconcile.footnote.merge import merge_continuation_footnotes
 from inkline.parsers.mineru.reconcile.notes.resolver import resolve_note_links
 
 

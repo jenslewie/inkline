@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional, cast
 
 from ...extraction.text import normalize_note_marker
+from ...schema.block_types import FOOTNOTE
+from ...schema.models import CanonicalBlock
 from ..block_access import block_id as _block_id
 from ..notes.keys import leading_note_marker as _com_leading_note_marker
-from ...schema.models import CanonicalBlock
 from .scopes import (
     _EndnoteSectionStrategy,
     _NoteCandidate,
@@ -25,7 +26,7 @@ class _PageFootnoteStrategy:
     def collect(self, blocks: List[CanonicalBlock], context: _NoteContext) -> List[_NoteCandidate]:
         out: List[_NoteCandidate] = []
         for block in blocks:
-            if block.get("type") != "footnote":
+            if block.get("type") != FOOTNOTE:
                 continue
             bid = _block_id(block)
             if not bid:
@@ -124,7 +125,7 @@ def resolve_note_links(blocks: List[Dict[str, Any]]) -> None:
             attrs.setdefault("note_marker", candidate.marker)
         elif not attrs.get("note_marker"):
             inferred_marker = _single_resolved_marker_for_note(candidate.block_id, resolved_markers_by_note)
-            if inferred_marker and note_block.get("type") == "footnote" and attrs.get("role") == "page_footnote":
+            if inferred_marker and note_block.get("type") == FOOTNOTE and attrs.get("role") == "page_footnote":
                 attrs["note_marker"] = inferred_marker
                 attrs.setdefault("note_marker_source", "resolved_body_ref")
         attrs.setdefault("note_strategy", candidate.strategy)
@@ -152,13 +153,13 @@ def _resolved_note_indexes(
 def _suppress_lower_confidence_duplicate_page_footnote_refs(blocks: List[CanonicalBlock], by_id: Dict[str, CanonicalBlock]) -> None:
     refs_by_target: Dict[str, List[tuple[CanonicalBlock, Dict[str, Any]]]] = {}
     for block in blocks:
-        if block.get("type") == "footnote":
+        if block.get("type") == FOOTNOTE:
             continue
         for ref in _note_refs(block):
             target_id = ref.get("target_block_id")
             target = by_id.get(str(target_id or ""))
             target_attrs = target.get("attrs") if isinstance(target, dict) and isinstance(target.get("attrs"), dict) else {}
-            if not target or target.get("type") != "footnote" or target_attrs.get("role") != "page_footnote":
+            if not target or target.get("type") != FOOTNOTE or target_attrs.get("role") != "page_footnote":
                 continue
             refs_by_target.setdefault(str(target_id), []).append((block, ref))
     for target_id, entries in refs_by_target.items():

@@ -19,8 +19,9 @@ from .builders import (
 )
 from .normal_flow import _looks_like_note_definition_footer, process_normal_flow
 from .page_detectors import dominant_block as _dominant_block, should_snapshot_layout_page
-from .raw_display_quotes import _RawTextStyleProvider
+from .raw_display_blocks import _RawTextStyleProvider
 from ..analysis.layout import has_attribution_line, is_full_page_image_page, is_title_only_page, page_has_images
+from ..schema.block_types import CAPTION, DISPLAY_BLOCK, FIGURE, HEADING, TABLE, TABLE_CONTINUATION, TOC_ITEM
 from ..schema.models import IdFactory, LayoutStats, RawBlock, canonical_block
 from ..schema.patterns import ATTR_RE, CHAPTER_RE, PART_RE, TOC_LINE_RE
 from ..extraction.text import block_text, extract_list_item_text, normalize_ws
@@ -46,7 +47,7 @@ def group_sparse_display_page(blocks: Sequence[RawBlock], prev_major_type: Optio
             groups.append(buf)
             buf = []
     if buf:
-        if prev_major_type in {"part_title", "chapter_title", "heading"}:
+        if prev_major_type in {"part_title", "chapter_title", HEADING}:
             groups.append(buf)
     grouped_count = sum(len(g) for g in groups)
     if groups and (grouped_count == len(paras) or len(groups) * 2 >= len(paras)):
@@ -57,7 +58,7 @@ def group_sparse_display_page(blocks: Sequence[RawBlock], prev_major_type: Optio
 def build_toc_from_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     toc = []
     for b in blocks:
-        if b["type"] != "toc_item":
+        if b["type"] != TOC_ITEM:
             continue
         attrs = b.get("attrs", {})
         toc.append({
@@ -123,7 +124,7 @@ def _process_toc_page(ids: IdFactory, page_blocks: List[RawBlock]) -> List[Dict[
         if b.raw_type == "page_number":
             continue
         if b.raw_type == "title" and block_text(b) == "目录":
-            out.append(canonical_block(ids.next(), "heading", "目录", b.page, b.bbox, attrs={"role": "toc_heading"}, level=1))
+            out.append(canonical_block(ids.next(), HEADING, "目录", b.page, b.bbox, attrs={"role": "toc_heading"}, level=1))
         elif b.raw_type == "title":
             out.append(make_toc_item(ids, b, level=_toc_level_from_indent(b, indent_clusters)))
         elif b.raw_type == "paragraph":
@@ -253,10 +254,10 @@ def _try_process_snapshot_page(
             elif b.raw_type == "chart":
                 out.append(make_chart_table(ids, b))
         if out:
-            return _PageResult(out, "table", in_toc)
+            return _PageResult(out, TABLE, in_toc)
     if snapshot_role in {"page_diagram", "visual_label_page"}:
         page_num = blocks[0].page
-        return _PageResult([make_page_snapshot_figure(ids, page_num, content_blocks, snapshot_role)], "figure", in_toc)
+        return _PageResult([make_page_snapshot_figure(ids, page_num, content_blocks, snapshot_role)], FIGURE, in_toc)
     if snapshot_role in {"designed_media_page", "designed_text_page"}:
         text_blocks = [b for b in content_blocks if b.raw_type in {"paragraph", "title", "list"}]
         out, prev, in_toc = process_normal_flow(ids, text_blocks, layout, prev_major_type, in_toc, text_style=None)
@@ -301,8 +302,8 @@ def _try_process_sparse_display_page(
     if len(groups) == 1:
         block = make_display_block(ids, groups[0], layout_role="standalone_display_page", prev_text="")
         block.setdefault("attrs", {})["layout_form"] = "standalone_sparse_page"
-        return _PageResult([block], "display_block", in_toc)
-    return _PageResult([make_display_group(ids, groups)], "display_block", in_toc)
+        return _PageResult([block], DISPLAY_BLOCK, in_toc)
+    return _PageResult([make_display_group(ids, groups)], DISPLAY_BLOCK, in_toc)
 
 
 def _try_process_full_page_image(
@@ -345,7 +346,7 @@ def _try_process_plate_page(
             _attach_embedded_image_text_attrs(figure, b, absorbed_by_image.get(id(b), []))
             out.append(figure)
         elif b.raw_type == "paragraph" and block_text(b):
-            out.append(make_paragraph(ids, b, block_type="caption", extra_attrs={"role": "plate_caption"}))
+            out.append(make_paragraph(ids, b, block_type=CAPTION, extra_attrs={"role": "plate_caption"}))
         elif b.raw_type == "title" and block_text(b):
             out.append(make_heading(ids, [b], level=1, role="front_matter_title"))
     return _PageResult(out, "plate_page", in_toc)
@@ -393,17 +394,17 @@ def process_page(
 def extend_table_source_pages(blocks: List[Dict[str, Any]]) -> None:
     last_table: Optional[Dict[str, Any]] = None
     for b in blocks:
-        if b["type"] == "table":
+        if b["type"] == TABLE:
             last_table = b
             pages = b["source"].setdefault("pages", [b["source"]["page"]])
             if b["source"]["page"] not in pages:
                 pages.append(b["source"]["page"])
-        elif b["type"] == "table_continuation" and last_table is not None:
+        elif b["type"] == TABLE_CONTINUATION and last_table is not None:
             pages = last_table["source"].setdefault("pages", [last_table["source"]["page"]])
             p = b["source"].get("page")
             if p and p not in pages:
                 pages.append(p)
             last_table["attrs"]["continued"] = True
         elif b["type"] not in {"page_number"}:
-            if b["type"] not in {"table_continuation"}:
+            if b["type"] not in {TABLE_CONTINUATION}:
                 last_table = None

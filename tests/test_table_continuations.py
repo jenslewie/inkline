@@ -1,4 +1,4 @@
-from inkline.parsers.mineru.reconcile.tables import reconcile_table_continuations
+from inkline.parsers.mineru.reconcile.table import reconcile_table_continuations
 
 
 def test_table_continuation_preserves_intervening_page_footnote() -> None:

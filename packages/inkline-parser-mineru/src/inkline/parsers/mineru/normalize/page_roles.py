@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, List, Sequence
 
 from .page_detectors import body_text_like_page, should_snapshot_layout_page
 from ..extraction.text import normalize_ws
+from ..schema.block_types import DISPLAY_BLOCK, HEADING, LIST_ITEM, PARAGRAPH, TABLE
 from ..schema.models import LayoutStats, RawBlock
 
 
@@ -116,7 +117,7 @@ def _last_content_page(blocks: Sequence[dict[str, Any]]) -> int | None:
     pages = [
         (block.get("source") or {}).get("page")
         for block in blocks
-        if block.get("type") in {"heading", "paragraph", "display_block", "table", "list_item"} and (block.get("source") or {}).get("page")
+        if block.get("type") in {HEADING, PARAGRAPH, DISPLAY_BLOCK, TABLE, LIST_ITEM} and (block.get("source") or {}).get("page")
     ]
     return max((int(page) for page in pages if isinstance(page, int)), default=None)
 

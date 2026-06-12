@@ -1,4 +1,4 @@
-"""Display quotes across footnote interruptions. Merges display quote continuations that are split by page-bottom footnotes. Detects when a display block at page bottom and another at next page top share the same visual lane."""
+"""Display blocks across footnote interruptions. Merges display block continuations that are split by page-bottom footnotes. Detects when a display block at page bottom and another at next page top share the same visual lane."""
 
 from __future__ import annotations
 
@@ -7,12 +7,13 @@ from typing import Any, Dict, List
 from ...analysis.layout import LayoutStats
 from ..constants import _DEFAULT_PAGE_HEIGHT
 from ..block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
-from ..block_merge import _merge_block_pair, _refresh_canonical_quote_attrs
+from ..block_merge import _merge_block_pair, _refresh_display_block_attrs
 from ..layout_helpers import (
-    _canonical_quote_layout, _ends_with_terminal,
+    _display_block_layout, _ends_with_terminal,
     _is_near_page_bottom, _is_near_page_top, _page_coord_heights,
 )
 from ..block_nav import _prev_text_non_float
+from ...schema.block_types import DISPLAY_BLOCK, FOOTNOTE, PARAGRAPH
 from .helpers import (
     display_lanes_compatible,
     has_display_attribution_line,
@@ -20,11 +21,11 @@ from .helpers import (
 )
 
 
-def reconcile_display_quote_across_footnote_interruptions(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_display_block_across_footnote_interruptions(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
     i = 0
     while i < len(blocks):
         cur = blocks[i]
-        if cur.get("type") != "display_block":
+        if cur.get("type") != DISPLAY_BLOCK:
             i += 1
             continue
         page_heights = _page_coord_heights(blocks)
@@ -38,7 +39,7 @@ def reconcile_display_quote_across_footnote_interruptions(blocks: List[Dict[str,
         cp = max(_block_pages(cur) or [_block_page(cur) or -1])
         j = i + 1
         skipped: List[Dict[str, Any]] = []
-        while j < len(blocks) and blocks[j].get("type") == "footnote":
+        while j < len(blocks) and blocks[j].get("type") == FOOTNOTE:
             skipped.append({
                 "page": _block_page(blocks[j]),
                 "bbox": _bbox(blocks[j]),
@@ -59,9 +60,9 @@ def reconcile_display_quote_across_footnote_interruptions(blocks: List[Dict[str,
                 break
             if not skipped_footnotes and _ends_with_terminal(str(cur.get("text", ""))):
                 break
-            nxt_is_quote = nxt.get("type") == "display_block"
-            nxt_is_display_paragraph = nxt.get("type") == "paragraph" and _canonical_quote_layout(nxt, layout)
-            if not nxt_is_quote and not nxt_is_display_paragraph:
+            nxt_is_display_block = nxt.get("type") == DISPLAY_BLOCK
+            nxt_is_paragraph = nxt.get("type") == PARAGRAPH
+            if not nxt_is_display_block and not (nxt_is_paragraph and _display_block_layout(nxt, layout)):
                 break
             if not display_lanes_compatible(cur, nxt, layout):
                 break
@@ -83,7 +84,7 @@ def reconcile_display_quote_across_footnote_interruptions(blocks: List[Dict[str,
                 skipped,
                 joiner=joiner,
             )
-            _refresh_canonical_quote_attrs(cur, prev_text=_prev_text_non_float(blocks, i))
+            _refresh_display_block_attrs(cur, prev_text=_prev_text_non_float(blocks, i))
             del blocks[j]
             cp = max(_block_pages(cur) or [cp])
             merged = True

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ...normalize.builders import union_bbox
+from ...schema.block_types import FOOTNOTE
 from ...extraction.text import normalize_ws
 from ..block_access import block_bbox as _bbox, block_page as _block_page
 from ..notes.keys import leading_note_marker as _leading_note_marker
@@ -28,7 +29,7 @@ def _drop_duplicate_adjacent_footnotes(blocks: List[Dict[str, Any]]) -> None:
     while i + 1 < len(blocks):
         cur = blocks[i]
         nxt = blocks[i + 1]
-        if cur.get("type") != "footnote" or nxt.get("type") != "footnote":
+        if cur.get("type") != FOOTNOTE or nxt.get("type") != FOOTNOTE:
             i += 1
             continue
         if _block_page(cur) != _block_page(nxt):
@@ -66,8 +67,8 @@ def _merge_same_page_unmarked_footnotes(blocks: List[Dict[str, Any]]) -> None:
         cur = blocks[i]
         nxt = blocks[i + 1]
         if (
-            cur.get("type") == "footnote"
-            and nxt.get("type") == "footnote"
+            cur.get("type") == FOOTNOTE
+            and nxt.get("type") == FOOTNOTE
             and _block_page(cur) == _block_page(nxt)
             and _footnote_marker(nxt) is None
             and (_footnote_marker(cur) is not None or _has_next_page_continuation(cur) or _has_previous_page_continuation(cur))
@@ -83,7 +84,7 @@ def _merge_explicit_cross_page_footnotes(blocks: List[Dict[str, Any]]) -> None:
     i = 0
     while i < len(blocks):
         cur = blocks[i]
-        if cur.get("type") != "footnote" or not _has_next_page_continuation(cur):
+        if cur.get("type") != FOOTNOTE or not _has_next_page_continuation(cur):
             i += 1
             continue
         cp = _block_page(cur)
@@ -93,13 +94,13 @@ def _merge_explicit_cross_page_footnotes(blocks: List[Dict[str, Any]]) -> None:
             np = _block_page(nxt)
             if np is not None and cp is not None and np > cp + 1:
                 break
-            if nxt.get("type") == "footnote" and np == (cp or 0) + 1 and _has_previous_page_continuation(nxt):
+            if nxt.get("type") == FOOTNOTE and np == (cp or 0) + 1 and _has_previous_page_continuation(nxt):
                 previous_fragment = nxt
                 _merge_footnote_pair(cur, nxt, "explicit_cross_page_footnote_continuation")
                 del blocks[j]
                 while (
                     j < len(blocks)
-                    and blocks[j].get("type") == "footnote"
+                    and blocks[j].get("type") == FOOTNOTE
                     and _block_page(blocks[j]) == np
                     and _footnote_marker(blocks[j]) is None
                     and _is_footnote_continuation_layout(previous_fragment, blocks[j])

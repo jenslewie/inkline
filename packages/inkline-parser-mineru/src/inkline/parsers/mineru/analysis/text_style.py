@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from statistics import median
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from ..schema.block_types import DISPLAY_BLOCK, LIST_ITEM, PARAGRAPH
 from ..schema.models import BBox
 from .pdf_page_metrics import PdfPageCache, line_bands
 
@@ -105,7 +106,7 @@ class TextStyleAnalyzer:
         line_heights: List[float] = []
         sources: List[str] = []
         for block in blocks:
-            if block.get("type") not in {"paragraph", "list_item", "display_block"}:
+            if block.get("type") not in {PARAGRAPH, LIST_ITEM, DISPLAY_BLOCK}:
                 continue
             if _block_page(block) != page:
                 continue
@@ -237,7 +238,7 @@ class TextStyleAnalyzer:
 def _raw_block_as_canonical(block: Any) -> Dict[str, Any]:
     return {
         "block_id": f"raw:{getattr(block, 'page', '')}:{getattr(block, 'index', '')}",
-        "type": "paragraph" if getattr(block, "raw_type", None) == "paragraph" else str(getattr(block, "raw_type", "text")),
+        "type": PARAGRAPH if getattr(block, "raw_type", None) == "paragraph" else str(getattr(block, "raw_type", "text")),
         "text": str(getattr(block, "text", "") or ""),
         "source": {"page": getattr(block, "page", None), "bbox": getattr(block, "bbox", None)},
     }

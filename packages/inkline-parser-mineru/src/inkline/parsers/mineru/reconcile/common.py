@@ -2,7 +2,7 @@
 
 New code should import directly from the real module:
   - constants: TERMINAL_PUNCT, FLOAT_LIKE_TYPES, MERGEABLE_TEXT_TYPES, DISPLAY_BLOCK_TYPES, _DEFAULT_PAGE_HEIGHT, etc.
-  - layout_helpers: _canonical_quote_layout, _page_coord_heights, _page_coord_widths, _is_near_page_bottom, _is_near_page_top, _ends_with_terminal
+  - layout_helpers: _display_block_layout, _page_coord_heights, _page_coord_widths, _is_near_page_bottom, _is_near_page_top, _ends_with_terminal
   - block_nav: _prev_text_non_float, _prev_text_non_float_idx, _next_text_non_float_idx
   - block_access: block_page, block_bbox, block_id, block_pages
   - block_merge: _merge_block_pair, _merge_inline_runs, _refresh_display_block_attrs
@@ -32,7 +32,7 @@ from .block_access import block_bbox as _bbox
 
 # --- Block merge ---
 from .block_merge import _merge_block_pair, _merge_inline_runs, _refresh_display_block_attrs
-from .block_merge import _refresh_canonical_quote_attrs
+from .block_merge import _refresh_display_block_attrs
 from .block_merge import _join_text
 
 # --- Notes keys ---
@@ -42,7 +42,7 @@ from .notes.keys import note_ref_key as _note_ref_key
 
 # --- Layout helpers ---
 from .layout_helpers import (
-    _canonical_quote_layout,
+    _display_block_layout,
     _page_coord_heights,
     _page_coord_widths,
     _is_near_page_bottom,

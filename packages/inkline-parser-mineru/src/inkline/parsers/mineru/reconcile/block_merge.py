@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ..normalize.builders import union_bbox
+from ..schema.block_types import DISPLAY_BLOCK
 from ..schema.patterns import CHINESE_RE
 
-DISPLAY_BLOCK_TYPES = {"display_block"}
+DISPLAY_BLOCK_TYPES = {DISPLAY_BLOCK}
 TERMINAL_PUNCT = set("。？！!?；;：:.”’\"'）】》」』")
 
 
@@ -28,7 +29,7 @@ def _merge_block_pair(
     left_was_display = left.get("type") in DISPLAY_BLOCK_TYPES
     right_was_display = right.get("type") in DISPLAY_BLOCK_TYPES
     if right_was_display and not left_was_display:
-        left["type"] = "display_block"
+        left["type"] = DISPLAY_BLOCK
         for k, v in (right.get("attrs") or {}).items():
             if k in {"layout_role", "layout_form", "line_count", "has_attribution_line", "line_layouts", "raw_types"}:
                 left.setdefault("attrs", {})[k] = v
@@ -68,7 +69,7 @@ def _merge_block_pair(
             if ref not in refs:
                 refs.append(ref)
     _merge_inline_runs(left, right, original_left_text, original_right_text)
-    if left.get("type") == "display_block":
+    if left.get("type") == DISPLAY_BLOCK:
         _refresh_display_block_attrs(left)
 
 
@@ -176,7 +177,4 @@ def _refresh_display_block_attrs(
         attrs["note_refs"] = existing_note_refs
     if existing_raw_types is not None:
         attrs["raw_types"] = existing_raw_types
-    b["type"] = "display_block"
-
-
-_refresh_canonical_quote_attrs = _refresh_display_block_attrs
+    b["type"] = DISPLAY_BLOCK

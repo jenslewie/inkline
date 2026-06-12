@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, List, Optional, Tuple
 
 from ...extraction.text import normalize_note_marker, normalize_ws
+from ...schema.block_types import CAPTION, DISPLAY_BLOCK, PARAGRAPH
 
 
 TERMINAL_PUNCTUATION = set("。！？；：.!?;:")
@@ -13,7 +14,7 @@ QUOTE_BOUNDARY_PUNCTUATION = set("「『“‘")
 SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
 FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９", "0123456789")
 MAX_NOTE_MARKER_DIGITS = 3
-BODY_TYPES = {"paragraph", "display_block", "caption"}
+BODY_TYPES = {PARAGRAPH, DISPLAY_BLOCK, CAPTION}
 
 DISQUALIFY_NEXT_PREFIXES = (
     "%",
@@ -171,4 +172,3 @@ def _latex_marker_at(text: str, start: int) -> Optional[Tuple[int, str]]:
             continue
         return digit_end + len(suffix), _normalize_digits(text[digit_start:digit_end])
     return None
-

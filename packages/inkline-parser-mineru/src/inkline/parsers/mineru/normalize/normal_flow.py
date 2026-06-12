@@ -1,4 +1,9 @@
-"""Normal flow page processing. Processes paragraphs, headings, figures, tables, footnotes, lists, display quotes, CJK-numbered items, and flush-right terminal blocks during the per-page canonicalization pass. Falls through from page_handlers when no special page type is detected."""
+"""Normal flow page processing for canonical block types.
+
+Handles paragraph, heading, figure, table, footnote, list_item, and
+display_block output during the per-page canonicalization pass. Falls through
+from page_handlers when no special page type is detected.
+"""
 
 from __future__ import annotations
 
@@ -15,15 +20,16 @@ from .builders import (
     make_table,
 )
 from .page_detectors import coord_page_size as _coord_page_size
-from .raw_display_quotes import (
+from .raw_display_blocks import (
     _RawTextStyleProvider,
-    collect_display_quote,
+    collect_display_block,
     ends_with_terminal_punctuation,
     next_meaningful_block as _next_meaningful_block,
     previous_meaningful_block as _previous_meaningful_block,
-    should_start_display_quote,
+    should_start_display_block,
 )
 from ..analysis.layout import is_right_aligned_short
+from ..schema.block_types import DISPLAY_BLOCK, FIGURE, FOOTNOTE, HEADING, LIST_ITEM, PARAGRAPH, TABLE, TABLE_CONTINUATION
 from ..schema.models import IdFactory, LayoutStats, RawBlock, canonical_block
 from ..schema.patterns import CHAPTER_RE, CN_LIST_ITEM_RE
 from ..extraction.text import block_text, extract_list_item_text, normalize_ws
@@ -50,10 +56,10 @@ def process_normal_flow(
             out.append(make_paragraph(
                 ids,
                 b,
-                block_type="list_item",
+                block_type=LIST_ITEM,
                 extra_attrs={"promoted_from": "page_footer", "promote_reason": "note_definition_footer"},
             ))
-            prev_major_type = "list_item"
+            prev_major_type = LIST_ITEM
             i += 1
             continue
         if b.raw_type == "title":
@@ -62,7 +68,7 @@ def process_normal_flow(
             while j < len(content_blocks) and content_blocks[j].raw_type == "title" and abs(content_blocks[j].y0 - group[-1].y1) < 80:
                 group.append(content_blocks[j])
                 j += 1
-            role = "chapter_title" if any(CHAPTER_RE.match(block_text(x)) for x in group) or len(group) > 1 else "heading"
+            role = "chapter_title" if any(CHAPTER_RE.match(block_text(x)) for x in group) or len(group) > 1 else HEADING
             level = 2 if role == "chapter_title" else 1
             out.append(make_heading(ids, group, level=level, role=role))
             prev_major_type = role
@@ -70,12 +76,12 @@ def process_normal_flow(
             continue
         if b.raw_type == "image":
             out.append(make_figure(ids, b))
-            prev_major_type = "figure"
+            prev_major_type = FIGURE
             i += 1
             continue
         if b.raw_type == "chart":
             out.append(make_chart_table(ids, b))
-            prev_major_type = "table"
+            prev_major_type = TABLE
             i += 1
             continue
         if b.raw_type == "table":
@@ -83,10 +89,10 @@ def process_normal_flow(
             html = content.get("html", "") if isinstance(content, dict) else ""
             if html.strip():
                 out.append(make_table(ids, b))
-                prev_major_type = "table"
+                prev_major_type = TABLE
             else:
-                out.append(canonical_block(ids.next(), "table_continuation", "", b.page, b.bbox, attrs={"role": "continued_table_region", "html_empty": True}))
-            prev_major_type = "table_continuation"
+                out.append(canonical_block(ids.next(), TABLE_CONTINUATION, "", b.page, b.bbox, attrs={"role": "continued_table_region", "html_empty": True}))
+            prev_major_type = TABLE_CONTINUATION
             i += 1
             continue
         if b.raw_type in {"page_footnote", "ref_text"} and block_text(b):
@@ -94,7 +100,7 @@ def process_normal_flow(
             middle_markers = b.raw.get("_middle_page_inline_markers")
             if isinstance(middle_markers, list) and middle_markers:
                 footnote_attrs["_middle_page_inline_markers"] = list(middle_markers)
-            out.append(make_paragraph(ids, b, block_type="footnote", extra_attrs=footnote_attrs))
+            out.append(make_paragraph(ids, b, block_type=FOOTNOTE, extra_attrs=footnote_attrs))
             i += 1
             continue
         if b.raw_type == "list":
@@ -106,14 +112,14 @@ def process_normal_flow(
                 if t:
                     pseudo = RawBlock(page=b.page, index=b.index, raw_type="list_item", text=t, bbox=b.bbox, raw=li)
                     list_attrs = {"list_type": list_type} if list_type else None
-                    out.append(make_paragraph(ids, pseudo, block_type="list_item", extra_attrs=list_attrs))
+                    out.append(make_paragraph(ids, pseudo, block_type=LIST_ITEM, extra_attrs=list_attrs))
             prev_major_type = "list"
             i += 1
             continue
         if b.raw_type == "paragraph" and block_text(b):
             if _is_centered_table_heading_continuation(content_blocks, i, layout):
                 out.append(make_heading(ids, [b], level=2, role="table_heading_byline"))
-                prev_major_type = "heading"
+                prev_major_type = HEADING
                 i += 1
                 continue
 
@@ -148,19 +154,19 @@ def process_normal_flow(
                 continue
 
             if CN_LIST_ITEM_RE.match(block_text(b)):
-                out.append(make_paragraph(ids, b, block_type="list_item", extra_attrs={"list_marker_style": "cjk_decimal"}))
+                out.append(make_paragraph(ids, b, block_type=LIST_ITEM, extra_attrs={"list_marker_style": "cjk_decimal"}))
                 last_text_context = block_text(b)
-                prev_major_type = "list_item"
+                prev_major_type = LIST_ITEM
                 i += 1
                 continue
 
-            prev_text = last_text_context or (out[-1]["text"] if out and out[-1]["type"] in {"paragraph", "heading"} else "")
-            if should_start_display_quote(content_blocks, i, prev_text, layout, text_style=text_style):
-                group, j, boundary_reason = collect_display_quote(content_blocks, i, prev_text, layout, text_style=text_style)
+            prev_text = last_text_context or (out[-1]["text"] if out and out[-1]["type"] in {PARAGRAPH, HEADING} else "")
+            if should_start_display_block(content_blocks, i, prev_text, layout, text_style=text_style):
+                group, j, boundary_reason = collect_display_block(content_blocks, i, prev_text, layout, text_style=text_style)
                 if boundary_reason and j < len(content_blocks):
                     display_boundary_attrs[id(content_blocks[j])] = boundary_reason
                 out.append(make_display_block(ids, group, layout_role="inline_display_block", prev_text=prev_text))
-                prev_major_type = "display_block"
+                prev_major_type = DISPLAY_BLOCK
                 last_text_context = ""
                 i = j
                 continue
@@ -171,7 +177,7 @@ def process_normal_flow(
                 extra_attrs = {"display_boundary_before": boundary_reason}
             out.append(make_paragraph(ids, b, extra_attrs=extra_attrs))
             last_text_context = block_text(b)
-            prev_major_type = "paragraph"
+            prev_major_type = PARAGRAPH
             i += 1
             continue
         if block_text(b):

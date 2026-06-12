@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from ..normalize.builders import union_bbox
+from ..schema.block_types import FOOTNOTE, PARAGRAPH, TABLE
 from ..extraction.text import normalize_ws
 from .constants import _DEFAULT_PAGE_HEIGHT, _NEAR_PAGE_TOP_RATIO
 from .block_access import block_bbox as _bbox, block_page as _block_page
@@ -98,7 +99,7 @@ class _TableContinuationDetector:
         left = blocks[left_idx]
         left_page = _block_page(left)
         left_bbox = _bbox(left)
-        if left.get("type") != "table" or left_page is None or not left_bbox:
+        if left.get("type") != TABLE or left_page is None or not left_bbox:
             return None
         if not self._is_table_near_page_bottom(left, left_page, left_bbox):
             return None
@@ -124,7 +125,7 @@ class _TableContinuationDetector:
         return float(bbox[1]) <= self.page_heights.get(page, _DEFAULT_PAGE_HEIGHT) * _NEAR_PAGE_TOP_RATIO
 
     def _is_page_bottom_marker(self, block: Dict[str, Any]) -> bool:
-        if block.get("type") != "paragraph" or not _is_table_continuation_marker(str(block.get("text", ""))):
+        if block.get("type") != PARAGRAPH or not _is_table_continuation_marker(str(block.get("text", ""))):
             return False
         page = _block_page(block)
         bbox = _bbox(block)
@@ -146,11 +147,11 @@ class _TableContinuationDetector:
                 marker_idxs.append(j)
                 j += 1
                 continue
-            if b.get("type") == "footnote":
+            if b.get("type") == FOOTNOTE:
                 skipped_footnote_idxs.append(j)
                 j += 1
                 continue
-            if b.get("type") == "table":
+            if b.get("type") == TABLE:
                 return _TableContinuationMatch(j, marker_idxs, skipped_footnote_idxs)
             return None
         return None

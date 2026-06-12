@@ -6,12 +6,18 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol
 
 from ..normalize.builders import union_bbox
+from ..schema.block_types import CAPTION, FIGURE, FOOTNOTE, HEADING, PARAGRAPH, TABLE, TABLE_CONTINUATION
 from ..schema.models import BBox
 from .constants import _DEFAULT_PAGE_HEIGHT
 from .block_access import block_bbox as _bbox, block_page as _block_page
 from .layout_helpers import _page_coord_heights, _page_coord_widths
 
 __all__ = ["reconcile_figure_captions"]
+
+CAPTION_TEXT_TYPES = {PARAGRAPH, CAPTION}
+FIGURE_FLOW_BOUNDARY_TYPES = {FOOTNOTE, TABLE, FIGURE, TABLE_CONTINUATION}
+FIGURE_EMBEDDED_TEXT_TYPES = {HEADING, PARAGRAPH}
+FIGURE_FOLLOWING_CAPTION_TYPES = {HEADING, PARAGRAPH, CAPTION}
 
 
 class _TextStyleProvider(Protocol):
@@ -34,7 +40,7 @@ def reconcile_figure_captions(blocks: List[Dict[str, Any]], text_style: Optional
     i = 0
     while i < len(blocks):
         figure = blocks[i]
-        if figure.get("type") != "figure":
+        if figure.get("type") != FIGURE:
             i += 1
             continue
         caption_idxs = _FigureCaptionDetector(blocks, text_style).collect_indices(i)
@@ -80,23 +86,23 @@ class _FigureCaptionDetector:
                 j += 1
                 continue
             break
-        return out if any(self.blocks[k].get("type") in {"paragraph", "caption"} for k in out) else []
+        return out if any(self.blocks[k].get("type") in CAPTION_TEXT_TYPES for k in out) else []
 
     @staticmethod
     def _is_flow_boundary(candidate: Dict[str, Any]) -> bool:
-        return candidate.get("type") in {"footnote", "table", "figure", "table_continuation"}
+        return candidate.get("type") in FIGURE_FLOW_BOUNDARY_TYPES
 
     def _accept_heading(self, candidate: Dict[str, Any], figure: Dict[str, Any], caption_idxs: List[int], saw_text: bool) -> bool:
-        if candidate.get("type") != "heading":
+        if candidate.get("type") != HEADING:
             return False
         if saw_text or not _is_caption_like_heading(candidate):
             return False
         return _is_near_figure_caption_region(figure, candidate, caption_idxs, self.blocks)
 
     def _accept_paragraph(self, candidate: Dict[str, Any], figure: Dict[str, Any], caption_idxs: List[int], saw_text: bool) -> bool:
-        if candidate.get("type") not in {"paragraph", "caption"}:
+        if candidate.get("type") not in CAPTION_TEXT_TYPES:
             return False
-        if candidate.get("type") == "caption" and not saw_text:
+        if candidate.get("type") == CAPTION and not saw_text:
             return False
         if not saw_text and _is_body_paragraph_after_large_float(figure, candidate, self.blocks):
             return False
@@ -134,7 +140,7 @@ def _absorb_preceding_embedded_figure_text(blocks: List[Dict[str, Any]]) -> None
     while i < len(blocks):
         figure = blocks[i]
         candidate = blocks[i - 1]
-        if figure.get("type") != "figure" or candidate.get("type") not in {"heading", "paragraph"}:
+        if figure.get("type") != FIGURE or candidate.get("type") not in FIGURE_EMBEDDED_TEXT_TYPES:
             i += 1
             continue
         if not _is_preceding_embedded_figure_text(candidate, figure):
@@ -188,7 +194,7 @@ def _merge_adjacent_figure_fragments(blocks: List[Dict[str, Any]]) -> None:
     while i + 1 < len(blocks):
         left = blocks[i]
         right = blocks[i + 1]
-        if left.get("type") != "figure" or right.get("type") != "figure":
+        if left.get("type") != FIGURE or right.get("type") != FIGURE:
             i += 1
             continue
         if not _is_same_visual_figure_fragment(blocks, i):
@@ -244,9 +250,9 @@ def _has_following_caption_for_figure_pair(blocks: List[Dict[str, Any]], left_id
     for candidate in blocks[left_idx + 2:left_idx + 6]:
         if _block_page(candidate) != pair_page:
             return False
-        if candidate.get("type") in {"figure", "table", "table_continuation", "footnote"}:
+        if candidate.get("type") in FIGURE_FLOW_BOUNDARY_TYPES:
             return False
-        if candidate.get("type") not in {"heading", "paragraph", "caption"}:
+        if candidate.get("type") not in FIGURE_FOLLOWING_CAPTION_TYPES:
             continue
         cbb = _bbox(candidate)
         if not cbb:
@@ -321,7 +327,7 @@ def _is_near_figure_caption_region(
     return (
         _is_right_side_caption(region, cbb)
         or _is_below_caption(region, cbb, page_width, page_height)
-        or (candidate.get("type") == "heading" and _is_below_caption_heading(region, cbb))
+        or (candidate.get("type") == HEADING and _is_below_caption_heading(region, cbb))
     )
 
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from ..analysis.page_geometry import PageGeometry
+from ..schema.block_types import FIGURE
 
 
 def materialize_image_assets(
@@ -77,7 +78,7 @@ def materialize_full_page_image_assets(canonical: Dict[str, Any], source_pdf: Op
         return
     full_page_figures = [
         b for b in canonical.get("blocks", [])
-        if b.get("type") == "figure" and (b.get("attrs") or {}).get("layout_role") == "full_page_image"
+        if b.get("type") == FIGURE and (b.get("attrs") or {}).get("layout_role") == "full_page_image"
     ]
     if not full_page_figures:
         return
@@ -138,7 +139,7 @@ def materialize_repaired_figure_image_assets(
         return
     repaired_figures = [
         b for b in canonical.get("blocks", [])
-        if b.get("type") == "figure" and _needs_repaired_figure_asset(b)
+        if b.get("type") == FIGURE and _needs_repaired_figure_asset(b)
     ]
     if not repaired_figures:
         return

@@ -7,9 +7,9 @@ from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
 from ..block_access import block_bbox as _bbox, block_page as _block_page
-from ..block_merge import _merge_block_pair, _refresh_canonical_quote_attrs
-from ..block_nav import _prev_text_non_float
+from ..block_merge import _merge_block_pair, _refresh_display_block_attrs
 from ...extraction.text import normalize_ws
+from ...schema.block_types import DISPLAY_BLOCK, HEADING, PARAGRAPH
 
 ERA_MONTH_RE = re.compile(r"^\s*[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]年[正一二三四五六七八九十冬腊]+月\s*$")
 LUNAR_DAY_ENTRY_RE = re.compile(
@@ -21,7 +21,7 @@ NAME_LABEL_LINE_RE = re.compile(r"^[\u4e00-\u9fffA-Za-z0-9·•]{2,18}\s*[：:]\
 
 
 def is_era_month_header(block: Dict[str, Any], layout: LayoutStats) -> bool:
-    if block.get("type") == "heading":
+    if block.get("type") == HEADING:
         return False
     text = str(block.get("text", "")).strip()
     if not ERA_MONTH_RE.match(text):
@@ -36,7 +36,7 @@ def is_era_month_header(block: Dict[str, Any], layout: LayoutStats) -> bool:
 
 
 def is_lunar_day_entry(block: Dict[str, Any], layout: LayoutStats) -> bool:
-    if block.get("type") == "heading":
+    if block.get("type") == HEADING:
         return False
     text = str(block.get("text", "")).strip()
     return bool(LUNAR_DAY_ENTRY_RE.match(text))
@@ -46,15 +46,15 @@ def is_parenthetical_time_header(text: str) -> bool:
     return bool(PAREN_TIME_HEADER_RE.match(text or ""))
 
 
-def force_generic_display_attrs(
+def force_generic_display_block_attrs(
     b: Dict[str, Any],
     prev_text: str = "",
     evidence: str = "layout_defined_display_block",
 ) -> None:
-    if b.get("type") == "heading":
+    if b.get("type") == HEADING:
         b.pop("level", None)
-    b["type"] = "display_block"
-    _refresh_canonical_quote_attrs(b, prev_text=prev_text)
+    b["type"] = DISPLAY_BLOCK
+    _refresh_display_block_attrs(b, prev_text=prev_text)
     attrs = b.setdefault("attrs", {})
     attrs["layout_role"] = "inline_display_block"
     ev = attrs.setdefault("classification_evidence", [])
@@ -62,7 +62,7 @@ def force_generic_display_attrs(
         ev.append(evidence)
 
 
-def merge_display_run(
+def merge_display_block_run(
     blocks: List[Dict[str, Any]],
     start: int,
     end_exclusive: int,
@@ -72,31 +72,31 @@ def merge_display_run(
     if start < 0 or start >= len(blocks) or end_exclusive <= start:
         return start + 1
     cur = blocks[start]
-    force_generic_display_attrs(cur, prev_text=prev_text, evidence=reason)
+    force_generic_display_block_attrs(cur, prev_text=prev_text, evidence=reason)
     while start + 1 < end_exclusive and start + 1 < len(blocks):
         nxt = blocks[start + 1]
         _merge_block_pair(cur, nxt, reason, {"layout_run": True}, [], joiner="newline")
         del blocks[start + 1]
         end_exclusive -= 1
-    force_generic_display_attrs(cur, prev_text=prev_text, evidence=reason)
+    force_generic_display_block_attrs(cur, prev_text=prev_text, evidence=reason)
     return start + 1
 
 
-# ── display quote continuation helpers ──────────────────────────────────────
+# ── display block continuation helpers ──────────────────────────────────────
 
 
-def display_run_is_intro_continuation_candidate(b: Dict[str, Any], layout: LayoutStats) -> bool:
-    from ..layout_helpers import _canonical_quote_layout
+def display_block_run_is_intro_continuation_candidate(b: Dict[str, Any], layout: LayoutStats) -> bool:
+    from ..layout_helpers import _display_block_layout
 
-    if b.get("type") != "display_block":
+    if b.get("type") != DISPLAY_BLOCK:
         return False
-    return _canonical_quote_layout(b, layout) or bool(_bbox(b))
+    return _display_block_layout(b, layout) or bool(_bbox(b))
 
 
 def is_short_display_text_block(b: Dict[str, Any], layout: LayoutStats, max_len: int = 120) -> bool:
-    from ..layout_helpers import _canonical_quote_layout
+    from ..layout_helpers import _display_block_layout
 
-    if b.get("type") not in {"paragraph", "display_block"}:
+    if b.get("type") not in {PARAGRAPH, DISPLAY_BLOCK}:
         return False
     text = str(b.get("text", "")).strip()
     if not text or len(text) > max_len:
@@ -108,12 +108,12 @@ def is_short_display_text_block(b: Dict[str, Any], layout: LayoutStats, max_len:
         body_width = width >= layout.body_width * 0.88
         if near_body_indent and body_width:
             return False
-    return _canonical_quote_layout(b, layout) or (_bbox(b) is not None and float(_bbox(b)[0]) >= layout.body_left + 35)
+    return _display_block_layout(b, layout) or (bb is not None and float(bb[0]) >= layout.body_left + 35)
 
 
 def is_left_shifted_intro_before_display_lane_ds(blocks: List[Dict[str, Any]], i: int, layout: LayoutStats) -> bool:
     b = blocks[i]
-    if b.get("type") != "paragraph":
+    if b.get("type") != PARAGRAPH:
         return False
     bb = _bbox(b)
     text = normalize_ws(str(b.get("text", "")))
@@ -123,7 +123,7 @@ def is_left_shifted_intro_before_display_lane_ds(blocks: List[Dict[str, Any]], i
         return False
     nxt = blocks[i + 1]
     nbb = _bbox(nxt)
-    if nxt.get("type") != "display_block" or not nbb:
+    if nxt.get("type") != DISPLAY_BLOCK or not nbb:
         return False
     if _block_page(nxt) != _block_page(b):
         return False
@@ -154,7 +154,7 @@ def looks_like_record_display_text(text: str) -> bool:
     return False
 
 
-def display_quote_multiline_seed(text: str) -> bool:
+def display_block_multiline_seed(text: str) -> bool:
     lines = [ln.strip() for ln in str(text or "").split("\n") if ln.strip()]
     if len(lines) < 2:
         return False
@@ -194,10 +194,5 @@ def display_lanes_compatible(left: Dict[str, Any], right: Dict[str, Any], layout
     return left_compact and right_compact and left_x0 >= layout.body_left + 70 and right_x0 >= layout.body_left + 70
 
 
-_force_generic_quote_attrs = force_generic_display_attrs
-force_generic_quote_attrs = force_generic_display_attrs
 _is_era_month_header = is_era_month_header
 _is_lunar_day_entry = is_lunar_day_entry
-_merge_quote_run = merge_display_run
-merge_quote_run = merge_display_run
-quote_run_is_intro_continuation_candidate = display_run_is_intro_continuation_candidate

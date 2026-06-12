@@ -1,4 +1,4 @@
-from inkline.parsers.mineru.reconcile.footnotes.promote import split_page_footnote_blocks
+from inkline.parsers.mineru.reconcile.footnote.promote import split_page_footnote_blocks
 
 
 def _body(block_id: str, page: int, markers: list[str]) -> dict:

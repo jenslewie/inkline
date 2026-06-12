@@ -5,17 +5,19 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
+from ...schema.block_types import DISPLAY_BLOCK, PARAGRAPH
 from ...schema.patterns import ATTR_RE
 from ..constants import FLOAT_LIKE_TYPES
 from ..block_access import block_bbox as _bbox, block_page as _block_page
-from ..layout_helpers import _canonical_quote_layout
-from .helpers import _is_era_month_header, _is_lunar_day_entry, _merge_quote_run, _prev_text_non_float
+from ..block_nav import _prev_text_non_float
+from ..layout_helpers import _display_block_layout
+from .helpers import _is_era_month_header, _is_lunar_day_entry, merge_display_block_run
 
-def _reconcile_attribution_display_quotes(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
-    """Merge a display quote line followed by an attribution line.
+def _reconcile_attribution_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+    """Merge a display block line followed by an attribution line.
 
-    This is layout-based, not ID-based.  Typical shape: a short/indented quote
-    paragraph followed by a right-shifted attribution beginning with an em dash.
+    This is layout-based, not ID-based. Typical shape: a short/indented
+    display block followed by a right-shifted attribution beginning with an em dash.
     """
     i = 0
     while i + 1 < len(blocks):
@@ -36,10 +38,10 @@ def _reconcile_attribution_display_quotes(blocks: List[Dict[str, Any]], layout: 
             continue
         cbb = _bbox(cur)
         nbb = _bbox(nxt)
-        cur_display = _canonical_quote_layout(cur, layout) or len(cur_text) <= 90
+        cur_display = _display_block_layout(cur, layout) or len(cur_text) <= 90
         attribution_position = bool(cbb and nbb and float(nbb[0]) >= float(cbb[0]) - 5)
-        if cur.get("type") in {"paragraph", "display_block"} and cur_display and attribution_position:
-            _merge_quote_run(
+        if cur.get("type") in {PARAGRAPH, DISPLAY_BLOCK} and cur_display and attribution_position:
+            merge_display_block_run(
                 blocks,
                 i,
                 i + 2,
@@ -50,10 +52,10 @@ def _reconcile_attribution_display_quotes(blocks: List[Dict[str, Any]], layout: 
         i += 1
 
 
-def _reconcile_diary_date_display_quote_runs(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def _reconcile_diary_date_display_block_runs(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
     """Merge dated diary/extract runs such as '癸巳年五月' + dated entries.
 
-    These are quoted source excerpts laid out as display text.  Detection uses
+    These are source excerpts laid out as display text. Detection uses
     the calendar heading/date-entry structure and local layout, not block IDs.
     """
     i = 0
@@ -87,7 +89,7 @@ def _reconcile_diary_date_display_quote_runs(blocks: List[Dict[str, Any]], layou
                 end += 1
                 continue
             break
-        i = _merge_quote_run(
+        i = merge_display_block_run(
             blocks,
             i,
             end,
@@ -96,6 +98,6 @@ def _reconcile_diary_date_display_quote_runs(blocks: List[Dict[str, Any]], layou
         )
 
 
-def reconcile_display_quote_pair_and_date_structures(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
-    _reconcile_attribution_display_quotes(blocks, layout)
-    _reconcile_diary_date_display_quote_runs(blocks, layout)
+def reconcile_display_block_pair_and_date_structures(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+    _reconcile_attribution_display_blocks(blocks, layout)
+    _reconcile_diary_date_display_block_runs(blocks, layout)

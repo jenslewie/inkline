@@ -1,4 +1,4 @@
-"""Date-start prose fragment fixes. Demotes short date-start fragments (e.g. "1593 年 12 月上旬，...") that were misclassified as display quotes, then merges them across pages as normal paragraph continuations."""
+"""Date-start prose fragment fixes. Demotes short date-start fragments (e.g. "1593 年 12 月上旬，...") that were misclassified as display blocks, then merges them across pages as normal paragraph continuations."""
 
 from __future__ import annotations
 
@@ -6,22 +6,23 @@ import re
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
-from ..cjk import _is_cjk_numbered_item_block
+from ...schema.block_types import DISPLAY_BLOCK, PARAGRAPH
+from .cjk_numbered import _is_cjk_numbered_item_block
 from ..block_access import block_bbox as _bbox, block_page as _block_page
 from ..block_merge import _merge_block_pair
 from ..layout_helpers import (
-    _canonical_quote_layout, _ends_with_terminal,
+    _display_block_layout, _ends_with_terminal,
     _is_near_page_bottom, _is_near_page_top, _page_coord_heights,
 )
 
 
-def reconcile_false_short_date_quotes(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_false_short_date_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
     for b in blocks:
-        if b.get("type") != "display_block":
+        if b.get("type") != DISPLAY_BLOCK:
             continue
         text = str(b.get("text", "")).strip()
         if re.match(r"^\d{3,4}\s*年", text) and len(text) < 120 and not text.startswith("“"):
-            b["type"] = "paragraph"
+            b["type"] = PARAGRAPH
             b.pop("level", None)
             attrs = b.setdefault("attrs", {})
             for k in ["role", "content_form", "content_form_confidence", "content_form_scores", "classification_evidence", "quote_text", "attribution"]:
@@ -35,7 +36,7 @@ def reconcile_demoted_date_start_cross_page_paragraphs(blocks: List[Dict[str, An
     while i + 1 < len(blocks):
         cur = blocks[i]
         nxt = blocks[i + 1]
-        if cur.get("type") != "paragraph" or nxt.get("type") != "paragraph":
+        if cur.get("type") != PARAGRAPH or nxt.get("type") != PARAGRAPH:
             i += 1
             continue
         text = str(cur.get("text", "")).strip()
@@ -52,7 +53,7 @@ def reconcile_demoted_date_start_cross_page_paragraphs(blocks: List[Dict[str, An
         if not (_is_near_page_bottom(cur, page_heights) and _is_near_page_top(nxt, page_heights)):
             i += 1
             continue
-        if _is_cjk_numbered_item_block(nxt) or _canonical_quote_layout(nxt, layout):
+        if _is_cjk_numbered_item_block(nxt) or _display_block_layout(nxt, layout):
             i += 1
             continue
         _merge_block_pair(
@@ -68,7 +69,7 @@ def reconcile_demoted_date_start_cross_page_paragraphs(blocks: List[Dict[str, An
 
 def reconcile_date_start_cross_page_paragraph_attrs(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
     for b in blocks:
-        if b.get("type") != "paragraph":
+        if b.get("type") != PARAGRAPH:
             continue
         text = str(b.get("text", "")).strip()
         if not re.match(r"^\d{3,4}\s*年", text):
@@ -91,7 +92,7 @@ def reconcile_date_start_cross_page_paragraph_attrs(blocks: List[Dict[str, Any]]
         attrs = b.get("attrs") or {}
         if attrs.get("merge_reason") != "cross_page_paragraph_continuation":
             continue
-        raw_type = attrs.get("raw_type", "paragraph")
+        raw_type = attrs.get("raw_type", PARAGRAPH)
         new_attrs: Dict[str, Any] = {
             "raw_types": attrs.get("raw_types") or [raw_type],
             "demoted_reason": "short_date_start_prose_fragment_not_display_block",

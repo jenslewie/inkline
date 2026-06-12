@@ -1,23 +1,24 @@
-"""Record-style display quote merging. Merges compact record/receipt-style display excerpts across adjacent pages. Only repairs page-break splits; same-page entries are assumed to be separate dated records."""
+"""Record-style display block merging. Merges compact record/receipt-style display excerpts across adjacent pages. Only repairs page-break splits; same-page entries are assumed to be separate dated records."""
 
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
+from ...schema.block_types import DISPLAY_BLOCK, PARAGRAPH
 from ..constants import FLOAT_LIKE_TYPES
 from ..block_access import block_page as _block_page, block_pages as _block_pages
 from ..layout_helpers import _is_near_page_bottom, _is_near_page_top, _page_coord_heights
 from ..block_nav import _prev_text_non_float
-from .helpers import is_era_month_header, looks_like_record_display_text, merge_quote_run
+from .helpers import is_era_month_header, looks_like_record_display_text, merge_display_block_run
 
 
-def reconcile_record_style_display_quote_runs(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_record_style_display_block_runs(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
     page_heights = _page_coord_heights(blocks)
     i = 0
     while i < len(blocks):
         cur = blocks[i]
-        if cur.get("type") != "display_block" or not looks_like_record_display_text(cur.get("text", "")):
+        if cur.get("type") != DISPLAY_BLOCK or not looks_like_record_display_text(cur.get("text", "")):
             i += 1
             continue
         end = i + 1
@@ -25,7 +26,7 @@ def reconcile_record_style_display_quote_runs(blocks: List[Dict[str, Any]], layo
             nxt = blocks[end]
             if nxt.get("type") in FLOAT_LIKE_TYPES:
                 break
-            if nxt.get("type") not in {"paragraph", "display_block"}:
+            if nxt.get("type") not in {PARAGRAPH, DISPLAY_BLOCK}:
                 break
             if not looks_like_record_display_text(nxt.get("text", "")):
                 break
@@ -39,7 +40,7 @@ def reconcile_record_style_display_quote_runs(blocks: List[Dict[str, Any]], layo
                 break
             end += 1
         if end > i + 1:
-            merge_quote_run(
+            merge_display_block_run(
                 blocks,
                 i,
                 end,

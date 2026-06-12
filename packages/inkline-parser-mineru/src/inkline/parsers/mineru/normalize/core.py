@@ -1,18 +1,48 @@
 """Main canonical pipeline orchestration.
 
-build_canonical() runs the normalization pipeline in this order:
+build_canonical() runs in four layers:
 
-1. Infer layout stats and create the TextStyleAnalyzer.
-2. Run process_page for each page.
-3. Run extend_table_source_pages.
-4. Run reconcile_figure_captions while the TextStyleAnalyzer is available.
-5. Run reconcile_table_continuations.
-6. Run the footnote lifecycle: promote, split, promote cross-page, merge.
-7. Run merge_cross_page_paragraphs.
-8. Run recover_missing_note_refs and resolve_note_links.
-9. Run the display quote reconciliation passes.
-10. Run normalize_display_blocks_for_layout_schema.
-11. Build metadata and the table of contents.
+1. Page-level canonicalization:
+   - Infer document-level layout stats and create the TextStyleAnalyzer.
+   - Process raw MinerU blocks one page at a time with process_page.
+   - Append each page's canonical blocks into one global blocks list.
+   - Carry only lightweight flow state across pages, such as prev_major_type
+     and in_toc. The raw page contents are not first merged into one raw
+     document before parsing.
+
+2. Early whole-document cleanup before TextStyleAnalyzer is closed:
+   - These passes are not page-level canonicalization because they run after
+     all page outputs have been appended to the global blocks list. They are
+     kept early because figure/caption cleanup still needs TextStyleAnalyzer.
+   - Annotate source-page metadata for already emitted table_continuation
+     blocks with extend_table_source_pages. This only marks the previous table
+     as continued and extends source.pages; it does not merge table HTML or
+     delete continuation blocks.
+   - Reconcile figure structure while TextStyleAnalyzer is still available:
+     absorb embedded figure text, merge adjacent figure fragments, and attach
+     nearby caption blocks to figures.
+
+3. Whole-document structural reconciliation over the global blocks list:
+   - Reconcile true split-table continuations across adjacent pages with
+     reconcile_table_continuations. This structural pass merges table HTML,
+     source spans, and table footnotes, and removes continuation table or
+     continuation marker blocks.
+   - Run the footnote lifecycle: promote page reference-list entries, split
+     page footnote blocks, recover unmarked markers, promote cross-page
+     footnote continuations, and merge continuation footnotes.
+   - Merge cross-page body paragraphs after float/table/footnote cleanup has
+     reduced false flow boundaries.
+   - Recover missing note references and resolve note links, optionally using
+     the Qwen marker-locator repair loop before the final recovery/link pass.
+   - Run display block reconciliation passes for layout-specific,
+     CJK-numbered, and generic display-block structures.
+   - Normalize display blocks to the public layout schema and remove internal
+     note-ref indexes.
+
+4. Canonical assembly:
+   - Build metadata, page metadata, source map, assets container, and block
+     type metadata.
+   - Build the final table of contents from the reconciled canonical blocks.
 
 The list above is documentation only; the executable order is the explicit
 function call sequence inside build_canonical().
@@ -32,6 +62,7 @@ from ..extraction.text import normalize_note_marker, normalize_ws
 from ..analysis.layout import infer_layout_stats
 from ..analysis.pdf_page_metrics import PdfPageCache
 from ..analysis.text_style import TextStyleAnalyzer
+from ..schema.block_types import CANONICAL_BLOCK_TYPES, FOOTNOTE
 from ..schema.models import IdFactory, RawBlock
 from .output_schema import normalize_display_blocks_for_layout_schema, remove_internal_note_ref_indexes
 from .page_processing import build_toc_from_blocks, extend_table_source_pages, process_page
@@ -43,10 +74,10 @@ from ..reconcile import (
     promote_page_reference_list_footnotes,
     recover_unmarked_page_footnote_markers,
     recover_missing_note_refs,
-    reconcile_cjk_numbered_display_quotes,
-    reconcile_display_quotes,
+    reconcile_cjk_numbered_display_blocks,
+    reconcile_display_blocks,
     reconcile_figure_captions,
-    reconcile_generic_display_quote_structures,
+    reconcile_generic_display_block_structures,
     reconcile_table_continuations,
     resolve_note_links,
     split_page_footnote_blocks,
@@ -119,15 +150,11 @@ def build_canonical(
             )
         finally:
             note_cache.close()
-    reconcile_display_quotes(blocks, layout)
-    reconcile_cjk_numbered_display_quotes(blocks, layout)
-    reconcile_generic_display_quote_structures(blocks, layout)
+    reconcile_display_blocks(blocks, layout)
+    reconcile_cjk_numbered_display_blocks(blocks, layout)
+    reconcile_generic_display_block_structures(blocks, layout)
     normalize_display_blocks_for_layout_schema(blocks)
     remove_internal_note_ref_indexes(blocks)
-
-    block_types = ["heading", "paragraph", "toc_item", "display_block", "figure", "caption", "table", "table_continuation", "list_item"]
-    if any(b.get("type") == "footnote" for b in blocks):
-        block_types.append("footnote")
 
     source_files = {}
     for k in ["content_list_v2", "content_list", "middle", "model", "md", "source_pdf"]:
@@ -186,9 +213,9 @@ def build_canonical(
                 "note_trace_log": getattr(args, "note_trace_log", None) or None,
                 "note_recovery_mode": str(getattr(args, "note_recovery_mode", "qwen")),
                 "type_system": {
-                    "block_types": block_types,
+                    "block_types": list(CANONICAL_BLOCK_TYPES),
                     "content_forms": [],
-                    "note": "Display text block types are layout-first; semantic forms are not emitted.",
+                    "note": "display_block is layout-first; semantic forms are not emitted.",
                 },
             },
         },
@@ -270,7 +297,7 @@ def _missing_or_unreliable_body_ref_pages(blocks: List[Dict[str, Any]], *, qwen_
                 refs_by_note_id.setdefault(note_id, []).append((block, ref))
 
     for block in blocks:
-        if block.get("type") != "footnote":
+        if block.get("type") != FOOTNOTE:
             continue
         attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
         note_id = str(attrs.get("note_id") or "")
@@ -334,7 +361,7 @@ def _qwen_body_ref_markers_by_page(qwen_marker_pages: List[Any]) -> Dict[int, se
 def _clear_note_referenced_by(blocks: List[Dict[str, Any]]) -> None:
     for block in blocks:
         attrs = block.get("attrs")
-        if isinstance(attrs, dict) and block.get("type") == "footnote":
+        if isinstance(attrs, dict) and block.get("type") == FOOTNOTE:
             attrs.pop("referenced_by", None)
 
 

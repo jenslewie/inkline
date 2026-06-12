@@ -1,7 +1,7 @@
 """Page layout statistics inference.
 
 Infers body-width margins, page dimensions, and page-level classification
-signals (full-page images, title-only pages, display-quote layout). Used by
+signals (full-page images, title-only pages, display_block layout). Used by
 both the canonical page-processing pipeline and the reconciliation passes.
 """
 
@@ -46,11 +46,11 @@ def is_short_or_indented(b: RawBlock, layout: LayoutStats) -> bool:
     return b.x0 >= layout.body_left + 35 or b.width <= layout.body_width * 0.82
 
 
-def is_display_quote_layout_raw(b: RawBlock, layout: LayoutStats) -> bool:
-    """Looser layout test for display quotes after an explicit introducer.
+def is_display_block_layout_raw(b: RawBlock, layout: LayoutStats) -> bool:
+    """Looser layout test for display blocks after an explicit introducer.
 
     Some MinerU VLM paragraph boxes are the union of several rendered lines, so
-    a true block quote may only be mildly indented in bbox terms.  Use this only
+    a true display block may only be mildly indented in bbox terms. Use this only
     with a strong textual trigger such as a preceding colon / 上书 / 诏书.
     """
     if not b.bbox:

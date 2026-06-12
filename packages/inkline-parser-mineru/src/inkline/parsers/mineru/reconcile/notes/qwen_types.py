@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List
 
+from ...schema.block_types import CAPTION, DISPLAY_BLOCK, PARAGRAPH
+
 
 _PUNCTUATION_BOUNDARY_INSTRUCTION = (
     "这里的标点包括中文和英文的句号、逗号、顿号、分号、冒号、问号、叹号，以及紧邻正文的右括号、右引号、书名号。"
@@ -42,7 +44,7 @@ _FOOTNOTE_DEFS_PROMPT = (
 )
 _PROMPT_VERSION = 6
 _VALID_MARKER_RE = re.compile(r"^(?:\d{1,3}|\*{1,3})$")
-_BODY_REF_BLOCK_TYPES = {"paragraph", "display_block", "caption"}
+_BODY_REF_BLOCK_TYPES = {PARAGRAPH, DISPLAY_BLOCK, CAPTION}
 _PARAGRAPH_CROP_PADDING_PDF = 12.0
 
 

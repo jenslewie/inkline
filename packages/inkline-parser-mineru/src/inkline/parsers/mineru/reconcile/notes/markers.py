@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
 from ...analysis.pdf_page_metrics import PdfPageCache
 from ...extraction.text import normalize_note_marker
+from ...schema.block_types import FOOTNOTE
 from ...schema.models import CanonicalBlock
 from .keys import leading_note_marker
 from .marker_location import _locate_qwen_body_ref  # compatibility re-export
@@ -88,7 +89,7 @@ def _collect_note_definition_markers(
 def _collect_page_symbol_definition_markers(blocks: List[CanonicalBlock], context: _NoteContext) -> Dict[int, Set[str]]:
     out: Dict[int, Set[str]] = {}
     for block in blocks:
-        if block.get("type") != "footnote":
+        if block.get("type") != FOOTNOTE:
             continue
         attrs = block.get("attrs") or {}
         if attrs.get("role") != "page_footnote":

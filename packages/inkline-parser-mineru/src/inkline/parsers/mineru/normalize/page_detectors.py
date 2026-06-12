@@ -1,7 +1,7 @@
 """Page-level classification helpers.
 
 Detects full-page images, title-only pages, snapshot/layout pages, and dominant
-blocks. Provides the coord_page_size heuristic shared by display quote
+blocks. Provides the coord_page_size heuristic shared by display block
 detection.
 """
 

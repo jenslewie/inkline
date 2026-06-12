@@ -1,13 +1,13 @@
-"""Display quote detection and collection rules. Pure rule functions for deciding when a raw block starts a display quote (should_start_display_quote) and how far the quote run extends (collect_display_quote). Also contains left-shifted intro detection, page-bottom set-off detection, and body-layout resumption guards."""
+"""Display block detection and collection rules. Pure rule functions for deciding when a raw block starts a display block (should_start_display_block) and how far the display block run extends (collect_display_block). Also contains left-shifted intro detection, page-bottom set-off detection, and body-layout resumption guards."""
 
 from __future__ import annotations
 
 from statistics import median
 from typing import List, Optional, Protocol, Sequence, Tuple
 
-from .display_detectors import RawSetOffDisplayRunDetector
+from .display_block_detectors import RawSetOffDisplayRunDetector
 from .page_detectors import coord_page_size as _coord_page_size
-from ..analysis.layout import is_display_quote_layout_raw, is_right_aligned_short, is_short_or_indented
+from ..analysis.layout import is_display_block_layout_raw, is_right_aligned_short, is_short_or_indented
 from ..schema.models import LayoutStats, RawBlock
 from ..schema.patterns import ATTR_RE
 from ..extraction.text import block_text, normalize_ws
@@ -19,7 +19,7 @@ class _RawTextStyleProvider(Protocol):
     def raw_page_body_style_size(self, page: int, blocks: Sequence[RawBlock]) -> Optional[float]: ...
 
 
-def should_start_display_quote(
+def should_start_display_block(
     blocks: List[RawBlock],
     i: int,
     prev_text: str,
@@ -34,7 +34,7 @@ def should_start_display_quote(
     if ATTR_RE.match(next_t) and is_short_or_indented(b, layout):
         return True
     colon_intro = prev_text.rstrip().endswith(("：", ":"))
-    if colon_intro and is_display_quote_layout_raw(b, layout):
+    if colon_intro and is_display_block_layout_raw(b, layout):
         return True
     if is_left_shifted_intro_before_display_lane(blocks, i, layout):
         return False
@@ -177,7 +177,7 @@ def is_page_bottom_set_off_before_footnotes(
     return body_size * 0.84 <= candidate_size <= body_size * 1.12
 
 
-def collect_display_quote(
+def collect_display_block(
     blocks: List[RawBlock],
     i: int,
     prev_text: str,
@@ -225,7 +225,7 @@ def collect_display_quote(
             continue
         if (
             started_by_intro
-            and is_display_quote_layout_raw(b, layout)
+            and is_display_block_layout_raw(b, layout)
             and b.x0 >= group[0].x0 - 5
             and (not b.bbox or not group[0].bbox or b.x1 <= group[0].x1 + 20)
         ):

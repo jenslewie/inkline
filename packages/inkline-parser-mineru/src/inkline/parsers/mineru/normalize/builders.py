@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from ..schema.block_types import DISPLAY_BLOCK, FIGURE, HEADING, PARAGRAPH, TABLE, TOC_ITEM
 from ..schema.models import BBox, IdFactory, RawBlock, canonical_block
 from ..schema.patterns import TOC_LINE_RE
 from ..extraction.text import block_text, extract_caption_list, merge_inline_runs, normalize_toc_number, normalize_ws, strip_trailing_text_note
@@ -71,7 +72,7 @@ def make_display_block(
     text = "\n".join(raw_lines).strip()
     page = blocks[0].page if blocks else None
     bbox = union_bbox([b.bbox for b in blocks if b.bbox])
-    return canonical_block(ids.next(), "display_block", text, page, bbox, attrs=attrs, level=level, source_pages=_unique_pages(blocks))
+    return canonical_block(ids.next(), DISPLAY_BLOCK, text, page, bbox, attrs=attrs, level=level, source_pages=_unique_pages(blocks))
 
 
 def make_display_group(ids: IdFactory, groups: List[List[RawBlock]]) -> Dict[str, Any]:
@@ -99,7 +100,7 @@ def make_display_group(ids: IdFactory, groups: List[List[RawBlock]]) -> Dict[str
         "line_count": len(lines),
         "items": items,
     }
-    return canonical_block(ids.next(), "display_block", text, all_blocks[0].page, union_bbox([b.bbox for b in all_blocks if b.bbox]), attrs=attrs, source_pages=_unique_pages(all_blocks))
+    return canonical_block(ids.next(), DISPLAY_BLOCK, text, all_blocks[0].page, union_bbox([b.bbox for b in all_blocks if b.bbox]), attrs=attrs, source_pages=_unique_pages(all_blocks))
 
 
 def _display_layout_form(lines: Sequence[str]) -> str:
@@ -121,7 +122,7 @@ def _unique_pages(blocks: Sequence[RawBlock]) -> List[int]:
     return sorted({b.page for b in blocks})
 
 
-def make_paragraph(ids: IdFactory, b: RawBlock, block_type: str = "paragraph", extra_attrs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def make_paragraph(ids: IdFactory, b: RawBlock, block_type: str = PARAGRAPH, extra_attrs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     text, _ = strip_trailing_text_note(b.text)
     attrs: Dict[str, Any] = {"raw_type": b.raw_type}
     inline_runs = merge_inline_runs([b], separator="")
@@ -142,7 +143,7 @@ def make_flush_right_terminal_block(ids: IdFactory, blocks: Sequence[RawBlock]) 
     }
     return canonical_block(
         ids.next(),
-        "display_block",
+        DISPLAY_BLOCK,
         text,
         blocks[0].page,
         union_bbox([b.bbox for b in blocks]),
@@ -167,7 +168,7 @@ def make_heading(ids: IdFactory, blocks: Sequence[RawBlock], level: int, role: O
         attrs["raw_types"] = raw_types
     if role:
         attrs["role"] = role
-    return canonical_block(ids.next(), "heading", norm_text, blocks[0].page, union_bbox([b.bbox for b in blocks]), attrs=attrs, level=level, source_pages=_unique_pages(blocks))
+    return canonical_block(ids.next(), HEADING, norm_text, blocks[0].page, union_bbox([b.bbox for b in blocks]), attrs=attrs, level=level, source_pages=_unique_pages(blocks))
 
 
 def make_toc_item(ids: IdFactory, b: RawBlock, text: Optional[str] = None, level: int = 1) -> Dict[str, Any]:
@@ -179,7 +180,7 @@ def make_toc_item(ids: IdFactory, b: RawBlock, text: Optional[str] = None, level
         display_text = normalize_toc_number(m.group("title")).strip()
         attrs["title"] = display_text
         attrs["target_page_label"] = m.group("page")
-    return canonical_block(ids.next(), "toc_item", display_text, b.page, b.bbox, attrs=attrs, level=level)
+    return canonical_block(ids.next(), TOC_ITEM, display_text, b.page, b.bbox, attrs=attrs, level=level)
 
 
 def make_figure(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
@@ -196,7 +197,7 @@ def make_figure(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
         "captions": captions,
         "footnotes": footnotes,
     }
-    return canonical_block(ids.next(), "figure", "", b.page, b.bbox, attrs=attrs)
+    return canonical_block(ids.next(), FIGURE, "", b.page, b.bbox, attrs=attrs)
 
 
 def make_full_page_figure(ids: IdFactory, image: RawBlock, absorbed_blocks: Sequence[RawBlock]) -> Dict[str, Any]:
@@ -231,7 +232,7 @@ def make_page_snapshot_figure(ids: IdFactory, page: int, blocks: Sequence[RawBlo
         attrs["absorbed_text"] = [block_text(b) for b in text_blocks]
     return canonical_block(
         ids.next(),
-        "figure",
+        FIGURE,
         "",
         page,
         union_bbox([b.bbox for b in blocks if b.bbox]),
@@ -254,7 +255,7 @@ def make_table(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
         "table_nest_level": content.get("table_nest_level") if isinstance(content, dict) else None,
         "image_path": (content.get("image_source") or {}).get("path") if isinstance(content, dict) else None,
     }
-    return canonical_block(ids.next(), "table", caption_text, b.page, b.bbox, attrs=attrs)
+    return canonical_block(ids.next(), TABLE, caption_text, b.page, b.bbox, attrs=attrs)
 
 
 def make_chart_table(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
@@ -265,4 +266,4 @@ def make_chart_table(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
         "chart_type": b.raw.get("sub_type"),
         "image_path": (content.get("image_source") or {}).get("path") if isinstance(content, dict) else None,
     }
-    return canonical_block(ids.next(), "table", chart_text, b.page, b.bbox, attrs=attrs)
+    return canonical_block(ids.next(), TABLE, chart_text, b.page, b.bbox, attrs=attrs)

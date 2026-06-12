@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..analysis.layout import LayoutStats
 from ..analysis.pdf_page_metrics import PdfPageCache, line_bands
+from ..schema.block_types import DISPLAY_BLOCK, FOOTNOTE, HEADING, PARAGRAPH, TABLE
 from ..schema.models import BBox
 from ..extraction.text import chinese_len, normalize_ws
 from .constants import (
@@ -16,13 +17,14 @@ from .constants import (
 from .block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
 from .block_merge import _join_text, _merge_block_pair
 from .layout_helpers import (
-    _canonical_quote_layout, _ends_with_terminal, _is_near_page_bottom,
+    _display_block_layout, _ends_with_terminal, _is_near_page_bottom,
     _is_near_page_top, _page_coord_heights, _page_coord_widths,
 )
 from .notes.keys import leading_note_marker as _leading_note_marker
 from .notes.marker_inline import _note_refs
 
-FLOAT_INTERRUPTION_TYPES = FLOAT_LIKE_TYPES | {"table"}
+FLOAT_INTERRUPTION_TYPES = FLOAT_LIKE_TYPES | {TABLE}
+FLOW_STOP_TYPES = {HEADING, DISPLAY_BLOCK, TABLE}
 
 _BODY_INDENT_MAX_PX = 48.0
 _BODY_INDENT_RATIO = 0.055
@@ -215,7 +217,7 @@ def _next_same_page_text_block(blocks: List[Dict[str, Any]], start: int, page: i
             continue
         if b.get("type") in MERGEABLE_TEXT_TYPES:
             return b
-        if b.get("type") in {"heading", "display_block", "table"}:
+        if b.get("type") in FLOW_STOP_TYPES:
             return None
     return None
 
@@ -225,7 +227,7 @@ def _is_cross_page_interruption(b: Dict[str, Any]) -> bool:
         return True
     # Page footnotes sit below the body text and should not prevent a body
     # paragraph from continuing onto the next page.
-    return b.get("type") == "footnote"
+    return b.get("type") == FOOTNOTE
 
 
 def _starts_after_next_page_float(right: Dict[str, Any], interruptions: List[Dict[str, Any]], page_heights: Dict[int, float]) -> bool:
@@ -266,7 +268,7 @@ def _left_refs_interrupted_footnote(left: Dict[str, Any], interruptions: List[Di
     if not ref_markers:
         return False
     for item in interruptions:
-        if item.get("type") != "footnote":
+        if item.get("type") != FOOTNOTE:
             continue
         marker = item.get("_note_marker") or _leading_note_marker(str(item.get("text", "")))
         if marker and marker in ref_markers:
@@ -318,7 +320,7 @@ def _can_end_body_before_page_footnotes(blocks: List[Dict[str, Any]], idx: int, 
         bp = _block_page(b)
         if bp != lp:
             break
-        if b.get("type") == "footnote":
+        if b.get("type") == FOOTNOTE:
             b_pages = (b.get("source") or {}).get("pages") or []
             if len(b_pages) > 1 and lp in b_pages:
                 _collect_spans_on_page(b, lp)
@@ -335,7 +337,7 @@ def _can_end_body_before_page_footnotes(blocks: List[Dict[str, Any]], idx: int, 
     for k in range(idx - 1, -1, -1):
         b = blocks[k]
         b_pages = (b.get("source") or {}).get("pages") or []
-        if lp in b_pages and b.get("type") == "footnote":
+        if lp in b_pages and b.get("type") == FOOTNOTE:
             _collect_spans_on_page(b, lp)
 
     if not footnote_boxes:
@@ -389,7 +391,7 @@ def _collect_interruptions(blocks: List[Dict[str, Any]], start: int, left_page: 
                 "bbox": _bbox(blocks[j]),
                 "block_id": blocks[j].get("block_id"),
                 "type": blocks[j].get("type"),
-                "_note_marker": _leading_note_marker(str(blocks[j].get("text", ""))) if blocks[j].get("type") == "footnote" else None,
+                "_note_marker": _leading_note_marker(str(blocks[j].get("text", ""))) if blocks[j].get("type") == FOOTNOTE else None,
             })
             j += 1
             continue
@@ -442,19 +444,19 @@ def merge_cross_page_paragraphs(blocks: List[Dict[str, Any]], source_pdf: Option
             # Do not let paragraph-continuation merging cross a set-off display
             # boundary.  A prose introducer at a page bottom followed by a
             # display block on the next page must remain separate; display text followed by
-            # normal narrative must also remain separate. True cross-page quote
-            # continuations are handled by display reconciliation when the next
-            # fragment has display layout.
-            if left.get("type") == "paragraph" and right.get("type") == "display_block":
+            # normal narrative must also remain separate. True cross-page
+            # display_block continuations are handled by display_block
+            # reconciliation when the next fragment has display layout.
+            if left.get("type") == PARAGRAPH and right.get("type") == DISPLAY_BLOCK:
                 i += 1
                 continue
-            if left.get("type") == "display_block" and right.get("type") == "paragraph":
-                if layout is not None and not _canonical_quote_layout(right, layout):
+            if left.get("type") == DISPLAY_BLOCK and right.get("type") == PARAGRAPH:
+                if layout is not None and not _display_block_layout(right, layout):
                     i += 1
                     continue
-            display_like = left.get("type") == "display_block"
-            if display_like and right.get("type") == "paragraph":
-                if layout is not None and not _canonical_quote_layout(right, layout):
+            display_like = left.get("type") == DISPLAY_BLOCK
+            if display_like and right.get("type") == PARAGRAPH:
+                if layout is not None and not _display_block_layout(right, layout):
                     i += 1
                     continue
             rp = _block_page(right)
@@ -471,7 +473,7 @@ def merge_cross_page_paragraphs(blocks: List[Dict[str, Any]], source_pdf: Option
                 continue
             if (
                 display_like
-                and right.get("type") == "paragraph"
+                and right.get("type") == PARAGRAPH
                 and layout is not None
                 and starts_after_float
                 and _looks_like_body_resumption(right, layout)
@@ -488,7 +490,7 @@ def merge_cross_page_paragraphs(blocks: List[Dict[str, Any]], source_pdf: Option
             if interruptions:
                 reason = (
                     "cross_page_paragraph_continuation_across_footnote"
-                    if all(x.get("type") == "footnote" for x in interruptions)
+                    if all(x.get("type") == FOOTNOTE for x in interruptions)
                     else "cross_page_paragraph_continuation_across_float"
                 )
             if left_terminal:

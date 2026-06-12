@@ -13,7 +13,7 @@ from .block_merge import _join_text
 from .constants import TERMINAL_PUNCT, _DEFAULT_PAGE_HEIGHT, _NEAR_PAGE_BOTTOM_RATIO, _NEAR_PAGE_TOP_RATIO, _DISPLAY_MIN_LEFT_MARGIN, _DISPLAY_MIN_WIDTH_RATIO
 
 
-def _canonical_quote_layout(b: Dict[str, Any], layout: LayoutStats) -> bool:
+def _display_block_layout(b: Dict[str, Any], layout: LayoutStats) -> bool:
     bb = _bbox(b)
     if not bb:
         return False

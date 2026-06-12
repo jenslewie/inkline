@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Set
 
 from ...extraction.text import normalize_note_marker, normalize_ws
+from ...schema.block_types import FOOTNOTE
 from ..block_access import block_bbox, block_page, block_pages
 from ...schema.models import CanonicalBlock
 from .marker_inline import _note_refs
@@ -55,7 +56,7 @@ def _problem_page_plan(blocks: List[CanonicalBlock]) -> _ProblemPagePlan:
 def _page_footnotes_by_page(blocks: List[CanonicalBlock]) -> Dict[int, List[CanonicalBlock]]:
     out: Dict[int, List[CanonicalBlock]] = {}
     for block in blocks:
-        if block.get("type") != "footnote":
+        if block.get("type") != FOOTNOTE:
             continue
         attrs = block.get("attrs") or {}
         if attrs.get("role") != "page_footnote":

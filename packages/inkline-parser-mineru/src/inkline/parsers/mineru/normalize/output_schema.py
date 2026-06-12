@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from ..schema.block_types import DISPLAY_BLOCK
 from ..schema.patterns import ATTR_RE
 
 INTERNAL_DISPLAY_ATTR_KEYS = {
@@ -44,7 +45,7 @@ def _normalize_display_item_attrs(item: Dict[str, Any]) -> None:
 def normalize_display_blocks_for_layout_schema(blocks: List[Dict[str, Any]]) -> None:
     """Normalize public display-block attrs for layout-oriented consumers."""
     for b in blocks:
-        if b.get("type") != "display_block":
+        if b.get("type") != DISPLAY_BLOCK:
             continue
         attrs = b.setdefault("attrs", {})
         lines = [ln.strip() for ln in str(b.get("text", "")).split("\n") if ln.strip()]

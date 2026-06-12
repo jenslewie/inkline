@@ -8,8 +8,9 @@ from dataclasses import replace
 from typing import Any, Dict, List, Optional, Protocol
 
 from ...extraction.text import normalize_note_marker, normalize_ws
-from ...schema.patterns import PART_RE
+from ...schema.block_types import HEADING, LIST_ITEM, PARAGRAPH
 from ...schema.models import CanonicalBlock
+from ...schema.patterns import PART_RE
 from ..block_access import block_id as _block_id
 from ..notes.keys import chinese_to_int as _chinese_to_int, leading_note_marker as _com_leading_note_marker
 
@@ -90,7 +91,7 @@ class _EndnoteSectionStrategy:
         for i, block in enumerate(blocks):
             text = normalize_ws(block.get("text", ""))
             typ = block.get("type")
-            if typ == "heading" and _is_note_section_heading(block, blocks, i):
+            if typ == HEADING and _is_note_section_heading(block, blocks, i):
                 state.enter_section(state.last_content_scope, i)
                 continue
 
@@ -98,7 +99,7 @@ class _EndnoteSectionStrategy:
                 continued = self._handle_note_section_block(block, i, text, typ, blocks, state, out)
                 if continued:
                     continue
-            elif typ == "heading" and _looks_like_content_heading(block):
+            elif typ == HEADING and _looks_like_content_heading(block):
                 state.last_content_scope = _normalize_scope(text)
         return out
 
@@ -112,18 +113,18 @@ class _EndnoteSectionStrategy:
         state: _NoteSectionState,
         out: List[_NoteCandidate],
     ) -> bool:
-        if typ == "heading" and _looks_like_note_subsection(text, state.section_start, i) and _heading_starts_note_subsection(blocks, i):
+        if typ == HEADING and _looks_like_note_subsection(text, state.section_start, i) and _heading_starts_note_subsection(blocks, i):
             new_scope = _normalize_scope(text)
             _reassign_preheading_reset_candidates(out, new_scope, state.current_scope, i)
             state.current_scope = new_scope
             return True
-        if typ == "heading" and _looks_like_content_heading(block):
+        if typ == HEADING and _looks_like_content_heading(block):
             if _heading_continues_note_section(blocks, i):
                 state.current_scope = None
                 return True
             state.exit_section(_normalize_scope(text))
             return True
-        if typ in {"list_item", "paragraph"} and _looks_like_note_subsection(text, state.section_start, i) and _block_starts_note_subsection(blocks, i):
+        if typ in {LIST_ITEM, PARAGRAPH} and _looks_like_note_subsection(text, state.section_start, i) and _block_starts_note_subsection(blocks, i):
             state.current_scope = _normalize_scope(text)
             return True
         marker = _leading_note_marker(text)
@@ -141,7 +142,7 @@ class _EndnoteSectionStrategy:
                     )
                 )
             return True
-        if typ in {"list_item", "paragraph"} and _looks_like_note_subsection(text, state.section_start, i):
+        if typ in {LIST_ITEM, PARAGRAPH} and _looks_like_note_subsection(text, state.section_start, i):
             state.current_scope = _normalize_scope(text)
             return True
         return False
@@ -180,7 +181,7 @@ def _pages_for_block(block: CanonicalBlock) -> List[int]:
 
 
 def _is_note_section_heading(block: CanonicalBlock, blocks: List[CanonicalBlock], index: int) -> bool:
-    if block.get("type") != "heading":
+    if block.get("type") != HEADING:
         return False
     text = normalize_ws(block.get("text", ""))
     first_line = text.split("\n", 1)[0].strip()
@@ -192,10 +193,10 @@ def _is_note_section_heading(block: CanonicalBlock, blocks: List[CanonicalBlock]
     for j in range(index + 1, min(index + 8, len(blocks))):
         nxt = blocks[j]
         nxt_type = nxt.get("type")
-        if nxt_type == "heading":
+        if nxt_type == HEADING:
             nxt_text = normalize_ws(nxt.get("text", ""))
             return _looks_like_note_subsection(nxt_text, None, j) and _heading_starts_note_subsection(blocks, j)
-        if nxt_type == "list_item" and _leading_note_marker(nxt.get("text", "")):
+        if nxt_type == LIST_ITEM and _leading_note_marker(nxt.get("text", "")):
             if found_note_marker:
                 return True
             found_note_marker = True
@@ -217,9 +218,9 @@ def _heading_starts_note_subsection(blocks: List[CanonicalBlock], index: int) ->
     skipped_continuations = 0
     for nxt in blocks[index + 1:min(index + 8, len(blocks))]:
         typ = nxt.get("type")
-        if typ == "heading":
+        if typ == HEADING:
             return False
-        if typ in {"list_item", "paragraph"}:
+        if typ in {LIST_ITEM, PARAGRAPH}:
             text = normalize_ws(nxt.get("text", ""))
             if not text:
                 continue
@@ -237,7 +238,7 @@ def _heading_continues_note_section(blocks: List[CanonicalBlock], index: int) ->
         nxt = blocks[j]
         typ = nxt.get("type")
         text = normalize_ws(nxt.get("text", ""))
-        if typ in {"list_item", "paragraph"}:
+        if typ in {LIST_ITEM, PARAGRAPH}:
             if not text:
                 continue
             if _leading_note_marker(text) is not None:
@@ -245,7 +246,7 @@ def _heading_continues_note_section(blocks: List[CanonicalBlock], index: int) ->
             skipped_continuations += 1
             if skipped_continuations > 2:
                 return False
-        if typ == "heading":
+        if typ == HEADING:
             if _looks_like_note_subsection(text, None, j) and _heading_starts_note_subsection(blocks, j):
                 return True
             return False
@@ -255,9 +256,9 @@ def _heading_continues_note_section(blocks: List[CanonicalBlock], index: int) ->
 def _block_starts_note_subsection(blocks: List[CanonicalBlock], index: int) -> bool:
     for nxt in blocks[index + 1:min(index + 8, len(blocks))]:
         typ = nxt.get("type")
-        if typ == "heading":
+        if typ == HEADING:
             return False
-        if typ not in {"list_item", "paragraph"}:
+        if typ not in {LIST_ITEM, PARAGRAPH}:
             continue
         text = normalize_ws(nxt.get("text", ""))
         if not text:
@@ -361,10 +362,10 @@ def _infer_block_scopes(blocks: List[CanonicalBlock]) -> Dict[str, str]:
     for i, block in enumerate(blocks):
         text = normalize_ws(block.get("text", ""))
         typ = block.get("type")
-        if typ == "heading" and _is_note_section_heading(block, blocks, i):
+        if typ == HEADING and _is_note_section_heading(block, blocks, i):
             in_note_section = True
             continue
-        if typ == "heading" and _looks_like_content_heading(block):
+        if typ == HEADING and _looks_like_content_heading(block):
             current_scope = _normalize_scope(text)
             in_note_section = False
         bid = _block_id(block)
@@ -386,4 +387,4 @@ def _looks_like_content_heading(block: CanonicalBlock) -> bool:
         return True
     if CHAPTER_HEADING_RE.match(text):
         return True
-    return block.get("type") == "heading" and len(text) <= 80
+    return block.get("type") == HEADING and len(text) <= 80

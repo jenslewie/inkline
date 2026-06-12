@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
 
 from ..extraction.text import normalize_note_marker, normalize_ws
+from ..schema.block_types import FOOTNOTE
 
 __all__ = ["build_note_ref_gap_report", "note_ref_gap_report_path", "write_note_ref_gap_report"]
 
@@ -42,7 +43,7 @@ def build_note_ref_gap_report(document: Dict[str, Any], *, canonical_path: Optio
         "doc_id": metadata.get("doc_id"),
         "title": metadata.get("title"),
         "summary": {
-            "footnote_blocks": sum(1 for block in blocks if block.get("type") == "footnote"),
+            "footnote_blocks": sum(1 for block in blocks if block.get("type") == FOOTNOTE),
             "note_definition_blocks": len(independent_notes),
             "independent_notes": len(independent_notes),
             "referenced_notes": len(referenced_notes),
