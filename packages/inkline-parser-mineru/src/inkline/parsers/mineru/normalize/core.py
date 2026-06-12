@@ -53,9 +53,10 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 from inkline.canonical import SCHEMA_VERSION
+from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_OLLAMA_KEEP_ALIVE, DEFAULT_QWEN_MODEL
 
 from ..analysis.note_gap_report import build_note_ref_gap_report
 from ..extraction.text import normalize_note_marker, normalize_ws
@@ -97,7 +98,7 @@ def build_canonical(
     blocks: List[Dict[str, Any]] = []
     prev_major_type: Optional[str] = None
     in_toc = False
-    text_style = TextStyleAnalyzer.from_raw_pages(getattr(args, "source_pdf", None), pages)
+    text_style = TextStyleAnalyzer.from_raw_pages(getattr(args, "source_pdf", None), cast(Dict[int, Sequence[Any]], pages))
 
     try:
         for page in sorted(pages):
@@ -196,8 +197,8 @@ def build_canonical(
                     "qwen_marker_locator": {
                         "enabled": marker_locator_enabled,
                         "repair_enabled": marker_locator_enabled,
-                        "model": getattr(args, "marker_locator_model", "qwen3.6:35b-a3b"),
-                        "keep_alive": getattr(args, "marker_locator_keep_alive", "2h"),
+                        "model": getattr(args, "marker_locator_model", DEFAULT_QWEN_MODEL),
+                        "keep_alive": getattr(args, "marker_locator_keep_alive", DEFAULT_OLLAMA_KEEP_ALIVE),
                         "body_mode": getattr(args, "marker_locator_body_mode", "page_then_block"),
                         "page_dpi": _marker_locator_page_dpi(args),
                         "block_dpi": _marker_locator_block_dpi(args),
@@ -299,12 +300,15 @@ def _missing_or_unreliable_body_ref_pages(blocks: List[Dict[str, Any]], *, qwen_
     for block in blocks:
         if block.get("type") != FOOTNOTE:
             continue
-        attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+        attrs_obj = block.get("attrs")
+        attrs = attrs_obj if isinstance(attrs_obj, dict) else {}
         note_id = str(attrs.get("note_id") or "")
         marker = normalize_note_marker(attrs.get("note_marker", ""))
         if not note_id or not marker:
             continue
-        page = (block.get("source") if isinstance(block.get("source"), dict) else {}).get("page")
+        source_obj = block.get("source")
+        source = source_obj if isinstance(source_obj, dict) else {}
+        page = source.get("page")
         if not isinstance(page, int) or marker not in qwen_markers_by_page.get(page, set()):
             continue
         refs = refs_by_note_id.get(note_id) or []
@@ -315,7 +319,8 @@ def _missing_or_unreliable_body_ref_pages(blocks: List[Dict[str, Any]], *, qwen_
 
 
 def _has_reliable_inline_ref(block: Dict[str, Any], ref: Dict[str, Any]) -> bool:
-    attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
+    attrs_obj = block.get("attrs")
+    attrs = attrs_obj if isinstance(attrs_obj, dict) else {}
     runs = attrs.get("inline_runs")
     if not isinstance(runs, list):
         return False
@@ -380,9 +385,9 @@ def _qwen_marker_locator_config(args: argparse.Namespace) -> QwenMarkerLocatorCo
     return QwenMarkerLocatorConfig(
         source_pdf=Path(source_pdf),
         artifact_dir=_qwen_marker_locator_artifact_dir(args),
-        model=getattr(args, "marker_locator_model", "qwen3.6:35b-a3b"),
-        api_url=getattr(args, "marker_locator_api_url", "http://127.0.0.1:11434/api/chat"),
-        keep_alive=str(getattr(args, "marker_locator_keep_alive", "2h")),
+        model=getattr(args, "marker_locator_model", DEFAULT_QWEN_MODEL),
+        api_url=getattr(args, "marker_locator_api_url", DEFAULT_OLLAMA_CHAT_URL),
+        keep_alive=str(getattr(args, "marker_locator_keep_alive", DEFAULT_OLLAMA_KEEP_ALIVE)),
         dpi=_marker_locator_page_dpi(args),
         page_dpi=_marker_locator_page_dpi(args),
         block_dpi=_marker_locator_block_dpi(args),

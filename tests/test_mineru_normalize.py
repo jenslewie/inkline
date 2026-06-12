@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from inkline.canonical import BLOCK_TYPES, validate_document
+from inkline.llm import DEFAULT_QWEN_MODEL
 from inkline.parse import ParseRequest
 from inkline.parsers.mineru import normalize_mineru_outputs
 import inkline.parsers.mineru.bridge as mineru_bridge
@@ -82,7 +83,7 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     assert document["metadata"]["mineru"]["vlm_model"]["model_name"] == "MinerU2.5-Pro-2605-1.2B"
     marker_config = document["metadata"]["mineru"]["auxiliary_ocr"]["qwen_marker_locator"]
     assert marker_config["enabled"] is False
-    assert marker_config["model"] == "qwen3.6:35b-a3b"
+    assert marker_config["model"] == DEFAULT_QWEN_MODEL
     assert marker_config["page_dpi"] == 150
     assert marker_config["block_dpi"] == 200
     assert output.exists()

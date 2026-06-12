@@ -7,7 +7,10 @@ name = "inkline-rag"
 version = "0.1.0"
 description = "RAG chunking, embeddings, indexing, and search for canonical documents."
 requires-python = ">=3.11"
-dependencies = ["inkline-canonical>=0.1.0"]
+dependencies = [
+  "inkline-canonical>=0.1.0",
+  "inkline-llm>=0.1.0",
+]
 
 [project.optional-dependencies]
 faiss = ["numpy>=1.26", "faiss-cpu>=1.8"]

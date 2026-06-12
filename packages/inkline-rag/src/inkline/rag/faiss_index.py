@@ -23,7 +23,7 @@ def build_faiss_index(
     metric: str = "inner_product",
 ) -> FaissBuildResult:
     try:
-        import faiss
+        import faiss  # type: ignore[reportMissingImports]
         import numpy as np
     except ImportError as exc:
         raise RuntimeError("faiss-cpu and numpy are required to build FAISS indexes") from exc
@@ -64,7 +64,7 @@ def build_faiss_index(
 
 def load_faiss_index(index_path: str | Path):
     try:
-        import faiss
+        import faiss  # type: ignore[reportMissingImports]
     except ImportError as exc:
         raise RuntimeError("faiss-cpu is required to load FAISS indexes") from exc
     return faiss.read_index(str(index_path))

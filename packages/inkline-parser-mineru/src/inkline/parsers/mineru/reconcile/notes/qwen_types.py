@@ -12,6 +12,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List
 
+from inkline.llm import (
+    DEFAULT_OLLAMA_CHAT_URL,
+    DEFAULT_OLLAMA_KEEP_ALIVE,
+    DEFAULT_OLLAMA_TIMEOUT_SECONDS,
+    DEFAULT_QWEN_MODEL,
+    OllamaChatConfig,
+)
+
 from ...schema.block_types import CAPTION, DISPLAY_BLOCK, PARAGRAPH
 
 
@@ -49,11 +57,27 @@ _PARAGRAPH_CROP_PADDING_PDF = 12.0
 
 
 @dataclass(frozen=True)
+class QwenMarkerLocatorModelConfig:
+    model: str = DEFAULT_QWEN_MODEL
+    api_url: str = DEFAULT_OLLAMA_CHAT_URL
+    timeout_seconds: int = DEFAULT_OLLAMA_TIMEOUT_SECONDS
+    keep_alive: str = DEFAULT_OLLAMA_KEEP_ALIVE
+
+    def to_ollama_config(self) -> OllamaChatConfig:
+        return OllamaChatConfig(
+            model=self.model,
+            api_url=self.api_url,
+            timeout_seconds=self.timeout_seconds,
+            keep_alive=self.keep_alive,
+        )
+
+
+@dataclass(frozen=True)
 class QwenMarkerLocatorConfig:
     source_pdf: Path
     artifact_dir: Path
-    model: str = "qwen3.6:35b-a3b"
-    api_url: str = "http://127.0.0.1:11434/api/chat"
+    model: str = DEFAULT_QWEN_MODEL
+    api_url: str = DEFAULT_OLLAMA_CHAT_URL
     dpi: int = 200
     page_dpi: int = 150
     block_dpi: int = 200
@@ -62,9 +86,17 @@ class QwenMarkerLocatorConfig:
     footnote_prompt: str = _FOOTNOTE_DEFS_PROMPT
     body_mode: str = "page_then_block"
     reuse_evidence: bool = False
-    timeout_seconds: int = 180
-    keep_alive: str = "2h"
+    timeout_seconds: int = DEFAULT_OLLAMA_TIMEOUT_SECONDS
+    keep_alive: str = DEFAULT_OLLAMA_KEEP_ALIVE
     timing_log_path: Path | None = None
+
+    def locator_model_config(self) -> QwenMarkerLocatorModelConfig:
+        return QwenMarkerLocatorModelConfig(
+            model=self.model,
+            api_url=self.api_url,
+            timeout_seconds=self.timeout_seconds,
+            keep_alive=self.keep_alive,
+        )
 
 
 @dataclass

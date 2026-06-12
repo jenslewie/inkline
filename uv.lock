@@ -19,6 +19,7 @@ members = [
     "inkline-canonical",
     "inkline-cli",
     "inkline-epub",
+    "inkline-llm",
     "inkline-parse",
     "inkline-parser-mineru",
     "inkline-rag",
@@ -1206,6 +1207,11 @@ dependencies = [
 requires-dist = [{ name = "inkline-canonical", editable = "packages/inkline-canonical" }]
 
 [[package]]
+name = "inkline-llm"
+version = "0.1.0"
+source = { editable = "packages/inkline-llm" }
+
+[[package]]
 name = "inkline-parse"
 version = "0.1.0"
 source = { editable = "packages/inkline-parse" }
@@ -1222,6 +1228,7 @@ version = "0.1.0"
 source = { editable = "packages/inkline-parser-mineru" }
 dependencies = [
     { name = "inkline-canonical" },
+    { name = "inkline-llm" },
     { name = "inkline-parse" },
 ]
 
@@ -1235,6 +1242,7 @@ mineru = [
 [package.metadata]
 requires-dist = [
     { name = "inkline-canonical", editable = "packages/inkline-canonical" },
+    { name = "inkline-llm", editable = "packages/inkline-llm" },
     { name = "inkline-parse", editable = "packages/inkline-parse" },
     { name = "mineru", extras = ["core", "mlx", "pipeline"], marker = "extra == 'mineru'", specifier = ">=3.2.3,<4" },
     { name = "pillow", marker = "extra == 'mineru'", specifier = ">=10" },
@@ -1248,6 +1256,7 @@ version = "0.1.0"
 source = { editable = "packages/inkline-rag" }
 dependencies = [
     { name = "inkline-canonical" },
+    { name = "inkline-llm" },
 ]
 
 [package.optional-dependencies]
@@ -1263,6 +1272,7 @@ faiss = [
 requires-dist = [
     { name = "faiss-cpu", marker = "extra == 'faiss'", specifier = ">=1.8" },
     { name = "inkline-canonical", editable = "packages/inkline-canonical" },
+    { name = "inkline-llm", editable = "packages/inkline-llm" },
     { name = "numpy", marker = "extra == 'faiss'", specifier = ">=1.26" },
     { name = "requests", marker = "extra == 'embeddings'", specifier = ">=2.31" },
 ]

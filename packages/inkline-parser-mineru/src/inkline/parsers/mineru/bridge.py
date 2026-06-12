@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from inkline.canonical import validate_document
+from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_OLLAMA_KEEP_ALIVE, DEFAULT_QWEN_MODEL
 from inkline.parse.state import write_run_state
 from inkline.parse.types import ParseRequest, ParseResult
 
@@ -99,9 +100,9 @@ def normalize_mineru_outputs(
         language=language,
         marker_locator_repair=marker_locator_repair,
         marker_locator_artifact_dir=None,
-        marker_locator_model="qwen3.6:35b-a3b",
-        marker_locator_api_url="http://127.0.0.1:11434/api/chat",
-        marker_locator_keep_alive="2h",
+        marker_locator_model=DEFAULT_QWEN_MODEL,
+        marker_locator_api_url=DEFAULT_OLLAMA_CHAT_URL,
+        marker_locator_keep_alive=DEFAULT_OLLAMA_KEEP_ALIVE,
         marker_locator_dpi=None,
         marker_locator_page_dpi=marker_locator_page_dpi,
         marker_locator_block_dpi=200,

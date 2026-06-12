@@ -28,6 +28,7 @@ members = ["packages/*"]
 [tool.uv.sources]
 inkline-cli = { workspace = true }
 inkline-canonical = { workspace = true }
+inkline-llm = { workspace = true }
 inkline-parse = { workspace = true }
 inkline-parser-mineru = { workspace = true }
 inkline-epub = { workspace = true }
@@ -37,6 +38,7 @@ inkline-rag = { workspace = true }
 testpaths = ["tests"]
 pythonpath = [
   "packages/inkline-canonical/src",
+  "packages/inkline-llm/src",
   "packages/inkline-parse/src",
   "packages/inkline-parser-mineru/src",
   "packages/inkline-epub/src",
@@ -47,6 +49,7 @@ pythonpath = [
 [tool.pyright]
 extraPaths = [
   "packages/inkline-canonical/src",
+  "packages/inkline-llm/src",
   "packages/inkline-parse/src",
   "packages/inkline-parser-mineru/src",
   "packages/inkline-epub/src",

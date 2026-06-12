@@ -47,7 +47,7 @@ def dense_search(index, docstore: list[dict], query_embedding: list[float], top_
                 rank=rank,
                 vector_id=int(vector_id),
                 chunk_id=row["chunk_id"],
-                book_id=row.get("book_id") or row.get("doc_id"),
+                book_id=str(row.get("book_id") or row.get("doc_id") or ""),
                 score=float(score),
                 title=row.get("title", ""),
                 chapter_title=row.get("chapter_title", ""),
