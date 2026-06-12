@@ -10,19 +10,19 @@ from inkline.parsers.mineru.normalize.core import (
     _missing_or_unreliable_body_ref_pages,
 )
 from inkline.parsers.mineru.reconcile.notes import qwen_marker_locator
-from inkline.parsers.mineru.reconcile.notes.qwen_evidence import (
+from inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.evidence import (
     _collect_qwen_marker_evidence,
     _page_footnote_markers_by_page,
     _retry_missing_single_marker_body_refs,
 )
-from inkline.parsers.mineru.reconcile.notes.qwen_api import _call_qwen_marker_locator
-from inkline.parsers.mineru.reconcile.notes.qwen_page_plan import _problem_page_plan
 from inkline.parsers.mineru.reconcile.notes.qwen_marker_locator import (
     QwenMarkerLocatorConfig,
     QwenMarkerPageEvidence,
     run_qwen_marker_locator_repairs,
 )
-from inkline.parsers.mineru.reconcile.notes.qwen_types import _PROMPT_VERSION
+from inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.api import _call_qwen_marker_locator
+from inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.page_plan import _problem_page_plan
+from inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.types import _PROMPT_VERSION
 
 
 def test_marker_locator_page_and_block_dpi_config() -> None:
@@ -76,8 +76,8 @@ def test_page_then_block_retries_missing_pages_with_block_dpi(monkeypatch, tmp_p
         ]
 
     # Patch at the definition module (monkeypatch principle)
-    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_page_plan._problem_page_plan", fake_problem_page_plan)
-    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_evidence._collect_qwen_marker_evidence", fake_collect)
+    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.page_plan._problem_page_plan", fake_problem_page_plan)
+    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.evidence._collect_qwen_marker_evidence", fake_collect)
 
     config = QwenMarkerLocatorConfig(
         source_pdf=tmp_path / "source.pdf",
@@ -278,7 +278,7 @@ def test_single_marker_retry_merges_missing_marker(monkeypatch, tmp_path: Path) 
         }
 
     # Patch at the definition module (monkeypatch principle)
-    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_api._call_qwen_marker_locator", fake_call)
+    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.api._call_qwen_marker_locator", fake_call)
     config = QwenMarkerLocatorConfig(
         source_pdf=tmp_path / "source.pdf",
         artifact_dir=tmp_path / "qwen",
@@ -389,11 +389,11 @@ def test_complete_cache_hit_does_not_raise_unboundlocalerror(monkeypatch, tmp_pa
     monkeypatch.setitem(sys.modules, "fitz", fake_fitz)
 
     # Patch _read_existing_evidence to return our cache
-    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_evidence._read_existing_evidence", MagicMock(return_value=fake_cache))
+    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.evidence._read_existing_evidence", MagicMock(return_value=fake_cache))
     # Patch render to avoid real PDF rendering
-    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_prompt._render_full_page", MagicMock())
+    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.prompt._render_full_page", MagicMock())
     # Patch timing to avoid needing a real config with all fields
-    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_evidence._write_timing_event", MagicMock())
+    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.evidence._write_timing_event", MagicMock())
 
     config = QwenMarkerLocatorConfig(
         source_pdf=tmp_path / "source.pdf",

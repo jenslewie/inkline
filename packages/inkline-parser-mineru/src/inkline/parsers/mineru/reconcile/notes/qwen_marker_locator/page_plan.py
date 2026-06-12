@@ -9,14 +9,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Set
 
-from ...extraction.text import normalize_note_marker, normalize_ws
-from ...schema.block_types import FOOTNOTE
-from ..block_access import block_bbox, block_page, block_pages
-from ...schema.models import CanonicalBlock
-from .marker_inline import _note_refs
-from .marker_patterns import BODY_TYPES, _marker_int
-from .keys import leading_note_marker
-from .scopes import _EndnoteSectionStrategy, _NoteContext
+from ....extraction.text import normalize_note_marker, normalize_ws
+from ....schema.block_types import FOOTNOTE
+from ...block_access import block_bbox, block_page, block_pages
+from ....schema.models import CanonicalBlock
+from ..marker_inline import _note_refs
+from ..marker_patterns import BODY_TYPES, _marker_int
+from ..keys import leading_note_marker
+from ..scopes import _EndnoteSectionStrategy, _NoteContext
 
 
 @dataclass(frozen=True)

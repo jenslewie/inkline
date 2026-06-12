@@ -2,7 +2,7 @@
 
 Contains the main evidence collection loop, paragraph body-ref collection,
 single-marker retry, evidence read/write, and timing helpers.  Uses module-
-level imports from other ``qwen_*`` modules so that monkeypatching works
+level imports from sibling modules so that monkeypatching works
 correctly (patch the definition module namespace).
 """
 
@@ -14,14 +14,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, cast
 
-from ...analysis.page_geometry import PageGeometry
-from ...extraction.text import normalize_ws
-from ..block_access import block_id
-from ...schema.models import CanonicalBlock
-from . import qwen_api
-from . import qwen_page_plan
-from . import qwen_prompt
-from . import qwen_types
+from ....analysis.page_geometry import PageGeometry
+from ....extraction.text import normalize_ws
+from ...block_access import block_id
+from ....schema.models import CanonicalBlock
+from . import api as qwen_api
+from . import page_plan as qwen_page_plan
+from . import prompt as qwen_prompt
+from . import types as qwen_types
 
 
 def _collect_qwen_marker_evidence(

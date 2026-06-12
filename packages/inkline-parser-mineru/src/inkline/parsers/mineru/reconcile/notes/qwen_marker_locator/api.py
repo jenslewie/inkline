@@ -12,8 +12,8 @@ from typing import Any, Dict, List, Optional
 
 from inkline.llm import vision_chat_json
 
-from ...extraction.text import normalize_note_marker
-from . import qwen_types
+from ....extraction.text import normalize_note_marker
+from . import types as qwen_types
 
 
 def _call_qwen_marker_locator(image_path: Any, config: qwen_types.QwenMarkerLocatorConfig, *, prompt: str) -> Dict[str, Any]:
@@ -26,6 +26,7 @@ def _call_qwen_marker_locator(image_path: Any, config: qwen_types.QwenMarkerLoca
     if isinstance(parsed.get("items"), list):
         return {"body_refs": parsed["items"]}
     return parsed if isinstance(parsed, dict) else {}
+
 
 def _clean_body_refs(value: Any) -> List[Dict[str, Any]]:
     if not isinstance(value, list):

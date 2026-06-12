@@ -2,7 +2,7 @@
 
 Contains prompt string generation, block/page rendering to images, footnote
 definition matching, and text similarity helpers.  Uses module-level import
-from ``qwen_types`` so that monkeypatching works correctly.
+from ``types`` so that monkeypatching works correctly.
 """
 
 from __future__ import annotations
@@ -12,12 +12,12 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from ...analysis.page_geometry import PageGeometry
-from ...extraction.text import normalize_note_marker, normalize_ws
-from ..block_access import block_bbox, block_id, block_page, block_pages
-from ...schema.models import CanonicalBlock
-from .keys import leading_note_marker
-from . import qwen_types
+from ....analysis.page_geometry import PageGeometry
+from ....extraction.text import normalize_note_marker, normalize_ws
+from ...block_access import block_bbox, block_id, block_page, block_pages
+from ....schema.models import CanonicalBlock
+from ..keys import leading_note_marker
+from . import types as qwen_types
 
 
 def _body_prompt_for_markers(default_prompt: str, markers: Sequence[str]) -> str:

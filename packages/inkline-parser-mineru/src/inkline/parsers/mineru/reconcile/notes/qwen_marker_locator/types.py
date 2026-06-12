@@ -20,7 +20,7 @@ from inkline.llm import (
     OllamaChatConfig,
 )
 
-from ...schema.block_types import CAPTION, DISPLAY_BLOCK, PARAGRAPH
+from ....schema.block_types import CAPTION, DISPLAY_BLOCK, PARAGRAPH
 
 
 _PUNCTUATION_BOUNDARY_INSTRUCTION = (

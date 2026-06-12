@@ -5,16 +5,16 @@ asks a local Ollama-hosted Qwen visual model for structured marker evidence,
 and applies only footnote-definition marker fixes before note ref recovery.
 
 The implementation has been split into sub-modules:
-  - ``qwen_types``: config + evidence dataclasses + constants
-  - ``qwen_api``: Ollama API call + JSON extraction + response cleaning
-  - ``qwen_prompt``: prompt generation + rendering + footnote matching
-  - ``qwen_evidence``: evidence collection + caching + I/O + timing
-  - ``qwen_page_plan``: problem-page planning + body candidate selection
+  - ``types``: config + evidence dataclasses + constants
+  - ``api``: Ollama API call + JSON extraction + response cleaning
+  - ``prompt``: prompt generation + rendering + footnote matching
+  - ``evidence``: evidence collection + caching + I/O + timing
+  - ``page_plan``: problem-page planning + body candidate selection
 
 This module retains the public entry point ``run_qwen_marker_locator_repairs``
 and ``apply_qwen_footnote_markers``, plus convenience aliases
 ``QwenMarkerLocatorConfig`` and ``QwenMarkerPageEvidence`` from
-``qwen_types``.  Uses module-level imports from sub-modules so that
+``types``.  Uses module-level imports from sub-modules so that
 monkeypatching the definition module namespace works correctly.
 """
 
@@ -25,13 +25,13 @@ import time
 from dataclasses import replace
 from typing import Any, Callable, Dict, List, Sequence, cast
 
-from . import qwen_api
-from . import qwen_evidence
-from . import qwen_page_plan
-from . import qwen_prompt
-from . import qwen_types
-from ...extraction.text import normalize_ws
-from ...schema.models import CanonicalBlock
+from . import api as qwen_api
+from . import evidence as qwen_evidence
+from . import page_plan as qwen_page_plan
+from . import prompt as qwen_prompt
+from . import types as qwen_types
+from ....extraction.text import normalize_ws
+from ....schema.models import CanonicalBlock
 
 
 
