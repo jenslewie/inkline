@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
-from ..constants import QUOTE_TYPES, _DEFAULT_PAGE_HEIGHT
+from ..constants import _DEFAULT_PAGE_HEIGHT
 from ..block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
 from ..block_merge import _merge_block_pair, _refresh_canonical_quote_attrs
 from ..layout_helpers import (
@@ -24,7 +24,7 @@ def reconcile_display_quote_across_footnote_interruptions(blocks: List[Dict[str,
     i = 0
     while i < len(blocks):
         cur = blocks[i]
-        if cur.get("type") not in QUOTE_TYPES:
+        if cur.get("type") != "display_block":
             i += 1
             continue
         page_heights = _page_coord_heights(blocks)
@@ -59,7 +59,7 @@ def reconcile_display_quote_across_footnote_interruptions(blocks: List[Dict[str,
                 break
             if not skipped_footnotes and _ends_with_terminal(str(cur.get("text", ""))):
                 break
-            nxt_is_quote = nxt.get("type") in QUOTE_TYPES
+            nxt_is_quote = nxt.get("type") == "display_block"
             nxt_is_display_paragraph = nxt.get("type") == "paragraph" and _canonical_quote_layout(nxt, layout)
             if not nxt_is_quote and not nxt_is_display_paragraph:
                 break
@@ -78,8 +78,8 @@ def reconcile_display_quote_across_footnote_interruptions(blocks: List[Dict[str,
             _merge_block_pair(
                 cur,
                 nxt,
-                "display_quote_continuation_across_footnotes",
-                {"footnote_interrupted_display_quote": True},
+                "display_block_continuation_across_footnotes",
+                {"footnote_interrupted_display_block": True},
                 skipped,
                 joiner=joiner,
             )

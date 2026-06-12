@@ -38,13 +38,13 @@ def _reconcile_attribution_display_quotes(blocks: List[Dict[str, Any]], layout: 
         nbb = _bbox(nxt)
         cur_display = _canonical_quote_layout(cur, layout) or len(cur_text) <= 90
         attribution_position = bool(cbb and nbb and float(nbb[0]) >= float(cbb[0]) - 5)
-        if cur.get("type") in {"paragraph", "blockquote"} and cur_display and attribution_position:
+        if cur.get("type") in {"paragraph", "display_block"} and cur_display and attribution_position:
             _merge_quote_run(
                 blocks,
                 i,
                 i + 2,
                 prev_text=_prev_text_non_float(blocks, i),
-                reason="display_quote_with_attribution_layout",
+                reason="display_block_with_attribution_layout",
             )
             continue
         i += 1
@@ -73,7 +73,7 @@ def _reconcile_diary_date_display_quote_runs(blocks: List[Dict[str, Any]], layou
         if j >= len(blocks) or not _is_lunar_day_entry(blocks[j], layout):
             i += 1
             continue
-        # Keep one month section per blockquote.  Stop at the next month header
+        # Keep one month section per display block. Stop at the next month header
         # or at the first non-date-entry prose paragraph.
         end = j + 1
         while end < len(blocks):
@@ -92,7 +92,7 @@ def _reconcile_diary_date_display_quote_runs(blocks: List[Dict[str, Any]], layou
             i,
             end,
             prev_text=_prev_text_non_float(blocks, i),
-            reason="diary_date_display_quote_layout",
+            reason="diary_date_display_block_layout",
         )
 
 

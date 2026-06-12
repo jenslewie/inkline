@@ -7,7 +7,6 @@ from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
 from ..cjk import _is_cjk_numbered_item_block
-from ..constants import QUOTE_TYPES
 from ..block_access import block_bbox as _bbox, block_page as _block_page
 from ..block_merge import _merge_block_pair
 from ..layout_helpers import (
@@ -18,7 +17,7 @@ from ..layout_helpers import (
 
 def reconcile_false_short_date_quotes(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
     for b in blocks:
-        if b.get("type") not in QUOTE_TYPES:
+        if b.get("type") != "display_block":
             continue
         text = str(b.get("text", "")).strip()
         if re.match(r"^\d{3,4}\s*年", text) and len(text) < 120 and not text.startswith("“"):
@@ -27,7 +26,7 @@ def reconcile_false_short_date_quotes(blocks: List[Dict[str, Any]], layout: Layo
             attrs = b.setdefault("attrs", {})
             for k in ["role", "content_form", "content_form_confidence", "content_form_scores", "classification_evidence", "quote_text", "attribution"]:
                 attrs.pop(k, None)
-            attrs["demoted_reason"] = "short_date_start_prose_fragment_not_display_quote"
+            attrs["demoted_reason"] = "short_date_start_prose_fragment_not_display_block"
 
 
 def reconcile_demoted_date_start_cross_page_paragraphs(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
@@ -95,7 +94,7 @@ def reconcile_date_start_cross_page_paragraph_attrs(blocks: List[Dict[str, Any]]
         raw_type = attrs.get("raw_type", "paragraph")
         new_attrs: Dict[str, Any] = {
             "raw_types": attrs.get("raw_types") or [raw_type],
-            "demoted_reason": "short_date_start_prose_fragment_not_display_quote",
+            "demoted_reason": "short_date_start_prose_fragment_not_display_block",
         }
         if attrs.get("note_refs"):
             new_attrs["note_refs"] = attrs["note_refs"]

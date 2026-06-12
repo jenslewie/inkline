@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from inkline.canonical import MigrationError, ValidationError, make_block, make_document, make_toc_entry, sample_document, validate_document
+from inkline.canonical import BLOCK_TYPES, MigrationError, ValidationError, make_block, make_document, make_toc_entry, sample_document, validate_document
 from inkline.canonical.io import read_canonical
 
 
@@ -32,7 +32,23 @@ def test_pages_metadata_validates_when_present():
     validate_document(document)
 
 
-def test_epigraph_blockquote_and_signature_blocks_validate():
+def test_block_types_match_public_contract():
+    assert BLOCK_TYPES == {
+        "heading",
+        "paragraph",
+        "toc_item",
+        "display_block",
+        "list_item",
+        "table",
+        "table_continuation",
+        "figure",
+        "caption",
+        "footnote",
+    }
+
+
+@pytest.mark.parametrize("block_type", sorted(BLOCK_TYPES))
+def test_public_block_types_validate(block_type):
     document = make_document(
         doc_id="sample",
         title="Sample",
@@ -41,14 +57,23 @@ def test_epigraph_blockquote_and_signature_blocks_validate():
         parser_name="sample",
         parser_mode="base",
         blocks=[
-            make_block("b000001", "epigraph", "沉醉夕阳，碧草青川。", page=1),
-            make_block("b000002", "blockquote", "凡兵之所起者有五。", page=2),
-            make_block("b000003", "signature", "塞缪尔·霍利", page=3),
+            make_block("b000001", block_type, "示例文本。", page=1),
         ],
         toc=[make_toc_entry("第一章", level=1)],
     )
 
     validate_document(document)
+
+
+@pytest.mark.parametrize("block_type", ["epigraph", "blockquote", "signature", "list", "footnote_ref", "equation", "page_break"])
+def test_deprecated_block_types_are_rejected(block_type):
+    with pytest.raises(ValidationError, match="Unsupported block type"):
+        make_block("b000001", block_type, "示例文本。", page=1)
+
+    document = sample_document()
+    document["blocks"][0]["type"] = block_type
+    with pytest.raises(ValidationError, match="type is invalid"):
+        validate_document(document)
 
 
 def test_toc_entry_validation_requires_title():

@@ -1,4 +1,4 @@
-"""Block merge logic. Contains _merge_block_pair() which joins two canonical blocks (text, source spans, bbox, note_refs, inline_runs, provenance), plus _merge_inline_runs() and _refresh_canonical_quote_attrs(). The core mutation point used by cross-page, display quote, and footnote merging."""
+"""Block merge logic for text-like canonical blocks."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from ..normalize.builders import union_bbox
 from ..schema.patterns import CHINESE_RE
 
-QUOTE_TYPES = {"blockquote", "epigraph"}
+DISPLAY_BLOCK_TYPES = {"display_block"}
 TERMINAL_PUNCT = set("。？！!?；;：:.”’\"'）】》」』")
 
 
@@ -25,12 +25,12 @@ def _merge_block_pair(
         left["text"] = original_left_text.rstrip() + "\n" + original_right_text.lstrip()
     else:
         left["text"] = _join_text(original_left_text, original_right_text)
-    left_was_quote = left.get("type") in QUOTE_TYPES
-    right_was_quote = right.get("type") in QUOTE_TYPES
-    if right_was_quote and not left_was_quote:
-        left["type"] = right.get("type")
+    left_was_display = left.get("type") in DISPLAY_BLOCK_TYPES
+    right_was_display = right.get("type") in DISPLAY_BLOCK_TYPES
+    if right_was_display and not left_was_display:
+        left["type"] = "display_block"
         for k, v in (right.get("attrs") or {}).items():
-            if k in {"role", "content_form", "content_form_confidence", "content_form_scores", "classification_evidence", "quote_text", "attribution", "raw_types"}:
+            if k in {"layout_role", "layout_form", "line_count", "has_attribution_line", "line_layouts", "raw_types"}:
                 left.setdefault("attrs", {})[k] = v
     lsrc = left.setdefault("source", {})
     rsrc = right.get("source", {})
@@ -68,8 +68,8 @@ def _merge_block_pair(
             if ref not in refs:
                 refs.append(ref)
     _merge_inline_runs(left, right, original_left_text, original_right_text)
-    if left.get("type") in QUOTE_TYPES:
-        _refresh_canonical_quote_attrs(left)
+    if left.get("type") == "display_block":
+        _refresh_display_block_attrs(left)
 
 
 def _merge_inline_runs(
@@ -159,24 +159,24 @@ def _join_text(left: str, right: str) -> str:
     return left + " " + right
 
 
-def _refresh_canonical_quote_attrs(
+def _refresh_display_block_attrs(
     b: Dict[str, Any],
     prev_text: str = "",
-    role: str = "inline_display_quote",
+    layout_role: str = "inline_display_block",
 ) -> None:
     lines = [ln.strip() for ln in str(b.get("text", "")).split("\n") if ln.strip()]
     attrs = b.setdefault("attrs", {})
     existing_note_refs = list(attrs.get("note_refs", []))
     existing_raw_types = attrs.get("raw_types")
-    for k in ["content_form", "content_form_confidence", "content_form_scores", "classification_evidence", "attribution"]:
+    for k in ["role", "content_form", "content_form_confidence", "content_form_scores", "classification_evidence", "quote_text", "attribution"]:
         attrs.pop(k, None)
-    attrs.update({
-        "role": attrs.get("role", role),
-        "quote_text": "\n".join(lines).strip(),
-    })
+    attrs["layout_role"] = attrs.get("layout_role", layout_role)
+    attrs["line_count"] = len(lines)
     if existing_note_refs:
         attrs["note_refs"] = existing_note_refs
     if existing_raw_types is not None:
         attrs["raw_types"] = existing_raw_types
-    if b.get("type") not in QUOTE_TYPES:
-        b["type"] = "blockquote"
+    b["type"] = "display_block"
+
+
+_refresh_canonical_quote_attrs = _refresh_display_block_attrs

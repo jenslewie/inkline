@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from inkline.canonical import validate_document
+from inkline.canonical import BLOCK_TYPES, validate_document
 from inkline.parse import ParseRequest
 from inkline.parsers.mineru import normalize_mineru_outputs
 import inkline.parsers.mineru.bridge as mineru_bridge
@@ -75,6 +75,7 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     )
 
     validate_document(document)
+    assert {block["type"] for block in document["blocks"]} <= BLOCK_TYPES
     assert document["metadata"]["parser_name"] == "mineru"
     assert document["metadata"]["schema_version"] == "1.0"
     assert document["metadata"]["mineru"]["version"] == "3.2.3"

@@ -1,4 +1,4 @@
-"""Shared display quote helpers and regex patterns. Contains era-month detection, parenthetical time headers, record-style display text detection, display lane compatibility checks, quote run merging, and attribute normalization."""
+"""Shared display block helpers and regex patterns."""
 
 from __future__ import annotations
 
@@ -46,51 +46,49 @@ def is_parenthetical_time_header(text: str) -> bool:
     return bool(PAREN_TIME_HEADER_RE.match(text or ""))
 
 
-def force_generic_quote_attrs(
+def force_generic_display_attrs(
     b: Dict[str, Any],
     prev_text: str = "",
-    evidence: str = "layout_defined_display_quote",
+    evidence: str = "layout_defined_display_block",
 ) -> None:
     if b.get("type") == "heading":
         b.pop("level", None)
-    b["type"] = "blockquote"
+    b["type"] = "display_block"
     _refresh_canonical_quote_attrs(b, prev_text=prev_text)
     attrs = b.setdefault("attrs", {})
-    attrs["role"] = "inline_display_quote"
+    attrs["layout_role"] = "inline_display_block"
     ev = attrs.setdefault("classification_evidence", [])
     if evidence not in ev:
         ev.append(evidence)
-    attrs["quote_text"] = str(b.get("text", "")).strip()
 
 
-def merge_quote_run(
+def merge_display_run(
     blocks: List[Dict[str, Any]],
     start: int,
     end_exclusive: int,
     prev_text: str = "",
-    reason: str = "generic_layout_quote_run",
+    reason: str = "generic_layout_display_block_run",
 ) -> int:
     if start < 0 or start >= len(blocks) or end_exclusive <= start:
         return start + 1
     cur = blocks[start]
-    force_generic_quote_attrs(cur, prev_text=prev_text, evidence=reason)
+    force_generic_display_attrs(cur, prev_text=prev_text, evidence=reason)
     while start + 1 < end_exclusive and start + 1 < len(blocks):
         nxt = blocks[start + 1]
         _merge_block_pair(cur, nxt, reason, {"layout_run": True}, [], joiner="newline")
         del blocks[start + 1]
         end_exclusive -= 1
-    force_generic_quote_attrs(cur, prev_text=prev_text, evidence=reason)
+    force_generic_display_attrs(cur, prev_text=prev_text, evidence=reason)
     return start + 1
 
 
 # ── display quote continuation helpers ──────────────────────────────────────
 
 
-def quote_run_is_intro_continuation_candidate(b: Dict[str, Any], layout: LayoutStats) -> bool:
-    from ..constants import QUOTE_TYPES
+def display_run_is_intro_continuation_candidate(b: Dict[str, Any], layout: LayoutStats) -> bool:
     from ..layout_helpers import _canonical_quote_layout
 
-    if b.get("type") not in QUOTE_TYPES:
+    if b.get("type") != "display_block":
         return False
     return _canonical_quote_layout(b, layout) or bool(_bbox(b))
 
@@ -98,7 +96,7 @@ def quote_run_is_intro_continuation_candidate(b: Dict[str, Any], layout: LayoutS
 def is_short_display_text_block(b: Dict[str, Any], layout: LayoutStats, max_len: int = 120) -> bool:
     from ..layout_helpers import _canonical_quote_layout
 
-    if b.get("type") not in {"paragraph", "blockquote"}:
+    if b.get("type") not in {"paragraph", "display_block"}:
         return False
     text = str(b.get("text", "")).strip()
     if not text or len(text) > max_len:
@@ -114,8 +112,6 @@ def is_short_display_text_block(b: Dict[str, Any], layout: LayoutStats, max_len:
 
 
 def is_left_shifted_intro_before_display_lane_ds(blocks: List[Dict[str, Any]], i: int, layout: LayoutStats) -> bool:
-    from ..constants import QUOTE_TYPES
-
     b = blocks[i]
     if b.get("type") != "paragraph":
         return False
@@ -127,7 +123,7 @@ def is_left_shifted_intro_before_display_lane_ds(blocks: List[Dict[str, Any]], i
         return False
     nxt = blocks[i + 1]
     nbb = _bbox(nxt)
-    if nxt.get("type") not in QUOTE_TYPES or not nbb:
+    if nxt.get("type") != "display_block" or not nbb:
         return False
     if _block_page(nxt) != _block_page(b):
         return False
@@ -198,7 +194,10 @@ def display_lanes_compatible(left: Dict[str, Any], right: Dict[str, Any], layout
     return left_compact and right_compact and left_x0 >= layout.body_left + 70 and right_x0 >= layout.body_left + 70
 
 
-_force_generic_quote_attrs = force_generic_quote_attrs
+_force_generic_quote_attrs = force_generic_display_attrs
+force_generic_quote_attrs = force_generic_display_attrs
 _is_era_month_header = is_era_month_header
 _is_lunar_day_entry = is_lunar_day_entry
-_merge_quote_run = merge_quote_run
+_merge_quote_run = merge_display_run
+merge_quote_run = merge_display_run
+quote_run_is_intro_continuation_candidate = display_run_is_intro_continuation_candidate

@@ -1,4 +1,4 @@
-"""Page classification handlers. Contains try-process functions for TOC pages, snapshot pages, title pages, epigraph pages, full-page image pages, and plate pages. The process_page() entry point chains these handlers and falls through to normal_flow."""
+"""Page classification handlers."""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ from statistics import median
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from .builders import (
-    make_epigraph_group,
+    make_display_group,
     make_chart_table,
     make_figure,
     make_full_page_figure,
     make_heading,
     make_page_snapshot_figure,
     make_paragraph,
-    make_quote_block,
+    make_display_block,
     make_toc_item,
     union_bbox,
 )
@@ -32,7 +32,7 @@ class _PageResult(NamedTuple):
     in_toc: bool
 
 
-def group_sparse_epigraph_page(blocks: Sequence[RawBlock], prev_major_type: Optional[str]) -> Optional[List[List[RawBlock]]]:
+def group_sparse_display_page(blocks: Sequence[RawBlock], prev_major_type: Optional[str]) -> Optional[List[List[RawBlock]]]:
     if any(b.raw_type in {"image", "chart", "table"} for b in blocks):
         return None
     paras = [b for b in blocks if b.raw_type == "paragraph" and block_text(b)]
@@ -289,18 +289,20 @@ def _title_page_level(content_blocks: List[RawBlock]) -> int:
     return 2 if _title_page_role(content_blocks) == "chapter_title" else 1
 
 
-def _try_process_epigraph_page(
+def _try_process_sparse_display_page(
     ids: IdFactory,
     content_blocks: List[RawBlock],
     prev_major_type: Optional[str],
     in_toc: bool,
 ) -> Optional[_PageResult]:
-    groups = group_sparse_epigraph_page(content_blocks, prev_major_type)
+    groups = group_sparse_display_page(content_blocks, prev_major_type)
     if not groups:
         return None
     if len(groups) == 1:
-        return _PageResult([make_quote_block(ids, groups[0], "epigraph", "part_or_chapter_epigraph", prev_text="")], "epigraph", in_toc)
-    return _PageResult([make_epigraph_group(ids, groups)], "epigraph", in_toc)
+        block = make_display_block(ids, groups[0], layout_role="standalone_display_page", prev_text="")
+        block.setdefault("attrs", {})["layout_form"] = "standalone_sparse_page"
+        return _PageResult([block], "display_block", in_toc)
+    return _PageResult([make_display_group(ids, groups)], "display_block", in_toc)
 
 
 def _try_process_full_page_image(
@@ -377,7 +379,7 @@ def process_page(
     for handler in (
         lambda: _try_process_snapshot_page(ids, blocks, content_blocks, layout, prev_major_type, in_toc),
         lambda: _try_process_title_page(ids, content_blocks, in_toc) if is_title_only_page(blocks) else None,
-        lambda: _try_process_epigraph_page(ids, content_blocks, prev_major_type, in_toc),
+        lambda: _try_process_sparse_display_page(ids, content_blocks, prev_major_type, in_toc),
         lambda: _try_process_full_page_image(ids, content_blocks, layout, in_toc),
         lambda: _try_process_plate_page(ids, content_blocks, layout, prev_major_type, in_toc),
     ):

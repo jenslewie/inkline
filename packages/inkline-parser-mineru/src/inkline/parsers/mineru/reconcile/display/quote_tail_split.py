@@ -6,7 +6,6 @@ import copy
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
-from ..constants import QUOTE_TYPES
 from ..block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
 from ..block_merge import _merge_block_pair, _refresh_canonical_quote_attrs
 from ..layout_helpers import (
@@ -22,7 +21,7 @@ def reconcile_page_bottom_overflow_tail_from_quotes(blocks: List[Dict[str, Any]]
     while i + 1 < len(blocks):
         b = blocks[i]
         nxt = blocks[i + 1]
-        if b.get("type") not in QUOTE_TYPES or nxt.get("type") != "paragraph":
+        if b.get("type") != "display_block" or nxt.get("type") != "paragraph":
             i += 1
             continue
         bp = max(_block_pages(b) or [_block_page(b) or -1])
@@ -56,8 +55,8 @@ def reconcile_page_bottom_overflow_tail_from_quotes(blocks: List[Dict[str, Any]]
         if quote_refs is not None:
             attrs["note_refs"] = quote_refs
         ev = attrs.setdefault("classification_evidence", [])
-        if "split_page_bottom_overflow_tail_from_display_quote" not in ev:
-            ev.append("split_page_bottom_overflow_tail_from_display_quote")
+        if "split_page_bottom_overflow_tail_from_display_block" not in ev:
+            ev.append("split_page_bottom_overflow_tail_from_display_block")
 
         new_para = copy.deepcopy(b)
         new_para["block_id"] = b.get("block_id") + "_tail"
@@ -67,13 +66,13 @@ def reconcile_page_bottom_overflow_tail_from_quotes(blocks: List[Dict[str, Any]]
         nattrs = new_para.setdefault("attrs", {})
         for k in ["role", "content_form", "content_form_confidence", "content_form_scores", "classification_evidence", "quote_text", "attribution"]:
             nattrs.pop(k, None)
-        nattrs["split_from_quote_block_id"] = b.get("block_id")
+        nattrs["split_from_display_block_id"] = b.get("block_id")
         if tail_runs:
             nattrs["inline_runs"] = tail_runs
         if tail_refs is not None:
             nattrs["note_refs"] = tail_refs
         new_para["block_id"] = nxt.get("block_id", new_para["block_id"])
-        _merge_block_pair(new_para, nxt, "split_quote_tail_joined_to_page_top_paragraph", {"narrative_tail": True}, [])
+        _merge_block_pair(new_para, nxt, "split_display_block_tail_joined_to_page_top_paragraph", {"narrative_tail": True}, [])
         del blocks[i + 1]
         blocks.insert(i + 1, new_para)
         i += 2

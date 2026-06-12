@@ -56,17 +56,16 @@ img {
 figcaption {
   font-size: 0.9em;
 }
-.epigraph {
+.display-block {
   margin: 1.2em 2em;
   text-indent: 0;
-  font-style: italic;
   white-space: pre-line;
 }
-.blockquote {
-  margin: 1em 2em;
-  text-indent: 0;
+.display-block-standalone {
+  margin-top: 1.6em;
+  margin-bottom: 1.6em;
 }
-.signature {
+.display-block-right {
   margin: 1.2em 0;
   text-align: right;
   text-indent: 0;
@@ -108,7 +107,10 @@ def _chapter_documents(
     current_title = document["metadata"].get("title") or document["metadata"]["doc_id"]
     current_html: list[str] = []
 
-    for block in document["blocks"]:
+    i = 0
+    blocks = document["blocks"]
+    while i < len(blocks):
+        block = blocks[i]
         block_type = block["type"]
         text = block.get("text", "")
         if block_type == "heading" and int(block.get("level", 1)) == 1:
@@ -122,14 +124,15 @@ def _chapter_documents(
             current_html.append(f"<h{level}>{escape(text)}</h{level}>")
         elif block_type == "paragraph":
             current_html.append(f"<p>{_text_html(block)}</p>")
-        elif block_type == "epigraph":
-            current_html.append(f'<blockquote class="epigraph">{escape(text)}</blockquote>')
-        elif block_type == "blockquote":
-            current_html.append(f'<blockquote class="blockquote">{escape(text)}</blockquote>')
-        elif block_type == "signature":
-            current_html.append(f'<p class="signature">{escape(text)}</p>')
-        elif block_type == "list":
-            current_html.append(f"<ul><li>{escape(text)}</li></ul>")
+        elif block_type == "display_block":
+            current_html.append(_display_block_html(block))
+        elif block_type == "list_item":
+            items = []
+            while i < len(blocks) and blocks[i]["type"] == "list_item":
+                items.append(f"<li>{_text_html(blocks[i])}</li>")
+                i += 1
+            current_html.append("<ul>" + "".join(items) + "</ul>")
+            continue
         elif block_type == "table":
             current_html.append(f"<table><tr><td>{escape(text)}</td></tr></table>")
         elif block_type == "figure":
@@ -141,6 +144,7 @@ def _chapter_documents(
             note_id = attrs.get("note_id") or block.get("block_id")
             id_attr = f' id="{escape(str(note_id), quote=True)}"' if note_id else ""
             current_html.append(f'<aside epub:type="footnote"{id_attr}><p>{escape(text)}</p></aside>')
+        i += 1
 
     if current_html:
         chapters.append((current_title, current_html))
@@ -148,6 +152,24 @@ def _chapter_documents(
         chapters.append((current_title, ["<p></p>"]))
 
     return [(title, "\n".join(html_parts)) for title, html_parts in chapters]
+
+
+def _display_block_html(block: dict[str, Any]) -> str:
+    attrs = block.get("attrs") or {}
+    classes = ["display-block"]
+    layout_role = attrs.get("layout_role")
+    if layout_role in {"standalone_display_page", "standalone_display_group"}:
+        classes.append("display-block-standalone")
+    raw_style_hints = attrs.get("style_hints")
+    style_hints = raw_style_hints if isinstance(raw_style_hints, dict) else {}
+    if (
+        layout_role == "flush_right_terminal_block"
+        or attrs.get("alignment") == "right"
+        or style_hints.get("text_align") == "right"
+    ):
+        classes.append("display-block-right")
+    class_attr = " ".join(classes)
+    return f'<blockquote class="{escape(class_attr, quote=True)}">{_text_html(block)}</blockquote>'
 
 
 def _text_html(block: dict[str, Any]) -> str:

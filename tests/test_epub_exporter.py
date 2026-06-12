@@ -76,6 +76,61 @@ def test_export_epub_renders_inline_note_refs(tmp_path):
     assert '<aside epub:type="footnote" id="note_b000002">' in html
 
 
+def test_export_epub_renders_display_blocks_and_list_items(tmp_path):
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b000001",
+            "type": "display_block",
+            "text": "第一行\n第二行",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {
+                "layout_role": "standalone_display_page",
+                "inline_runs": [
+                    {"type": "text", "text": "第一行\n第二行"},
+                    {"type": "note_ref", "marker": "1", "target_note_id": "note_b000004"},
+                ],
+            },
+        },
+        {
+            "block_id": "b000002",
+            "type": "display_block",
+            "text": "右对齐",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {"layout_role": "flush_right_terminal_block"},
+        },
+        {
+            "block_id": "b000003",
+            "type": "list_item",
+            "text": "列表一",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {},
+        },
+        {
+            "block_id": "b000004",
+            "type": "list_item",
+            "text": "列表二",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml"))
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+    assert 'class="display-block display-block-standalone"' in html
+    assert 'class="display-block display-block-right"' in html
+    assert 'epub:type="noteref"' in html
+    assert html.count("<ul>") == 1
+    assert "<li>列表一</li><li>列表二</li>" in html
+    assert ".epigraph" not in css
+    assert ".blockquote" not in css
+    assert ".signature" not in css
+
+
 def test_export_epub_marks_cover_asset(tmp_path):
     cover = tmp_path / "cover.png"
     cover.write_bytes(

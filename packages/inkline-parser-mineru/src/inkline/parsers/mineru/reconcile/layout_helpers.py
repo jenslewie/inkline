@@ -10,7 +10,7 @@ from ..extraction.text import normalize_ws, strip_trailing_text_note
 from .block_access import block_bbox as _bbox
 from .block_access import block_page as _block_page
 from .block_merge import _join_text
-from .constants import TERMINAL_PUNCT, _DEFAULT_PAGE_HEIGHT, _NEAR_PAGE_BOTTOM_RATIO, _NEAR_PAGE_TOP_RATIO, _QUOTE_MIN_LEFT_MARGIN, _QUOTE_MIN_WIDTH_RATIO
+from .constants import TERMINAL_PUNCT, _DEFAULT_PAGE_HEIGHT, _NEAR_PAGE_BOTTOM_RATIO, _NEAR_PAGE_TOP_RATIO, _DISPLAY_MIN_LEFT_MARGIN, _DISPLAY_MIN_WIDTH_RATIO
 
 
 def _canonical_quote_layout(b: Dict[str, Any], layout: LayoutStats) -> bool:
@@ -18,7 +18,7 @@ def _canonical_quote_layout(b: Dict[str, Any], layout: LayoutStats) -> bool:
     if not bb:
         return False
     width = max(0.0, float(bb[2]) - float(bb[0]))
-    return float(bb[0]) >= layout.body_left + _QUOTE_MIN_LEFT_MARGIN or width <= layout.body_width * _QUOTE_MIN_WIDTH_RATIO
+    return float(bb[0]) >= layout.body_left + _DISPLAY_MIN_LEFT_MARGIN or width <= layout.body_width * _DISPLAY_MIN_WIDTH_RATIO
 
 
 def _page_coord_heights(blocks: List[Dict[str, Any]]) -> Dict[int, float]:

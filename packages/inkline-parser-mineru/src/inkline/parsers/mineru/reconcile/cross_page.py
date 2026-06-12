@@ -10,7 +10,7 @@ from ..analysis.pdf_page_metrics import PdfPageCache, line_bands
 from ..schema.models import BBox
 from ..extraction.text import chinese_len, normalize_ws
 from .constants import (
-    FLOAT_LIKE_TYPES, MERGEABLE_TEXT_TYPES, QUOTE_TYPES, _DEFAULT_PAGE_HEIGHT,
+    FLOAT_LIKE_TYPES, MERGEABLE_TEXT_TYPES, _DEFAULT_PAGE_HEIGHT,
     _NEAR_PAGE_BOTTOM_RATIO,
 )
 from .block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
@@ -215,7 +215,7 @@ def _next_same_page_text_block(blocks: List[Dict[str, Any]], start: int, page: i
             continue
         if b.get("type") in MERGEABLE_TEXT_TYPES:
             return b
-        if b.get("type") in {"heading", "epigraph", "epigraph_group", "blockquote", "table"}:
+        if b.get("type") in {"heading", "display_block", "table"}:
             return None
     return None
 
@@ -441,18 +441,18 @@ def merge_cross_page_paragraphs(blocks: List[Dict[str, Any]], source_pdf: Option
                 continue
             # Do not let paragraph-continuation merging cross a set-off display
             # boundary.  A prose introducer at a page bottom followed by a
-            # quote on the next page must remain separate; a quote followed by
+            # display block on the next page must remain separate; display text followed by
             # normal narrative must also remain separate. True cross-page quote
-            # continuations are handled by quote reconciliation when the next
-            # fragment has quote layout.
-            if left.get("type") == "paragraph" and right.get("type") in QUOTE_TYPES:
+            # continuations are handled by display reconciliation when the next
+            # fragment has display layout.
+            if left.get("type") == "paragraph" and right.get("type") == "display_block":
                 i += 1
                 continue
-            if left.get("type") in QUOTE_TYPES and right.get("type") == "paragraph":
+            if left.get("type") == "display_block" and right.get("type") == "paragraph":
                 if layout is not None and not _canonical_quote_layout(right, layout):
                     i += 1
                     continue
-            display_like = (left.get("type") == "display_block") or (left.get("type") in QUOTE_TYPES)
+            display_like = left.get("type") == "display_block"
             if display_like and right.get("type") == "paragraph":
                 if layout is not None and not _canonical_quote_layout(right, layout):
                     i += 1

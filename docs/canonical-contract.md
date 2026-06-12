@@ -22,12 +22,20 @@ Required metadata fields:
 Supported block types:
 
 ```text
-heading paragraph toc_item display_block epigraph blockquote signature list
-list_item table table_continuation figure caption footnote_ref footnote
-equation page_break
+heading paragraph toc_item display_block list_item table table_continuation
+figure caption footnote
 ```
 
 Downstream packages must consume canonical fields instead of parser-private raw outputs. Parser-specific evidence can live under `block.attrs`.
+
+Display text uses the layout-first `display_block` type. Do not emit semantic
+display block variants such as epigraph, blockquote, or signature; preserve
+layout details under `block.attrs` instead.
+
+Inline note references are represented in `block.attrs.inline_runs` as
+`{"type": "note_ref", ...}` runs, not as top-level `footnote_ref` blocks.
+Inline equation markers from parser-private inputs may remain as note-ref
+sources, but canonical output does not use a top-level `equation` block.
 
 `pages` describes physical pages without replacing reading-flow `blocks`.
 Page metadata uses two coarse axes:

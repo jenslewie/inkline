@@ -105,7 +105,7 @@ class TextStyleAnalyzer:
         line_heights: List[float] = []
         sources: List[str] = []
         for block in blocks:
-            if block.get("type") not in {"paragraph", "list_item", "blockquote"}:
+            if block.get("type") not in {"paragraph", "list_item", "display_block"}:
                 continue
             if _block_page(block) != page:
                 continue

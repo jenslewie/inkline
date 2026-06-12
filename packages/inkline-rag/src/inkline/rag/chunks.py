@@ -8,13 +8,8 @@ from inkline.canonical.source_map import bbox_ref
 
 
 TEXT_TYPES = {
-    "heading",
     "paragraph",
     "display_block",
-    "epigraph",
-    "blockquote",
-    "signature",
-    "list",
     "list_item",
     "caption",
     "footnote",

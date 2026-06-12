@@ -42,7 +42,7 @@ _FOOTNOTE_DEFS_PROMPT = (
 )
 _PROMPT_VERSION = 6
 _VALID_MARKER_RE = re.compile(r"^(?:\d{1,3}|\*{1,3})$")
-_BODY_REF_BLOCK_TYPES = {"paragraph", "display_block", "blockquote", "caption", "epigraph_group"}
+_BODY_REF_BLOCK_TYPES = {"paragraph", "display_block", "caption"}
 _PARAGRAPH_CROP_PADDING_PDF = 12.0
 
 

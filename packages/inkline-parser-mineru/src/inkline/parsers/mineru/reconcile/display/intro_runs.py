@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
-from ..constants import FLOAT_LIKE_TYPES, QUOTE_TYPES
+from ..constants import FLOAT_LIKE_TYPES
 from ..block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
 from ..layout_helpers import _canonical_quote_layout
 from ..block_nav import _prev_text_non_float
@@ -38,7 +38,7 @@ def reconcile_parenthetical_header_display_quote_runs(blocks: List[Dict[str, Any
             nxt = blocks[end]
             if nxt.get("type") in FLOAT_LIKE_TYPES:
                 break
-            if nxt.get("type") not in {"paragraph", "blockquote"}:
+            if nxt.get("type") not in {"paragraph", "display_block"}:
                 break
             ntext = str(nxt.get("text", "")).strip()
             if not ntext:
@@ -60,7 +60,7 @@ def reconcile_parenthetical_header_display_quote_runs(blocks: List[Dict[str, Any
                 i,
                 end,
                 prev_text=_prev_text_non_float(blocks, i),
-                reason="parenthetical_letter_display_quote_layout",
+                reason="parenthetical_letter_display_block_layout",
             )
             continue
         i += 1
@@ -71,7 +71,7 @@ def reconcile_short_display_intro_quote_runs(blocks: List[Dict[str, Any]], layou
     while i + 1 < len(blocks):
         cur, nxt = blocks[i], blocks[i + 1]
         text = str(cur.get("text", "")).strip()
-        if cur.get("type") not in QUOTE_TYPES or nxt.get("type") not in {"paragraph", "blockquote"}:
+        if cur.get("type") != "display_block" or nxt.get("type") not in {"paragraph", "display_block"}:
             i += 1
             continue
         if not text.endswith(("：", ":")) or len(text) > 42:
@@ -111,7 +111,7 @@ def reconcile_short_display_intro_quote_runs(blocks: List[Dict[str, Any]], layou
             i,
             i + 2,
             prev_text=_prev_text_non_float(blocks, i),
-            reason="formal_edict_display_quote_layout",
+            reason="formal_edict_display_block_layout",
         )
         continue
 
@@ -151,7 +151,7 @@ def reconcile_intro_display_quote_continuations(blocks: List[Dict[str, Any]], la
                 i,
                 end,
                 prev_text=prev_text,
-                reason="introduced_display_quote_continuation_layout",
+                reason="introduced_display_block_continuation_layout",
             )
             continue
         i += 1

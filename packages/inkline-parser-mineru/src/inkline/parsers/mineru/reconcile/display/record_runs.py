@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
-from ..constants import FLOAT_LIKE_TYPES, QUOTE_TYPES
+from ..constants import FLOAT_LIKE_TYPES
 from ..block_access import block_page as _block_page, block_pages as _block_pages
 from ..layout_helpers import _is_near_page_bottom, _is_near_page_top, _page_coord_heights
 from ..block_nav import _prev_text_non_float
@@ -17,7 +17,7 @@ def reconcile_record_style_display_quote_runs(blocks: List[Dict[str, Any]], layo
     i = 0
     while i < len(blocks):
         cur = blocks[i]
-        if cur.get("type") not in QUOTE_TYPES or not looks_like_record_display_text(cur.get("text", "")):
+        if cur.get("type") != "display_block" or not looks_like_record_display_text(cur.get("text", "")):
             i += 1
             continue
         end = i + 1
@@ -25,7 +25,7 @@ def reconcile_record_style_display_quote_runs(blocks: List[Dict[str, Any]], layo
             nxt = blocks[end]
             if nxt.get("type") in FLOAT_LIKE_TYPES:
                 break
-            if nxt.get("type") not in {"paragraph", "blockquote"}:
+            if nxt.get("type") not in {"paragraph", "display_block"}:
                 break
             if not looks_like_record_display_text(nxt.get("text", "")):
                 break
@@ -44,7 +44,7 @@ def reconcile_record_style_display_quote_runs(blocks: List[Dict[str, Any]], layo
                 i,
                 end,
                 prev_text=_prev_text_non_float(blocks, i),
-                reason="record_style_display_quote_continuation_layout",
+                reason="record_style_display_block_continuation_layout",
             )
             continue
         i += 1

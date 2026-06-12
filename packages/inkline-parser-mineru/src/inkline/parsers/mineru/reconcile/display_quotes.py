@@ -1,11 +1,10 @@
-"""Display quote reconciliation (single pass). Merges adjacent display/quote blocks where the introducer and body are split by MinerU, and reconciles inline display quotes with the surrounding prose context."""
+"""Display block reconciliation."""
 
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
 from ..analysis.layout import LayoutStats
-from .constants import QUOTE_TYPES
 from .block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
 from .block_merge import _merge_block_pair, _refresh_canonical_quote_attrs
 from .layout_helpers import (
@@ -15,14 +14,14 @@ from .layout_helpers import (
 from .block_nav import _prev_text_non_float
 
 def reconcile_display_quotes(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
-    """Late quote reconciliation after cross-page paragraph merging.
+    """Late display block reconciliation after cross-page paragraph merging.
 
     This pass fixes cases that cannot be solved page-locally:
-      - a quote starts at the bottom of one page and the attribution is on the
+      - a display run starts at the bottom of one page and the attribution is on the
         next page;
       - an introduced display quote is emitted as a normal paragraph because its
         bbox is only mildly indented;
-      - a long display quote spans multiple paragraph boxes on the same page.
+      - a long display run spans multiple paragraph boxes on the same page.
     """
     page_heights = _page_coord_heights(blocks)
 
@@ -32,26 +31,26 @@ def reconcile_display_quotes(blocks: List[Dict[str, Any]], layout: LayoutStats) 
         # paragraphs that merely mention sources such as "实录".
         return prev_text.rstrip().endswith(("：", ":"))
 
-    # 1) Promote colon/source-introduced display quote paragraphs.
+    # 1) Promote colon/source-introduced display paragraphs.
     for idx, b in enumerate(blocks):
         if b.get("type") != "paragraph":
             continue
         prev_text = _prev_text_non_float(blocks, idx)
         if has_loose_intro(prev_text) and _canonical_quote_layout(b, layout):
-            b["type"] = "blockquote"
+            b["type"] = "display_block"
             attrs = b.setdefault("attrs", {})
             ev = attrs.setdefault("classification_evidence", [])
-            if "promoted_by_intro_trigger_and_display_quote_layout" not in ev:
-                ev.append("promoted_by_intro_trigger_and_display_quote_layout")
+            if "promoted_by_intro_trigger_and_display_block_layout" not in ev:
+                ev.append("promoted_by_intro_trigger_and_display_block_layout")
             _refresh_canonical_quote_attrs(b, prev_text=prev_text)
 
     # 2) If a page-bottom paragraph is immediately followed by a page-top
-    #    blockquote, the first paragraph is the beginning of the same quote.
+    #    display block, the first paragraph belongs to the same display run.
     i = 0
     while i + 1 < len(blocks):
         left = blocks[i]
         right = blocks[i + 1]
-        if left.get("type") == "paragraph" and right.get("type") in QUOTE_TYPES:
+        if left.get("type") == "paragraph" and right.get("type") == "display_block":
             lp = _block_page(left)
             rp = _block_page(right)
             if (
@@ -62,12 +61,12 @@ def reconcile_display_quotes(blocks: List[Dict[str, Any]], layout: LayoutStats) 
                 and _is_near_page_top(right, page_heights)
                 and _canonical_quote_layout(left, layout)
             ):
-                left["type"] = right.get("type")
+                left["type"] = "display_block"
                 _merge_block_pair(
                     left,
                     right,
-                    "cross_page_display_quote_continuation_with_attribution",
-                    {"left_fragment_promoted_to_quote": True},
+                    "cross_page_display_block_continuation_with_attribution",
+                    {"left_fragment_promoted_to_display_block": True},
                     [],
                 )
                 del blocks[i + 1]
@@ -79,12 +78,12 @@ def reconcile_display_quotes(blocks: List[Dict[str, Any]], layout: LayoutStats) 
     i = 0
     while i < len(blocks):
         cur = blocks[i]
-        if cur.get("type") not in QUOTE_TYPES:
+        if cur.get("type") != "display_block":
             i += 1
             continue
         while i + 1 < len(blocks):
             nxt = blocks[i + 1]
-            if nxt.get("type") not in {"paragraph", "blockquote"}:
+            if nxt.get("type") not in {"paragraph", "display_block"}:
                 break
             cur_pages = _block_pages(cur)
             cur_last_page = max(cur_pages) if cur_pages else _block_page(cur)
@@ -106,8 +105,8 @@ def reconcile_display_quotes(blocks: List[Dict[str, Any]], layout: LayoutStats) 
             _merge_block_pair(
                 cur,
                 nxt,
-                "same_page_display_quote_continuation",
-                {"aligned_with_previous_quote_bbox": True},
+                "same_page_display_block_continuation",
+                {"aligned_with_previous_display_block_bbox": True},
                 [],
                 joiner="newline",
             )

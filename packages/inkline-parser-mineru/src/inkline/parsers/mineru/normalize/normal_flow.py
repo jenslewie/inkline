@@ -11,7 +11,7 @@ from .builders import (
     make_figure,
     make_heading,
     make_paragraph,
-    make_quote_block,
+    make_display_block,
     make_table,
 )
 from .page_detectors import coord_page_size as _coord_page_size
@@ -159,8 +159,8 @@ def process_normal_flow(
                 group, j, boundary_reason = collect_display_quote(content_blocks, i, prev_text, layout, text_style=text_style)
                 if boundary_reason and j < len(content_blocks):
                     display_boundary_attrs[id(content_blocks[j])] = boundary_reason
-                out.append(make_quote_block(ids, group, "blockquote", "inline_display_quote", prev_text))
-                prev_major_type = "blockquote"
+                out.append(make_display_block(ids, group, layout_role="inline_display_block", prev_text=prev_text))
+                prev_major_type = "display_block"
                 last_text_context = ""
                 i = j
                 continue

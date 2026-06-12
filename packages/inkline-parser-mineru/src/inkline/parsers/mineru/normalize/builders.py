@@ -1,4 +1,4 @@
-"""Canonical block factory functions. Provides make_heading, make_paragraph, make_quote_block, make_figure, make_table, make_toc_item, make_flush_right_terminal_block, and union_bbox. All canonical blocks are created through these factories to ensure consistent shape."""
+"""Canonical block factory functions."""
 
 from __future__ import annotations
 
@@ -11,12 +11,14 @@ from ..extraction.text import block_text, extract_caption_list, merge_inline_run
 def _build_display_attrs(
     raw_lines: List[str],
     blocks: Sequence[RawBlock],
-    role: str,
+    layout_role: str,
 ) -> Tuple[Dict[str, Any], List[str]]:
     inline_runs = merge_inline_runs(blocks)
+    lines = [ln.strip() for ln in raw_lines if ln.strip()]
     attrs: Dict[str, Any] = {
-        "role": role,
-        "quote_text": "\n".join(raw_lines).strip(),
+        "layout_role": layout_role,
+        "layout_form": _display_layout_form(lines),
+        "line_count": len(lines),
         "raw_types": [b.raw_type for b in blocks],
     }
     if any(run.get("type") == "note_ref" for run in inline_runs):
@@ -31,9 +33,7 @@ def _line_layouts_for_display_blocks(blocks: Sequence[RawBlock]) -> List[Dict[st
     """Record non-default line layout inside a display block.
 
     The signal is deliberately geometric: a short raw line whose right edge is
-    close to the display block's right edge is a right-aligned line. This keeps
-    reflow targets from losing layout without reintroducing semantic labels such
-    as "signature".
+    close to the display block's right edge is a right-aligned line.
     """
     text_blocks = [b for b in blocks if block_text(b) and b.bbox]
     if len(text_blocks) < 2:
@@ -59,40 +59,55 @@ def _line_layouts_for_display_blocks(blocks: Sequence[RawBlock]) -> List[Dict[st
     return layouts
 
 
-def make_quote_block(
+def make_display_block(
     ids: IdFactory,
     blocks: Sequence[RawBlock],
-    block_type: str,
-    role: str,
+    layout_role: str,
     prev_text: str,
     level: Optional[int] = None,
 ) -> Dict[str, Any]:
     raw_lines = [block_text(b) for b in blocks if block_text(b)]
-    attrs, quote_lines = _build_display_attrs(raw_lines, blocks, role)
+    attrs, _ = _build_display_attrs(raw_lines, blocks, layout_role)
     text = "\n".join(raw_lines).strip()
     page = blocks[0].page if blocks else None
     bbox = union_bbox([b.bbox for b in blocks if b.bbox])
-    return canonical_block(ids.next(), block_type, text, page, bbox, attrs=attrs, level=level, source_pages=_unique_pages(blocks))
+    return canonical_block(ids.next(), "display_block", text, page, bbox, attrs=attrs, level=level, source_pages=_unique_pages(blocks))
 
 
-def make_epigraph_group(ids: IdFactory, groups: List[List[RawBlock]]) -> Dict[str, Any]:
+def make_display_group(ids: IdFactory, groups: List[List[RawBlock]]) -> Dict[str, Any]:
     items = []
     all_blocks: List[RawBlock] = []
     for g in groups:
         all_blocks.extend(g)
         raw_lines = [block_text(b) for b in g if block_text(b)]
         inline_runs = merge_inline_runs(g)
+        lines = [ln.strip() for ln in raw_lines if ln.strip()]
         item: Dict[str, Any] = {
             "text": "\n".join(raw_lines),
-            "quote_text": "\n".join(raw_lines),
+            "layout_form": _display_layout_form(lines),
+            "line_count": len(lines),
             "source": {"page": g[0].page, "bbox": union_bbox([b.bbox for b in g if b.bbox])},
         }
         if any(run.get("type") == "note_ref" for run in inline_runs):
             item["inline_runs"] = inline_runs
         items.append(item)
     text = "\n\n".join(i["text"] for i in items)
-    attrs = {"role": "section_epigraphs", "items": items}
-    return canonical_block(ids.next(), "epigraph_group", text, all_blocks[0].page, union_bbox([b.bbox for b in all_blocks if b.bbox]), attrs=attrs, source_pages=_unique_pages(all_blocks))
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    attrs = {
+        "layout_role": "standalone_display_group",
+        "layout_form": "standalone_sparse_page_group",
+        "line_count": len(lines),
+        "items": items,
+    }
+    return canonical_block(ids.next(), "display_block", text, all_blocks[0].page, union_bbox([b.bbox for b in all_blocks if b.bbox]), attrs=attrs, source_pages=_unique_pages(all_blocks))
+
+
+def _display_layout_form(lines: Sequence[str]) -> str:
+    if len(lines) >= 2:
+        short_ratio = sum(len(ln) <= 36 for ln in lines) / len(lines)
+        if max(len(ln) for ln in lines) <= 60 and short_ratio >= 0.6:
+            return "short_line_group"
+    return "set_off_text"
 
 
 def union_bbox(bboxes: Sequence[Optional[BBox]]) -> Optional[BBox]:

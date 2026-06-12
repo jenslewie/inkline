@@ -11,19 +11,12 @@ BLOCK_TYPES = {
     "paragraph",
     "toc_item",
     "display_block",
-    "epigraph",
-    "blockquote",
-    "signature",
-    "list",
     "list_item",
     "table",
     "table_continuation",
     "figure",
     "caption",
-    "footnote_ref",
     "footnote",
-    "equation",
-    "page_break",
 }
 
 

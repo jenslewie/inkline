@@ -121,7 +121,7 @@ def promote_page_reference_list_footnotes(blocks: List[Dict[str, Any]]) -> None:
 
 
 def promote_cross_page_footnote_continuation_paragraphs(blocks: List[Dict[str, Any]]) -> None:
-    TEXT_LIKE_TYPES = {"paragraph", "display_block", "blockquote", "list_item"}
+    TEXT_LIKE_TYPES = {"paragraph", "display_block", "list_item"}
     from .merge import _has_next_page_continuation, _has_previous_page_continuation
 
     i = 0
@@ -437,7 +437,7 @@ def _has_matching_page_refs(blocks: List[Dict[str, Any]], page: int, markers: Li
     for blk in blocks:
         if _block_page(blk) != page:
             continue
-        if blk.get("type") not in {"paragraph", "display_block", "caption", "blockquote", "list_item"}:
+        if blk.get("type") not in {"paragraph", "display_block", "caption", "list_item"}:
             continue
         for ref in _note_refs(blk):
             marker = str(ref.get("marker", "")).strip()
