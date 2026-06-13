@@ -121,8 +121,9 @@ def _import_epub(args: argparse.Namespace) -> int:
 
 
 def _export_epub(args: argparse.Namespace) -> int:
-    document = read_canonical(args.canonical)
-    export_epub(document, args.output)
+    canonical_path = Path(args.canonical).resolve()
+    document = read_canonical(canonical_path)
+    export_epub(document, args.output, base_dir=canonical_path.parent)
     print(f"Wrote EPUB: {args.output}")
     return 0
 
