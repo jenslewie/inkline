@@ -61,9 +61,11 @@ def build_toc_from_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if b["type"] != TOC_ITEM:
             continue
         attrs = b.get("attrs", {})
+        target_page_label = attrs.get("target_page_label")
         toc.append({
             "title": attrs.get("title", b.get("text")),
-            "target_page_label": attrs.get("target_page_label"),
+            "target_page_label": target_page_label,
+            "page_hint": target_page_label,
             "level": b.get("level", 1),
             "source_block_id": b.get("block_id"),
         })
@@ -405,6 +407,7 @@ def extend_table_source_pages(blocks: List[Dict[str, Any]]) -> None:
             if p and p not in pages:
                 pages.append(p)
             last_table["attrs"]["continued"] = True
+            b.setdefault("attrs", {})["merged"] = False
         elif b["type"] not in {"page_number"}:
             if b["type"] not in {TABLE_CONTINUATION}:
                 last_table = None

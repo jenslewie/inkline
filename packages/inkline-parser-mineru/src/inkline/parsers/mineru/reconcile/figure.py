@@ -53,6 +53,15 @@ def reconcile_figure_captions(blocks: List[Dict[str, Any]], text_style: Optional
             del blocks[k]
         i += 1
 
+    for idx, b in enumerate(blocks):
+        if b.get("type") != CAPTION:
+            continue
+        prev_is_figure = idx > 0 and blocks[idx - 1].get("type") == FIGURE
+        next_is_figure = idx + 1 < len(blocks) and blocks[idx + 1].get("type") == FIGURE
+        if prev_is_figure or next_is_figure:
+            continue
+        b.setdefault("attrs", {})["caption_role"] = "legend"
+
 
 @dataclass(frozen=True)
 class _FigureCaptionDetector:

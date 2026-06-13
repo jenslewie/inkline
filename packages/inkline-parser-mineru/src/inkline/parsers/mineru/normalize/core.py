@@ -171,11 +171,31 @@ def build_canonical(
         or ""
     )
     page_metadata = build_page_metadata(pages, layout, title=args.title, blocks=blocks)
+    title_page_nums = {
+        p["physical_page"] for p in page_metadata if p.get("page_role") == "title_page"
+    }
+    author = None
+    _AUTHOR_RE = re.compile(r"(?:著者[：:]\s*(.+?)(?:\s|$)|作者[：:]\s*(.+?)(?:\s|$)|(.+?)著(?:\s|$))")
+    for b in blocks:
+        source = b.get("source") or {}
+        if source.get("page") not in title_page_nums:
+            continue
+        text = str(b.get("text") or "")
+        for m in _AUTHOR_RE.finditer(text):
+            for group in m.groups():
+                if group:
+                    author = group.strip()
+                    break
+            if author:
+                break
+        if author:
+            break
     canonical = {
         "metadata": {
             "schema_version": SCHEMA_VERSION,
             "doc_id": args.doc_id or infer_doc_id(args),
             "title": args.title,
+            "author": author,
             "language": args.language,
             "source_file": str(source_file),
             "source_files": source_files,

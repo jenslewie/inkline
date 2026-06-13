@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..analysis.page_geometry import PageGeometry
 from ..schema.block_types import FIGURE
@@ -19,6 +19,7 @@ def materialize_image_assets(
     materialize_page_snapshot_assets(canonical, source_pdf, output_dir, dpi=dpi)
     materialize_full_page_image_assets(canonical, source_pdf, output_dir, dpi=dpi)
     materialize_repaired_figure_image_assets(canonical, source_pdf, output_dir, page_sizes=page_sizes, dpi=dpi)
+    materialize_figure_path_assets(canonical, output_dir)
 
 
 def materialize_page_snapshot_assets(canonical: Dict[str, Any], source_pdf: Optional[str], output_dir: Path, dpi: int = 150) -> None:
@@ -197,6 +198,81 @@ def materialize_repaired_figure_image_assets(
             )
     finally:
         doc.close()
+
+
+def materialize_figure_path_assets(canonical: Dict[str, Any], output_dir: Path) -> None:
+    doc_id = canonical.get("metadata", {}).get("doc_id", "")
+    source_dirs = _source_search_dirs(canonical, output_dir)
+    for b in canonical.get("blocks", []):
+        if b.get("type") != FIGURE:
+            continue
+        attrs = b.get("attrs") or {}
+        image_path = attrs.get("image_path")
+        if not image_path or attrs.get("image_id"):
+            continue
+        resolved = _resolve_figure_image_path(image_path, output_dir, doc_id, source_dirs)
+        if not resolved:
+            continue
+        block_id = b.get("block_id")
+        if not block_id:
+            continue
+        image_id = f"{block_id}-image"
+        attrs["image_id"] = image_id
+        _upsert_image_asset(
+            canonical,
+            {
+                "image_id": image_id,
+                "path": str(resolved),
+                "role": "figure",
+                "related_block_ids": [block_id],
+            },
+        )
+
+
+def _source_search_dirs(canonical: Dict[str, Any], output_dir: Path) -> List[Path]:
+    source_files = canonical.get("metadata", {}).get("source_files", {})
+    dirs: List[Path] = [output_dir]
+    for key in ("content_list_v2", "content_list", "middle", "model", "md", "source_pdf"):
+        path = source_files.get(key)
+        if not path:
+            continue
+        parent = Path(path).parent
+        if parent.is_dir() and parent not in dirs:
+            dirs.append(parent)
+    return dirs
+
+
+def _resolve_figure_image_path(image_path: str, output_dir: Path, doc_id: str = "", source_dirs: Optional[List[Path]] = None) -> Optional[Path]:
+    candidate = Path(image_path)
+    if candidate.is_absolute() and candidate.exists():
+        return candidate
+    filename = Path(image_path).name
+    search_dirs = source_dirs or [output_dir]
+    for base in search_dirs:
+        joined = base / image_path
+        if joined.exists():
+            return joined
+        images_dir = base / "images"
+        if images_dir.is_dir():
+            candidate = images_dir / filename
+            if candidate.exists():
+                return candidate
+    for base in search_dirs:
+        for vlm_dir in base.rglob("vlm/images"):
+            candidate = vlm_dir / filename
+            if candidate.exists():
+                return candidate
+    if doc_id:
+        for base in search_dirs:
+            for candidate_dir in [
+                base / "mineru_raw" / doc_id / "vlm" / "images",
+                base / doc_id / "mineru_raw" / doc_id / "vlm" / "images",
+            ]:
+                if candidate_dir.is_dir():
+                    candidate = candidate_dir / filename
+                    if candidate.exists():
+                        return candidate
+    return None
 
 
 def _needs_repaired_figure_asset(block: Dict[str, Any]) -> bool:

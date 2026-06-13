@@ -86,12 +86,15 @@ def make_toc_entry(
     level: int = 1,
     *,
     page_hint: str | None = None,
+    target_page_label: str | None = None,
     block_id: str | None = None,
     children: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     entry: dict[str, Any] = {"title": title, "level": level}
     if page_hint is not None:
         entry["page_hint"] = page_hint
+    if target_page_label is not None:
+        entry["target_page_label"] = target_page_label
     if block_id is not None:
         entry["block_id"] = block_id
     if children is not None:

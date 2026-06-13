@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from html import unescape
+from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..schema.block_types import DISPLAY_BLOCK, FIGURE, HEADING, PARAGRAPH, TABLE, TOC_ITEM
@@ -255,7 +257,59 @@ def make_table(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
         "table_nest_level": content.get("table_nest_level") if isinstance(content, dict) else None,
         "image_path": (content.get("image_source") or {}).get("path") if isinstance(content, dict) else None,
     }
-    return canonical_block(ids.next(), TABLE, caption_text, b.page, b.bbox, attrs=attrs)
+    block = canonical_block(ids.next(), TABLE, caption_text, b.page, b.bbox, attrs=attrs)
+    if not caption_text and html:
+        block["text"] = _html_table_to_text(html)
+    return block
+
+
+class _TableTextParser(HTMLParser):
+    """Extract plain text from an HTML table, preserving cell/row boundaries."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[list[str]] = []
+        self._current_row: list[str] = []
+        self._current_cell_parts: list[str] = []
+        self._in_cell = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
+        if tag == "tr":
+            self._current_row = []
+        elif tag in ("td", "th"):
+            self._in_cell = True
+            self._current_cell_parts = []
+        elif tag == "br" and self._in_cell:
+            self._current_cell_parts.append(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "tr" and self._current_row:
+            self.rows.append(self._current_row)
+            self._current_row = []
+        elif tag in ("td", "th") and self._in_cell:
+            text = unescape("".join(self._current_cell_parts).strip())
+            self._current_row.append(text)
+            self._in_cell = False
+            self._current_cell_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._in_cell:
+            self._current_cell_parts.append(data)
+
+    def handle_entityref(self, name: str) -> None:
+        if self._in_cell:
+            self._current_cell_parts.append(unescape(f"&{name};"))
+
+    def handle_charref(self, name: str) -> None:
+        if self._in_cell:
+            self._current_cell_parts.append(unescape(f"&#{name};"))
+
+
+def _html_table_to_text(html: str) -> str:
+    parser = _TableTextParser()
+    parser.feed(html)
+    rows = parser.rows
+    return "\n".join("\t".join(row) for row in rows if row)
 
 
 def make_chart_table(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:

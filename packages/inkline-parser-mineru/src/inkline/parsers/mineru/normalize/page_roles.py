@@ -14,7 +14,7 @@ from ..schema.models import LayoutStats, RawBlock
 
 _COPYRIGHT_RE = re.compile(r"(?:ISBN|CIP|版权|Copyright|出版|印刷|定价|版权所有)")
 _STRICT_COPYRIGHT_RE = re.compile(r"(?:CIP|版权|Copyright|版权所有)")
-_AUTHOR_RE = re.compile(r"(?:著|译|作者|译者|出版社|Publishing|Press)", re.IGNORECASE)
+_AUTHOR_RE = re.compile(r"(?:著|作者|出版社|Publishing|Press)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
