@@ -6,13 +6,18 @@ from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
 from ...schema.block_types import DISPLAY_BLOCK, PARAGRAPH
-from ..block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
+from ..block_access import block_bbox as _bbox
+from ..block_access import block_page as _block_page
+from ..block_access import block_pages as _block_pages
 from ..block_merge import _merge_block_pair, _refresh_display_block_attrs
-from ..layout_helpers import (
-    _display_block_layout, _is_near_page_bottom,
-    _is_near_page_top, _page_coord_heights,
-)
 from ..block_nav import _prev_text_non_float
+from ..layout_helpers import (
+    _display_block_layout,
+    _is_near_page_bottom,
+    _is_near_page_top,
+    _page_coord_heights,
+)
+
 
 def reconcile_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
     """Late display block reconciliation after cross-page paragraph merging.

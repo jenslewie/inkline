@@ -6,10 +6,19 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol
 
 from ..normalize.builders import union_bbox
-from ..schema.block_types import CAPTION, FIGURE, FOOTNOTE, HEADING, PARAGRAPH, TABLE, TABLE_CONTINUATION
+from ..schema.block_types import (
+    CAPTION,
+    FIGURE,
+    FOOTNOTE,
+    HEADING,
+    PARAGRAPH,
+    TABLE,
+    TABLE_CONTINUATION,
+)
 from ..schema.models import BBox
+from .block_access import block_bbox as _bbox
+from .block_access import block_page as _block_page
 from .constants import _DEFAULT_PAGE_HEIGHT
-from .block_access import block_bbox as _bbox, block_page as _block_page
 from .layout_helpers import _page_coord_heights, _page_coord_widths
 
 __all__ = ["reconcile_figure_captions"]
@@ -26,7 +35,9 @@ class _TextStyleProvider(Protocol):
     def page_body_style_size(self, page: int, blocks: List[Dict[str, Any]]) -> Optional[float]: ...
 
 
-def reconcile_figure_captions(blocks: List[Dict[str, Any]], text_style: Optional[_TextStyleProvider] = None) -> None:
+def reconcile_figure_captions(
+    blocks: List[Dict[str, Any]], text_style: Optional[_TextStyleProvider] = None
+) -> None:
     """Attach nearby title/paragraph caption blocks to preceding figures.
 
     MinerU sometimes emits a figure as an image block followed by a title and a
@@ -101,14 +112,26 @@ class _FigureCaptionDetector:
     def _is_flow_boundary(candidate: Dict[str, Any]) -> bool:
         return candidate.get("type") in FIGURE_FLOW_BOUNDARY_TYPES
 
-    def _accept_heading(self, candidate: Dict[str, Any], figure: Dict[str, Any], caption_idxs: List[int], saw_text: bool) -> bool:
+    def _accept_heading(
+        self,
+        candidate: Dict[str, Any],
+        figure: Dict[str, Any],
+        caption_idxs: List[int],
+        saw_text: bool,
+    ) -> bool:
         if candidate.get("type") != HEADING:
             return False
         if saw_text or not _is_caption_like_heading(candidate):
             return False
         return _is_near_figure_caption_region(figure, candidate, caption_idxs, self.blocks)
 
-    def _accept_paragraph(self, candidate: Dict[str, Any], figure: Dict[str, Any], caption_idxs: List[int], saw_text: bool) -> bool:
+    def _accept_paragraph(
+        self,
+        candidate: Dict[str, Any],
+        figure: Dict[str, Any],
+        caption_idxs: List[int],
+        saw_text: bool,
+    ) -> bool:
         if candidate.get("type") not in CAPTION_TEXT_TYPES:
             return False
         if candidate.get("type") == CAPTION and not saw_text:
@@ -126,7 +149,9 @@ class _FigureCaptionDetector:
 
 
 def _attach_captions(figure: Dict[str, Any], caption_blocks: List[Dict[str, Any]]) -> None:
-    caption_text = "\n".join(str(b.get("text", "")).strip() for b in caption_blocks if str(b.get("text", "")).strip())
+    caption_text = "\n".join(
+        str(b.get("text", "")).strip() for b in caption_blocks if str(b.get("text", "")).strip()
+    )
     attrs = figure.setdefault("attrs", {})
     existing = attrs.setdefault("captions", [])
     if caption_text and caption_text not in existing:
@@ -155,7 +180,9 @@ def _absorb_preceding_embedded_figure_text(blocks: List[Dict[str, Any]]) -> None
         if not _is_preceding_embedded_figure_text(candidate, figure):
             i += 1
             continue
-        _absorb_text_blocks_into_figure(figure, [candidate], reason="preceding_embedded_figure_text_layout")
+        _absorb_text_blocks_into_figure(
+            figure, [candidate], reason="preceding_embedded_figure_text_layout"
+        )
         del blocks[i - 1]
         continue
 
@@ -171,11 +198,15 @@ def _is_preceding_embedded_figure_text(candidate: Dict[str, Any], figure: Dict[s
     gap = float(fbb[1]) - float(cbb[3])
     candidate_center = (float(cbb[0]) + float(cbb[2])) / 2.0
     horizontally_inside = float(fbb[0]) - 20.0 <= candidate_center <= float(fbb[2]) + 20.0
-    narrow_or_short = len(text) <= 60 and (float(cbb[2]) - float(cbb[0])) <= max(220.0, (float(fbb[2]) - float(fbb[0])) * 0.45)
+    narrow_or_short = len(text) <= 60 and (float(cbb[2]) - float(cbb[0])) <= max(
+        220.0, (float(fbb[2]) - float(fbb[0])) * 0.45
+    )
     return -8.0 <= gap <= 12.0 and horizontally_inside and narrow_or_short
 
 
-def _absorb_text_blocks_into_figure(figure: Dict[str, Any], text_blocks: List[Dict[str, Any]], reason: str) -> None:
+def _absorb_text_blocks_into_figure(
+    figure: Dict[str, Any], text_blocks: List[Dict[str, Any]], reason: str
+) -> None:
     attrs = figure.setdefault("attrs", {})
     absorbed_text = attrs.setdefault("absorbed_text", [])
     for block in text_blocks:
@@ -191,7 +222,11 @@ def _absorb_text_blocks_into_figure(figure: Dict[str, Any], text_blocks: List[Di
     attrs["embedded_text_absorbed"] = True
     attrs["embedded_text_absorb_reason"] = reason
     ocr_text = str(attrs.get("ocr_text_in_image") or "").strip()
-    extra_text = "\n".join(str(block.get("text", "")).strip() for block in text_blocks if str(block.get("text", "")).strip())
+    extra_text = "\n".join(
+        str(block.get("text", "")).strip()
+        for block in text_blocks
+        if str(block.get("text", "")).strip()
+    )
     if extra_text and extra_text not in ocr_text:
         attrs["ocr_text_in_image"] = "\n".join(part for part in [ocr_text, extra_text] if part)
     source = figure.setdefault("source", {})
@@ -223,8 +258,16 @@ def _is_same_visual_figure_fragment(blocks: List[Dict[str, Any]], left_idx: int)
     if not lbb or not rbb:
         return False
     page = _block_page(left)
-    page_width = _page_coord_widths(blocks).get(page, _DEFAULT_PAGE_HEIGHT) if page is not None else _DEFAULT_PAGE_HEIGHT
-    page_height = _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT) if page is not None else _DEFAULT_PAGE_HEIGHT
+    page_width = (
+        _page_coord_widths(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+        if page is not None
+        else _DEFAULT_PAGE_HEIGHT
+    )
+    page_height = (
+        _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+        if page is not None
+        else _DEFAULT_PAGE_HEIGHT
+    )
     lw = max(1.0, float(lbb[2]) - float(lbb[0]))
     lh = max(1.0, float(lbb[3]) - float(lbb[1]))
     rw = max(1.0, float(rbb[2]) - float(rbb[0]))
@@ -238,7 +281,11 @@ def _is_same_visual_figure_fragment(blocks: List[Dict[str, Any]], left_idx: int)
         and abs(float(lbb[1]) - float(rbb[1])) <= page_height * 0.10
         and abs(float(lbb[3]) - float(rbb[3])) <= page_height * 0.12
     )
-    side_by_side = side_by_side_layout and bool(union) and _has_following_caption_for_figure_pair(blocks, left_idx, union)
+    side_by_side = (
+        side_by_side_layout
+        and bool(union)
+        and _has_following_caption_for_figure_pair(blocks, left_idx, union)
+    )
     horizontal_overlap = min(float(lbb[2]), float(rbb[2])) - max(float(lbb[0]), float(rbb[0]))
     vertical_gap = float(rbb[1]) - float(lbb[3])
     left_attrs = left.get("attrs") or {}
@@ -250,13 +297,15 @@ def _is_same_visual_figure_fragment(blocks: List[Dict[str, Any]], left_idx: int)
     return side_by_side or below_fragment
 
 
-def _has_following_caption_for_figure_pair(blocks: List[Dict[str, Any]], left_idx: int, pair_bbox: BBox) -> bool:
+def _has_following_caption_for_figure_pair(
+    blocks: List[Dict[str, Any]], left_idx: int, pair_bbox: BBox
+) -> bool:
     pair_page = _block_page(blocks[left_idx])
     if pair_page is None:
         return False
     pair_width = max(1.0, float(pair_bbox[2]) - float(pair_bbox[0]))
     pair_bottom = float(pair_bbox[3])
-    for candidate in blocks[left_idx + 2:left_idx + 6]:
+    for candidate in blocks[left_idx + 2 : left_idx + 6]:
         if _block_page(candidate) != pair_page:
             return False
         if candidate.get("type") in FIGURE_FLOW_BOUNDARY_TYPES:
@@ -293,7 +342,10 @@ def _merge_figure_fragment_pair(left: Dict[str, Any], right: Dict[str, Any]) -> 
             if value and value not in values:
                 values.append(value)
         left_attrs[key] = values
-    ocr_parts = [str(left_attrs.get("ocr_text_in_image") or "").strip(), str(right_attrs.get("ocr_text_in_image") or "").strip()]
+    ocr_parts = [
+        str(left_attrs.get("ocr_text_in_image") or "").strip(),
+        str(right_attrs.get("ocr_text_in_image") or "").strip(),
+    ]
     left_attrs["ocr_text_in_image"] = "\n".join(part for part in ocr_parts if part)
     left_attrs["figure_fragment_merge_reason"] = "adjacent_same_page_figure_fragments"
     source = left.setdefault("source", {})
@@ -305,8 +357,16 @@ def _merge_figure_fragment_pair(left: Dict[str, Any], right: Dict[str, Any]) -> 
             pages.append(page)
     spans = source.setdefault("spans", [])
     if not spans:
-        spans.append({"page": source.get("page"), "bbox": _bbox(left), "block_id": left.get("block_id")})
-    spans.append({"page": right_source.get("page"), "bbox": right_source.get("bbox"), "block_id": right.get("block_id")})
+        spans.append(
+            {"page": source.get("page"), "bbox": _bbox(left), "block_id": left.get("block_id")}
+        )
+    spans.append(
+        {
+            "page": right_source.get("page"),
+            "bbox": right_source.get("bbox"),
+            "block_id": right.get("block_id"),
+        }
+    )
 
 
 def _is_caption_like_heading(block: Dict[str, Any]) -> bool:
@@ -331,8 +391,16 @@ def _is_near_figure_caption_region(
         return _is_caption_continuation(blocks[existing_caption_idxs[-1]], candidate)
     region = fbb
     page = _block_page(figure)
-    page_width = _page_coord_widths(blocks).get(page, _DEFAULT_PAGE_HEIGHT) if page is not None else _DEFAULT_PAGE_HEIGHT
-    page_height = _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT) if page is not None else _DEFAULT_PAGE_HEIGHT
+    page_width = (
+        _page_coord_widths(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+        if page is not None
+        else _DEFAULT_PAGE_HEIGHT
+    )
+    page_height = (
+        _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+        if page is not None
+        else _DEFAULT_PAGE_HEIGHT
+    )
     return (
         _is_right_side_caption(region, cbb)
         or _is_below_caption(region, cbb, page_width, page_height)
@@ -379,14 +447,24 @@ def _is_body_sized_text_after_completed_caption(
     return False
 
 
-def _is_body_paragraph_after_large_float(figure: Dict[str, Any], candidate: Dict[str, Any], blocks: List[Dict[str, Any]]) -> bool:
+def _is_body_paragraph_after_large_float(
+    figure: Dict[str, Any], candidate: Dict[str, Any], blocks: List[Dict[str, Any]]
+) -> bool:
     fbb = _bbox(figure)
     cbb = _bbox(candidate)
     if not fbb or not cbb:
         return False
     page = _block_page(figure)
-    page_width = _page_coord_widths(blocks).get(page, _DEFAULT_PAGE_HEIGHT) if page is not None else _DEFAULT_PAGE_HEIGHT
-    page_height = _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT) if page is not None else _DEFAULT_PAGE_HEIGHT
+    page_width = (
+        _page_coord_widths(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+        if page is not None
+        else _DEFAULT_PAGE_HEIGHT
+    )
+    page_height = (
+        _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+        if page is not None
+        else _DEFAULT_PAGE_HEIGHT
+    )
     figure_width = float(fbb[2]) - float(fbb[0])
     figure_height = float(fbb[3]) - float(fbb[1])
     candidate_width = float(cbb[2]) - float(cbb[0])
@@ -420,4 +498,8 @@ def _is_below_caption_heading(region: BBox, cbb: BBox) -> bool:
     horizontal_overlap = min(float(region[2]), float(cbb[2])) - max(float(region[0]), float(cbb[0]))
     region_width = max(1.0, float(region[2]) - float(region[0]))
     left_aligned_near_region = abs(float(cbb[0]) - float(region[0])) <= 85.0
-    return -15.0 <= gap <= 90.0 and (horizontal_overlap >= region_width * 0.10 or region_width <= 280.0 or left_aligned_near_region)
+    return -15.0 <= gap <= 90.0 and (
+        horizontal_overlap >= region_width * 0.10
+        or region_width <= 280.0
+        or left_aligned_near_region
+    )

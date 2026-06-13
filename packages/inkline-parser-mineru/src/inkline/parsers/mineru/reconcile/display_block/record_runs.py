@@ -6,19 +6,24 @@ from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
 from ...schema.block_types import DISPLAY_BLOCK, PARAGRAPH
-from ..constants import FLOAT_LIKE_TYPES
-from ..block_access import block_page as _block_page, block_pages as _block_pages
-from ..layout_helpers import _is_near_page_bottom, _is_near_page_top, _page_coord_heights
+from ..block_access import block_page as _block_page
+from ..block_access import block_pages as _block_pages
 from ..block_nav import _prev_text_non_float
+from ..constants import FLOAT_LIKE_TYPES
+from ..layout_helpers import _is_near_page_bottom, _is_near_page_top, _page_coord_heights
 from .helpers import is_era_month_header, looks_like_record_display_text, merge_display_block_run
 
 
-def reconcile_record_style_display_block_runs(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_record_style_display_block_runs(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     page_heights = _page_coord_heights(blocks)
     i = 0
     while i < len(blocks):
         cur = blocks[i]
-        if cur.get("type") != DISPLAY_BLOCK or not looks_like_record_display_text(cur.get("text", "")):
+        if cur.get("type") != DISPLAY_BLOCK or not looks_like_record_display_text(
+            cur.get("text", "")
+        ):
             i += 1
             continue
         end = i + 1
@@ -36,7 +41,10 @@ def reconcile_record_style_display_block_runs(blocks: List[Dict[str, Any]], layo
             np = _block_page(nxt)
             if cp is None or np is None or np != cp + 1:
                 break
-            if not (_is_near_page_bottom(blocks[end - 1], page_heights) or _is_near_page_top(nxt, page_heights)):
+            if not (
+                _is_near_page_bottom(blocks[end - 1], page_heights)
+                or _is_near_page_top(nxt, page_heights)
+            ):
                 break
             end += 1
         if end > i + 1:

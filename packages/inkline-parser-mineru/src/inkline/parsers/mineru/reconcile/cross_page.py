@@ -1,24 +1,33 @@
 """Cross-page paragraph merging. Merges logical paragraphs split across page boundaries or interrupted by full-page floats. Uses PDF text-layer line metrics and rendered image analysis to detect continuation via first-line indent patterns. Contains _PdfLineExtractor and merge_cross_page_paragraphs()."""
 
 from __future__ import annotations
+
 from pathlib import Path
 from statistics import median
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..analysis.layout import LayoutStats
 from ..analysis.pdf_page_metrics import PdfPageCache, line_bands
+from ..extraction.text import chinese_len, normalize_ws
 from ..schema.block_types import DISPLAY_BLOCK, FOOTNOTE, HEADING, PARAGRAPH, TABLE
 from ..schema.models import BBox
-from ..extraction.text import chinese_len, normalize_ws
+from .block_access import block_bbox as _bbox
+from .block_access import block_page as _block_page
+from .block_access import block_pages as _block_pages
+from .block_merge import _merge_block_pair
 from .constants import (
-    FLOAT_LIKE_TYPES, MERGEABLE_TEXT_TYPES, _DEFAULT_PAGE_HEIGHT,
+    _DEFAULT_PAGE_HEIGHT,
     _NEAR_PAGE_BOTTOM_RATIO,
+    FLOAT_LIKE_TYPES,
+    MERGEABLE_TEXT_TYPES,
 )
-from .block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
-from .block_merge import _join_text, _merge_block_pair
 from .layout_helpers import (
-    _display_block_layout, _ends_with_terminal, _is_near_page_bottom,
-    _is_near_page_top, _page_coord_heights, _page_coord_widths,
+    _display_block_layout,
+    _ends_with_terminal,
+    _is_near_page_bottom,
+    _is_near_page_top,
+    _page_coord_heights,
+    _page_coord_widths,
 )
 from .notes.keys import leading_note_marker as _leading_note_marker
 from .notes.marker_inline import _note_refs
@@ -39,6 +48,7 @@ _MAX_CHAR_WIDTH = 18.0
 _FOOTNOTE_GAP_MAX_PX = 95.0
 _FOOTNOTE_GAP_RATIO = 0.095
 
+
 def resolve_source_pdf_path(pdf_path: Optional[str], allow_missing: bool = False) -> Optional[str]:
     """Resolve --source-pdf robustly and fail loudly when requested PDF is unavailable."""
     if not pdf_path:
@@ -49,7 +59,7 @@ def resolve_source_pdf_path(pdf_path: Optional[str], allow_missing: bool = False
     if not raw.is_absolute():
         candidates.append(Path.cwd() / raw)
         candidates.append(Path.cwd() / raw.name)
-        candidates.append(Path('/mnt/data') / raw.name)
+        candidates.append(Path("/mnt/data") / raw.name)
     # de-duplicate while preserving order
     seen = set()
     uniq: List[Path] = []
@@ -70,6 +80,7 @@ def resolve_source_pdf_path(pdf_path: Optional[str], allow_missing: bool = False
         return None
     raise FileNotFoundError(msg)
 
+
 class _PdfLineExtractor:
     def __init__(
         self,
@@ -81,7 +92,9 @@ class _PdfLineExtractor:
         sizes: Dict[int, Tuple[float, float]] = {}
         for p in set(page_widths) | set(page_heights):
             sizes[p] = (page_widths.get(p, 1000.0), page_heights.get(p, 1000.0))
-        self._cache = PdfPageCache(pdf_path, sizes, render_zoom=2.0, allow_missing=allow_missing_pdf_text)
+        self._cache = PdfPageCache(
+            pdf_path, sizes, render_zoom=2.0, allow_missing=allow_missing_pdf_text
+        )
 
     def close(self) -> None:
         self._cache.close()
@@ -121,7 +134,7 @@ class _PdfLineExtractor:
         xs = [it[0][0] for it in selected]
         widths = [max(1.0, it[0][2] - it[0][0]) for it in selected]
         char_widths = []
-        for (lbb, txt), w in zip(selected, widths):
+        for (_lbb, txt), w in zip(selected, widths, strict=True):
             clen = max(1, chinese_len(txt))
             if clen >= 5:
                 char_widths.append(w / clen)
@@ -165,8 +178,7 @@ class _PdfLineExtractor:
         data = list(crop.getdata())
         threshold = 225
         row_counts = [
-            sum(1 for val in data[y * w : (y + 1) * w] if val < threshold)
-            for y in range(h)
+            sum(1 for val in data[y * w : (y + 1) * w] if val < threshold) for y in range(h)
         ]
         min_row_pixels = max(3, int(w * 0.004))
         bands = self._line_bands(row_counts, min_row_pixels)
@@ -208,7 +220,9 @@ class _PdfLineExtractor:
         }
 
 
-def _next_same_page_text_block(blocks: List[Dict[str, Any]], start: int, page: int) -> Optional[Dict[str, Any]]:
+def _next_same_page_text_block(
+    blocks: List[Dict[str, Any]], start: int, page: int
+) -> Optional[Dict[str, Any]]:
     for k in range(start, len(blocks)):
         b = blocks[k]
         if _block_page(b) != page:
@@ -230,7 +244,9 @@ def _is_cross_page_interruption(b: Dict[str, Any]) -> bool:
     return b.get("type") == FOOTNOTE
 
 
-def _starts_after_next_page_float(right: Dict[str, Any], interruptions: List[Dict[str, Any]], page_heights: Dict[int, float]) -> bool:
+def _starts_after_next_page_float(
+    right: Dict[str, Any], interruptions: List[Dict[str, Any]], page_heights: Dict[int, float]
+) -> bool:
     rp = _block_page(right)
     rbb = _bbox(right)
     if rp is None or not rbb:
@@ -238,7 +254,9 @@ def _starts_after_next_page_float(right: Dict[str, Any], interruptions: List[Dic
     float_boxes = [
         x.get("bbox")
         for x in interruptions
-        if x.get("page") == rp and x.get("type") in FLOAT_INTERRUPTION_TYPES and isinstance(x.get("bbox"), list)
+        if x.get("page") == rp
+        and x.get("type") in FLOAT_INTERRUPTION_TYPES
+        and isinstance(x.get("bbox"), list)
     ]
     if not float_boxes:
         return False
@@ -254,12 +272,16 @@ def _looks_like_body_resumption(block: Dict[str, Any], layout: LayoutStats) -> b
         return False
     x0, _y0, x1, _y1 = [float(v) for v in bb]
     width = max(0.0, x1 - x0)
-    near_body_left = x0 <= layout.body_left + max(_BODY_INDENT_MAX_PX, layout.body_width * _BODY_INDENT_RATIO)
+    near_body_left = x0 <= layout.body_left + max(
+        _BODY_INDENT_MAX_PX, layout.body_width * _BODY_INDENT_RATIO
+    )
     body_width = width >= layout.body_width * _BODY_WIDTH_RATIO
     return near_body_left and body_width
 
 
-def _left_refs_interrupted_footnote(left: Dict[str, Any], interruptions: List[Dict[str, Any]]) -> bool:
+def _left_refs_interrupted_footnote(
+    left: Dict[str, Any], interruptions: List[Dict[str, Any]]
+) -> bool:
     ref_markers = {
         str(ref.get("marker", "")).strip()
         for ref in _note_refs(left)
@@ -296,10 +318,16 @@ def _is_short_page_bottom_line(b: Dict[str, Any], page_heights: Dict[int, float]
     h = page_heights.get(p, _DEFAULT_PAGE_HEIGHT)
     line_height = float(bb[3]) - float(bb[1])
     text = normalize_ws(str(b.get("text", "")))
-    return float(bb[3]) >= h * 0.78 and line_height <= max(_SHORT_LINE_MAX_HEIGHT, h * _SHORT_LINE_HEIGHT_RATIO) and len(text) <= _SHORT_LINE_MAX_LEN
+    return (
+        float(bb[3]) >= h * 0.78
+        and line_height <= max(_SHORT_LINE_MAX_HEIGHT, h * _SHORT_LINE_HEIGHT_RATIO)
+        and len(text) <= _SHORT_LINE_MAX_LEN
+    )
 
 
-def _can_end_body_before_page_footnotes(blocks: List[Dict[str, Any]], idx: int, page_heights: Dict[int, float]) -> bool:
+def _can_end_body_before_page_footnotes(
+    blocks: List[Dict[str, Any]], idx: int, page_heights: Dict[int, float]
+) -> bool:
     left = blocks[idx]
     lp = _block_page(left)
     lbb = _bbox(left)
@@ -345,10 +373,17 @@ def _can_end_body_before_page_footnotes(blocks: List[Dict[str, Any]], idx: int, 
     first_top = min(float(bb[1]) for bb in footnote_boxes)
     last_bottom = max(float(bb[3]) for bb in footnote_boxes)
     gap = first_top - float(lbb[3])
-    return 0 <= gap <= max(_FOOTNOTE_GAP_MAX_PX, h * _FOOTNOTE_GAP_RATIO) and last_bottom >= h * _NEAR_PAGE_BOTTOM_RATIO
+    return (
+        0 <= gap <= max(_FOOTNOTE_GAP_MAX_PX, h * _FOOTNOTE_GAP_RATIO)
+        and last_bottom >= h * _NEAR_PAGE_BOTTOM_RATIO
+    )
 
 
-def _indent_says_continuation(right: Dict[str, Any], next_same_page: Optional[Dict[str, Any]], line_extractor: _PdfLineExtractor) -> Tuple[bool, Dict[str, Any]]:
+def _indent_says_continuation(
+    right: Dict[str, Any],
+    next_same_page: Optional[Dict[str, Any]],
+    line_extractor: _PdfLineExtractor,
+) -> Tuple[bool, Dict[str, Any]]:
     evidence: Dict[str, Any] = {}
     if next_same_page is None:
         return False, evidence
@@ -359,13 +394,19 @@ def _indent_says_continuation(right: Dict[str, Any], next_same_page: Optional[Di
     if nmet:
         evidence["next_first_line_metrics"] = nmet
     if rmet and nmet:
-        char_w = max(6.0, min(float(rmet.get("char_width", 10.0)), float(nmet.get("char_width", 10.0))))
+        char_w = max(
+            6.0, min(float(rmet.get("char_width", 10.0)), float(nmet.get("char_width", 10.0)))
+        )
         right_indent = abs(float(rmet.get("first_line_indent", 0.0)))
         next_indent = float(nmet.get("first_line_indent", 0.0))
         delta_first_x = float(nmet.get("first_line_x", 0.0)) - float(rmet.get("first_line_x", 0.0))
         evidence["indent_delta_chars"] = round(delta_first_x / char_w, 3) if char_w else None
         next_is_single_line = int(nmet.get("line_count", 0)) == 1
-        ok = right_indent <= char_w * 0.65 and delta_first_x >= char_w * 1.15 and (next_indent >= char_w * 1.15 or next_is_single_line)
+        ok = (
+            right_indent <= char_w * 0.65
+            and delta_first_x >= char_w * 1.15
+            and (next_indent >= char_w * 1.15 or next_is_single_line)
+        )
         return ok, evidence
     # Fallback when PDF text line extraction fails.
     rbb = _bbox(right)
@@ -377,7 +418,9 @@ def _indent_says_continuation(right: Dict[str, Any], next_same_page: Optional[Di
     return False, evidence
 
 
-def _collect_interruptions(blocks: List[Dict[str, Any]], start: int, left_page: int) -> Tuple[int, List[Dict[str, Any]]]:
+def _collect_interruptions(
+    blocks: List[Dict[str, Any]], start: int, left_page: int
+) -> Tuple[int, List[Dict[str, Any]]]:
     j = start
     interruptions: List[Dict[str, Any]] = []
     while j < len(blocks) and _is_cross_page_interruption(blocks[j]):
@@ -386,20 +429,29 @@ def _collect_interruptions(blocks: List[Dict[str, Any]], start: int, left_page: 
             j += 1
             continue
         if bp is not None and bp >= left_page:
-            interruptions.append({
-                "page": bp,
-                "bbox": _bbox(blocks[j]),
-                "block_id": blocks[j].get("block_id"),
-                "type": blocks[j].get("type"),
-                "_note_marker": _leading_note_marker(str(blocks[j].get("text", ""))) if blocks[j].get("type") == FOOTNOTE else None,
-            })
+            interruptions.append(
+                {
+                    "page": bp,
+                    "bbox": _bbox(blocks[j]),
+                    "block_id": blocks[j].get("block_id"),
+                    "type": blocks[j].get("type"),
+                    "_note_marker": _leading_note_marker(str(blocks[j].get("text", "")))
+                    if blocks[j].get("type") == FOOTNOTE
+                    else None,
+                }
+            )
             j += 1
             continue
         break
     return j, interruptions
 
 
-def merge_cross_page_paragraphs(blocks: List[Dict[str, Any]], source_pdf: Optional[str], layout: Optional[LayoutStats] = None, allow_missing_pdf_text: bool = False) -> None:
+def merge_cross_page_paragraphs(
+    blocks: List[Dict[str, Any]],
+    source_pdf: Optional[str],
+    layout: Optional[LayoutStats] = None,
+    allow_missing_pdf_text: bool = False,
+) -> None:
     """Merge logical paragraphs split by page boundaries or full-page floats.
 
     This pass deliberately runs after page-local classification. It fixes cases
@@ -411,7 +463,9 @@ def merge_cross_page_paragraphs(blocks: List[Dict[str, Any]], source_pdf: Option
     """
     page_heights = _page_coord_heights(blocks)
     page_widths = _page_coord_widths(blocks)
-    line_extractor = _PdfLineExtractor(source_pdf, page_widths, page_heights, allow_missing_pdf_text=allow_missing_pdf_text)
+    line_extractor = _PdfLineExtractor(
+        source_pdf, page_widths, page_heights, allow_missing_pdf_text=allow_missing_pdf_text
+    )
     try:
         i = 0
         while i < len(blocks):
@@ -427,7 +481,9 @@ def merge_cross_page_paragraphs(blocks: List[Dict[str, Any]], source_pdf: Option
                 i += 1
                 continue
             left_page = max(lp_list)
-            if not _is_near_page_bottom(left, page_heights) and not _can_end_body_before_page_footnotes(blocks, i, page_heights):
+            if not _is_near_page_bottom(
+                left, page_heights
+            ) and not _can_end_body_before_page_footnotes(blocks, i, page_heights):
                 i += 1
                 continue
             j, interruptions = _collect_interruptions(blocks, i + 1, left_page)
@@ -450,15 +506,23 @@ def merge_cross_page_paragraphs(blocks: List[Dict[str, Any]], source_pdf: Option
             if left.get("type") == PARAGRAPH and right.get("type") == DISPLAY_BLOCK:
                 i += 1
                 continue
-            if left.get("type") == DISPLAY_BLOCK and right.get("type") == PARAGRAPH:
-                if layout is not None and not _display_block_layout(right, layout):
-                    i += 1
-                    continue
+            if (
+                left.get("type") == DISPLAY_BLOCK
+                and right.get("type") == PARAGRAPH
+                and layout is not None
+                and not _display_block_layout(right, layout)
+            ):
+                i += 1
+                continue
             display_like = left.get("type") == DISPLAY_BLOCK
-            if display_like and right.get("type") == PARAGRAPH:
-                if layout is not None and not _display_block_layout(right, layout):
-                    i += 1
-                    continue
+            if (
+                display_like
+                and right.get("type") == PARAGRAPH
+                and layout is not None
+                and not _display_block_layout(right, layout)
+            ):
+                i += 1
+                continue
             rp = _block_page(right)
             if rp is None or rp <= left_page:
                 i += 1
@@ -500,29 +564,36 @@ def merge_cross_page_paragraphs(blocks: List[Dict[str, Any]], source_pdf: Option
                 if indent_ok:
                     should_merge = True
                     reason = "cross_page_paragraph_continuation_after_terminal_by_indent"
-                    evidence["terminal_continuation_exception"] = "right_unindented_vs_next_paragraph_first_line_indent"
+                    evidence["terminal_continuation_exception"] = (
+                        "right_unindented_vs_next_paragraph_first_line_indent"
+                    )
                 elif starts_after_float and _is_short_page_bottom_line(left, page_heights):
                     should_merge = True
                     reason = "cross_page_paragraph_continuation_after_terminal_across_float"
-                    evidence["terminal_continuation_exception"] = "short_page_bottom_line_before_next_page_float"
+                    evidence["terminal_continuation_exception"] = (
+                        "short_page_bottom_line_before_next_page_float"
+                    )
                 elif (
                     not _note_refs(right)
                     and _right_layout_says_unindented_continuation(evidence)
-                    and _left_refs_interrupted_footnote(
-                        left, interruptions
-                    )
+                    and _left_refs_interrupted_footnote(left, interruptions)
                 ):
                     should_merge = True
                     reason = "cross_page_paragraph_continuation_after_terminal_across_referenced_footnote"
-                    evidence["terminal_continuation_exception"] = "left_note_ref_matches_interrupted_footnote"
+                    evidence["terminal_continuation_exception"] = (
+                        "left_note_ref_matches_interrupted_footnote"
+                    )
             if not should_merge:
                 i += 1
                 continue
-            stored_interruptions = [{k: v for k, v in item.items() if not k.startswith("_") and v is not None} for item in interruptions]
+            stored_interruptions = [
+                {k: v for k, v in item.items() if not k.startswith("_") and v is not None}
+                for item in interruptions
+            ]
             _merge_block_pair(left, right, reason, evidence, stored_interruptions)
             # Remove right block. Keep any skipped float blocks in document order.
             del blocks[j]
             # Try merging the enlarged left with a further continuation.
-        
+
     finally:
         line_extractor.close()

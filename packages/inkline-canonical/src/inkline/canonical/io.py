@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable, Mapping, Any
+from typing import Any, Iterable, Mapping
 
 from inkline.canonical.schema import migrate_document, validate_document
 
@@ -14,7 +14,9 @@ def read_json(path: str | Path) -> dict[str, Any]:
 def write_json(path: str | Path, payload: Mapping[str, Any]) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(dict(payload), ensure_ascii=False, indent=2), encoding="utf-8")
+    output_path.write_text(
+        json.dumps(dict(payload), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def read_canonical(path: str | Path) -> dict[str, Any]:

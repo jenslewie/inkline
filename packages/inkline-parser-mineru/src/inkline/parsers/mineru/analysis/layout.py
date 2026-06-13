@@ -8,13 +8,16 @@ both the canonical page-processing pipeline and the reconciliation passes.
 from __future__ import annotations
 
 from statistics import median
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
+from ..extraction.text import block_text
 from ..schema.models import LayoutStats, RawBlock
 from ..schema.patterns import ATTR_RE
-from ..extraction.text import block_text
 
-def infer_layout_stats(pages: Dict[int, List[RawBlock]], page_sizes: Dict[int, Tuple[float, float]]) -> LayoutStats:
+
+def infer_layout_stats(
+    pages: Dict[int, List[RawBlock]], page_sizes: Dict[int, Tuple[float, float]]
+) -> LayoutStats:
     widths = [w for w, h in page_sizes.values() if w]
     heights = [h for w, h in page_sizes.values() if h]
     page_width = median(widths) if widths else 1000.0
@@ -37,7 +40,9 @@ def infer_layout_stats(pages: Dict[int, List[RawBlock]], page_sizes: Dict[int, T
                 x1s.append(b.x1)
     body_left = median(x0s) if x0s else page_width * 0.13
     body_right = median(x1s) if x1s else page_width * 0.88
-    return LayoutStats(page_width=page_width, page_height=page_height, body_left=body_left, body_right=body_right)
+    return LayoutStats(
+        page_width=page_width, page_height=page_height, body_left=body_left, body_right=body_right
+    )
 
 
 def is_short_or_indented(b: RawBlock, layout: LayoutStats) -> bool:
@@ -59,7 +64,9 @@ def is_display_block_layout_raw(b: RawBlock, layout: LayoutStats) -> bool:
 
 
 def is_right_aligned_short(b: RawBlock, layout: LayoutStats) -> bool:
-    return bool(b.bbox and len(block_text(b)) <= 20 and b.x0 > layout.body_left + layout.body_width * 0.65)
+    return bool(
+        b.bbox and len(block_text(b)) <= 20 and b.x0 > layout.body_left + layout.body_width * 0.65
+    )
 
 
 def page_has_images(blocks: Sequence[RawBlock]) -> bool:
@@ -68,8 +75,10 @@ def page_has_images(blocks: Sequence[RawBlock]) -> bool:
 
 def is_full_page_image_page(blocks: Sequence[RawBlock], layout: LayoutStats) -> bool:
     content = [
-        b for b in blocks
-        if b.raw_type not in {"page_number", "page_header", "page_footer"} and (block_text(b) or b.raw_type in {"image", "table"})
+        b
+        for b in blocks
+        if b.raw_type not in {"page_number", "page_header", "page_footer"}
+        and (block_text(b) or b.raw_type in {"image", "table"})
     ]
     images = [b for b in content if b.raw_type == "image" and b.bbox]
     if len(images) != 1:
@@ -104,13 +113,22 @@ def is_full_page_image_page(blocks: Sequence[RawBlock], layout: LayoutStats) -> 
 
 
 def is_title_only_page(blocks: Sequence[RawBlock]) -> bool:
-    content = [b for b in blocks if b.raw_type not in {"page_number", "page_header", "page_footer"} and (block_text(b) or b.raw_type in {"image", "table"})]
+    content = [
+        b
+        for b in blocks
+        if b.raw_type not in {"page_number", "page_header", "page_footer"}
+        and (block_text(b) or b.raw_type in {"image", "table"})
+    ]
     if not content:
         return False
     if all(b.raw_type == "title" for b in content) and len(content) <= 3:
         return True
     textual = [b for b in content if b.raw_type in {"paragraph", "title"} and block_text(b)]
-    if len(textual) != len(content) or len(textual) > 4 or not any(b.raw_type == "title" for b in textual):
+    if (
+        len(textual) != len(content)
+        or len(textual) > 4
+        or not any(b.raw_type == "title" for b in textual)
+    ):
         return False
     return all(len(block_text(b)) <= 24 for b in textual)
 

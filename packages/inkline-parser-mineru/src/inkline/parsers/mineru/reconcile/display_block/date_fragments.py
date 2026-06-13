@@ -7,16 +7,21 @@ from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
 from ...schema.block_types import DISPLAY_BLOCK, PARAGRAPH
-from .cjk_numbered import _is_cjk_numbered_item_block
-from ..block_access import block_bbox as _bbox, block_page as _block_page
+from ..block_access import block_page as _block_page
 from ..block_merge import _merge_block_pair
 from ..layout_helpers import (
-    _display_block_layout, _ends_with_terminal,
-    _is_near_page_bottom, _is_near_page_top, _page_coord_heights,
+    _display_block_layout,
+    _ends_with_terminal,
+    _is_near_page_bottom,
+    _is_near_page_top,
+    _page_coord_heights,
 )
+from .cjk_numbered import _is_cjk_numbered_item_block
 
 
-def reconcile_false_short_date_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_false_short_date_display_blocks(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     for b in blocks:
         if b.get("type") != DISPLAY_BLOCK:
             continue
@@ -25,12 +30,22 @@ def reconcile_false_short_date_display_blocks(blocks: List[Dict[str, Any]], layo
             b["type"] = PARAGRAPH
             b.pop("level", None)
             attrs = b.setdefault("attrs", {})
-            for k in ["role", "content_form", "content_form_confidence", "content_form_scores", "classification_evidence", "quote_text", "attribution"]:
+            for k in [
+                "role",
+                "content_form",
+                "content_form_confidence",
+                "content_form_scores",
+                "classification_evidence",
+                "quote_text",
+                "attribution",
+            ]:
                 attrs.pop(k, None)
             attrs["demoted_reason"] = "short_date_start_prose_fragment_not_display_block"
 
 
-def reconcile_demoted_date_start_cross_page_paragraphs(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_demoted_date_start_cross_page_paragraphs(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     page_heights = _page_coord_heights(blocks)
     i = 0
     while i + 1 < len(blocks):
@@ -67,7 +82,9 @@ def reconcile_demoted_date_start_cross_page_paragraphs(blocks: List[Dict[str, An
         continue
 
 
-def reconcile_date_start_cross_page_paragraph_attrs(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_date_start_cross_page_paragraph_attrs(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     for b in blocks:
         if b.get("type") != PARAGRAPH:
             continue
@@ -87,7 +104,11 @@ def reconcile_date_start_cross_page_paragraph_attrs(blocks: List[Dict[str, Any]]
             continue
         first_height = float(first_bbox[3]) - float(first_bbox[1])
         next_height = float(next_bbox[3]) - float(next_bbox[1])
-        if first_height > 28 or float(first_bbox[1]) < layout.page_height * 0.85 or next_height < 180:
+        if (
+            first_height > 28
+            or float(first_bbox[1]) < layout.page_height * 0.85
+            or next_height < 180
+        ):
             continue
         attrs = b.get("attrs") or {}
         if attrs.get("merge_reason") != "cross_page_paragraph_continuation":

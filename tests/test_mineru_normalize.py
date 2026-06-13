@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 
+import inkline.parsers.mineru.bridge as mineru_bridge
 from inkline.canonical import BLOCK_TYPES, validate_document
 from inkline.llm import DEFAULT_QWEN_MODEL
 from inkline.parse import ParseRequest
 from inkline.parsers.mineru import normalize_mineru_outputs
-import inkline.parsers.mineru.bridge as mineru_bridge
 from inkline.parsers.mineru.bridge import MinerUParser
 
 
@@ -108,27 +108,71 @@ def test_snapshot_front_matter_does_not_replace_following_body_text_page(tmp_pat
                     _text_item("title", "THE SILK ROAD", [30, 482, 117, 863]),
                     _image_item([120, 120, 920, 900]),
                     _text_item("title", "丝绸之路新史", [450, 110, 620, 150]),
-                    {"type": "page_header", "content": {"page_header_content": [{"type": "text", "content": "header"}]}, "bbox": [1, 1, 50, 20]},
-                    {"type": "page_footer", "content": {"page_footer_content": [{"type": "text", "content": "footer"}]}, "bbox": [1, 940, 50, 960]},
-                    {"type": "page_footer", "content": {"page_footer_content": [{"type": "text", "content": "footer"}]}, "bbox": [60, 940, 110, 960]},
-                    {"type": "page_footer", "content": {"page_footer_content": [{"type": "text", "content": "footer"}]}, "bbox": [120, 940, 170, 960]},
+                    {
+                        "type": "page_header",
+                        "content": {"page_header_content": [{"type": "text", "content": "header"}]},
+                        "bbox": [1, 1, 50, 20],
+                    },
+                    {
+                        "type": "page_footer",
+                        "content": {"page_footer_content": [{"type": "text", "content": "footer"}]},
+                        "bbox": [1, 940, 50, 960],
+                    },
+                    {
+                        "type": "page_footer",
+                        "content": {"page_footer_content": [{"type": "text", "content": "footer"}]},
+                        "bbox": [60, 940, 110, 960],
+                    },
+                    {
+                        "type": "page_footer",
+                        "content": {"page_footer_content": [{"type": "text", "content": "footer"}]},
+                        "bbox": [120, 940, 170, 960],
+                    },
                 ],
                 [
                     _text_item("title", "THE SILK ROAD", [120, 60, 300, 90]),
                     _text_item("paragraph", "这是一段推荐语。" * 20, [110, 120, 900, 260]),
                     _image_item([100, 700, 900, 940]),
-                    {"type": "page_footer", "content": {"page_footer_content": [{"type": "text", "content": "footer"}]}, "bbox": [1, 940, 50, 960]},
-                    {"type": "page_footer", "content": {"page_footer_content": [{"type": "text", "content": "footer"}]}, "bbox": [60, 940, 110, 960]},
-                    {"type": "page_footer", "content": {"page_footer_content": [{"type": "text", "content": "footer"}]}, "bbox": [120, 940, 170, 960]},
-                    {"type": "page_footer", "content": {"page_footer_content": [{"type": "text", "content": "footer"}]}, "bbox": [180, 940, 230, 960]},
+                    {
+                        "type": "page_footer",
+                        "content": {"page_footer_content": [{"type": "text", "content": "footer"}]},
+                        "bbox": [1, 940, 50, 960],
+                    },
+                    {
+                        "type": "page_footer",
+                        "content": {"page_footer_content": [{"type": "text", "content": "footer"}]},
+                        "bbox": [60, 940, 110, 960],
+                    },
+                    {
+                        "type": "page_footer",
+                        "content": {"page_footer_content": [{"type": "text", "content": "footer"}]},
+                        "bbox": [120, 940, 170, 960],
+                    },
+                    {
+                        "type": "page_footer",
+                        "content": {"page_footer_content": [{"type": "text", "content": "footer"}]},
+                        "bbox": [180, 940, 230, 960],
+                    },
                 ],
                 [
                     _text_item("paragraph", "（美）芮乐伟·韩森著 张湛译", [700, 60, 920, 90]),
                     _text_item("title", "丝绸之路新史", [720, 100, 920, 140]),
                     _text_item("paragraph", "北京联合出版公司", [720, 850, 920, 880]),
-                    {"type": "page_footer", "content": {"page_footer_content": [{"type": "text", "content": "footer"}]}, "bbox": [1, 940, 50, 960]},
-                    {"type": "page_footer", "content": {"page_footer_content": [{"type": "text", "content": "footer"}]}, "bbox": [60, 940, 110, 960]},
-                    {"type": "page_footer", "content": {"page_footer_content": [{"type": "text", "content": "footer"}]}, "bbox": [120, 940, 170, 960]},
+                    {
+                        "type": "page_footer",
+                        "content": {"page_footer_content": [{"type": "text", "content": "footer"}]},
+                        "bbox": [1, 940, 50, 960],
+                    },
+                    {
+                        "type": "page_footer",
+                        "content": {"page_footer_content": [{"type": "text", "content": "footer"}]},
+                        "bbox": [60, 940, 110, 960],
+                    },
+                    {
+                        "type": "page_footer",
+                        "content": {"page_footer_content": [{"type": "text", "content": "footer"}]},
+                        "bbox": [120, 940, 170, 960],
+                    },
                 ],
                 [
                     _text_item("title", "图书在版编目（CIP）数据", [105, 72, 400, 96]),
@@ -154,18 +198,28 @@ def test_snapshot_front_matter_does_not_replace_following_body_text_page(tmp_pat
                     _text_item("paragraph", long_1, [119, 281, 896, 537]),
                     _text_item("paragraph", long_2, [118, 544, 893, 741]),
                     _text_item("paragraph", long_3, [118, 748, 893, 917]),
-                    {"type": "page_number", "content": {"page_number_content": [{"type": "text", "content": "1"}]}, "bbox": [877, 948, 888, 959]},
+                    {
+                        "type": "page_number",
+                        "content": {"page_number_content": [{"type": "text", "content": "1"}]},
+                        "bbox": [877, 948, 888, 959],
+                    },
                 ],
                 [
                     _text_item("title", "第一章 起点", [420, 184, 610, 211]),
                     _text_item("paragraph", "这是第一章的正文。" * 20, [119, 281, 896, 537]),
-                    {"type": "page_number", "content": {"page_number_content": [{"type": "text", "content": "2"}]}, "bbox": [877, 948, 888, 959]},
+                    {
+                        "type": "page_number",
+                        "content": {"page_number_content": [{"type": "text", "content": "2"}]},
+                        "bbox": [877, 948, 888, 959],
+                    },
                 ],
             ]
         ),
         encoding="utf-8",
     )
-    middle.write_text(json.dumps({"pdf_info": [{"page_size": [1418, 2092]} for _ in range(6)]}), encoding="utf-8")
+    middle.write_text(
+        json.dumps({"pdf_info": [{"page_size": [1418, 2092]} for _ in range(6)]}), encoding="utf-8"
+    )
 
     document = normalize_mineru_outputs(
         content_list_v2=content_list_v2,
@@ -178,8 +232,15 @@ def test_snapshot_front_matter_does_not_replace_following_body_text_page(tmp_pat
         language="zh-CN",
     )
 
-    page5_blocks = [block for block in document["blocks"] if (block.get("source") or {}).get("page") == 5]
-    assert [block["type"] for block in page5_blocks] == ["heading", "paragraph", "paragraph", "paragraph"]
+    page5_blocks = [
+        block for block in document["blocks"] if (block.get("source") or {}).get("page") == 5
+    ]
+    assert [block["type"] for block in page5_blocks] == [
+        "heading",
+        "paragraph",
+        "paragraph",
+        "paragraph",
+    ]
     assert page5_blocks[0]["text"] == "中文版序言"
     assert all(block["type"] != "figure" for block in page5_blocks)
     assert document["pages"][0]["page_role"] == "cover"
@@ -192,7 +253,9 @@ def test_chart_and_diagram_snapshot_pages_keep_visual_content_blocks(tmp_path) -
     content_list_v2 = tmp_path / "sample_content_list_v2.json"
     middle = tmp_path / "sample_middle.json"
     output = tmp_path / "canonical.json"
-    chart_text = "| Region | Start Year | End Year |\n| :--- | :--- | :--- |\n| 尼雅 | 200 BCE | 400 CE |"
+    chart_text = (
+        "| Region | Start Year | End Year |\n| :--- | :--- | :--- |\n| 尼雅 | 200 BCE | 400 CE |"
+    )
     diagram_page = [
         _text_item("paragraph", "600 CE", [83, 109, 161, 125]),
         _text_item("paragraph", "800 CE", [276, 109, 353, 125]),
@@ -229,7 +292,9 @@ def test_chart_and_diagram_snapshot_pages_keep_visual_content_blocks(tmp_path) -
         ),
         encoding="utf-8",
     )
-    middle.write_text(json.dumps({"pdf_info": [{"page_size": [1418, 2092]} for _ in range(2)]}), encoding="utf-8")
+    middle.write_text(
+        json.dumps({"pdf_info": [{"page_size": [1418, 2092]} for _ in range(2)]}), encoding="utf-8"
+    )
 
     document = normalize_mineru_outputs(
         content_list_v2=content_list_v2,
@@ -242,8 +307,12 @@ def test_chart_and_diagram_snapshot_pages_keep_visual_content_blocks(tmp_path) -
         language="zh-CN",
     )
 
-    assert any(block["type"] == "table" and block["text"] == chart_text for block in document["blocks"])
-    page2_blocks = [block for block in document["blocks"] if (block.get("source") or {}).get("page") == 2]
+    assert any(
+        block["type"] == "table" and block["text"] == chart_text for block in document["blocks"]
+    )
+    page2_blocks = [
+        block for block in document["blocks"] if (block.get("source") or {}).get("page") == 2
+    ]
     assert len(page2_blocks) == 1
     assert page2_blocks[0]["type"] == "figure"
     assert page2_blocks[0]["attrs"]["snapshot_role"] == "page_diagram"

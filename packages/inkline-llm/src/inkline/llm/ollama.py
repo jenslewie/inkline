@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import base64
 import json
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
-import urllib.error
-import urllib.request
-
 
 DEFAULT_QWEN_MODEL = "qwen3.6:35b-a3b"
 DEFAULT_OLLAMA_CHAT_URL = "http://127.0.0.1:11434/api/chat"
@@ -37,7 +36,9 @@ class OllamaChatConfig:
     )
 
 
-def vision_chat_json(image_path: str | Path, config: OllamaChatConfig, *, prompt: str) -> dict[str, Any]:
+def vision_chat_json(
+    image_path: str | Path, config: OllamaChatConfig, *, prompt: str
+) -> dict[str, Any]:
     image_b64 = base64.b64encode(Path(image_path).read_bytes()).decode("ascii")
     return chat_json(
         config,
@@ -119,7 +120,9 @@ def extract_json_value(text: str) -> Any:
 
 def _post_json(api_url: str, payload: dict[str, Any], *, timeout_seconds: int) -> dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(api_url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+    request = urllib.request.Request(
+        api_url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+    )
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             response_body = response.read().decode("utf-8")

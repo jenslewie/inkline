@@ -17,7 +17,9 @@ def load_docstore(path: str | Path) -> list[dict]:
     return rows
 
 
-def dense_search(index, docstore: list[dict], query_embedding: list[float], top_k: int) -> list[SearchResult]:
+def dense_search(
+    index, docstore: list[dict], query_embedding: list[float], top_k: int
+) -> list[SearchResult]:
     try:
         import numpy as np
     except ImportError as exc:
@@ -28,17 +30,21 @@ def dense_search(index, docstore: list[dict], query_embedding: list[float], top_
     if not query_embedding:
         raise ValueError("query_embedding must not be empty.")
     if index.ntotal != len(docstore):
-        raise ValueError(f"Index/docstore size mismatch: index={index.ntotal}, docstore={len(docstore)}.")
+        raise ValueError(
+            f"Index/docstore size mismatch: index={index.ntotal}, docstore={len(docstore)}."
+        )
 
     query = np.asarray([query_embedding], dtype="float32")
     if query.ndim != 2:
         raise ValueError("query_embedding must be a 1D vector.")
     if query.shape[1] != index.d:
-        raise ValueError(f"Query dimension {query.shape[1]} does not match index dimension {index.d}.")
+        raise ValueError(
+            f"Query dimension {query.shape[1]} does not match index dimension {index.d}."
+        )
 
     scores, vector_ids = index.search(query, min(top_k, index.ntotal))
     results: list[SearchResult] = []
-    for rank, (score, vector_id) in enumerate(zip(scores[0], vector_ids[0]), start=1):
+    for rank, (score, vector_id) in enumerate(zip(scores[0], vector_ids[0], strict=True), start=1):
         if vector_id < 0:
             continue
         row = docstore[int(vector_id)]

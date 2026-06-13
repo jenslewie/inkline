@@ -29,8 +29,7 @@ class ParseResult:
 @runtime_checkable
 class DocumentParser(Protocol):
     @property
-    def name(self) -> str:
-        ...
+    def name(self) -> str: ...
 
     def parse(self, request: ParseRequest) -> ParseResult:
         """Parse one source document into the canonical contract."""

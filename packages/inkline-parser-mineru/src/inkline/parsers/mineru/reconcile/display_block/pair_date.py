@@ -7,13 +7,17 @@ from typing import Any, Dict, List
 from ...analysis.layout import LayoutStats
 from ...schema.block_types import DISPLAY_BLOCK, PARAGRAPH
 from ...schema.patterns import ATTR_RE
-from ..constants import FLOAT_LIKE_TYPES
-from ..block_access import block_bbox as _bbox, block_page as _block_page
+from ..block_access import block_bbox as _bbox
+from ..block_access import block_page as _block_page
 from ..block_nav import _prev_text_non_float
+from ..constants import FLOAT_LIKE_TYPES
 from ..layout_helpers import _display_block_layout
 from .helpers import _is_era_month_header, _is_lunar_day_entry, merge_display_block_run
 
-def _reconcile_attribution_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+
+def _reconcile_attribution_display_blocks(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     """Merge a display block line followed by an attribution line.
 
     This is layout-based, not ID-based. Typical shape: a short/indented
@@ -52,7 +56,9 @@ def _reconcile_attribution_display_blocks(blocks: List[Dict[str, Any]], layout: 
         i += 1
 
 
-def _reconcile_diary_date_display_block_runs(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def _reconcile_diary_date_display_block_runs(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     """Merge dated diary/extract runs such as '癸巳年五月' + dated entries.
 
     These are source excerpts laid out as display text. Detection uses
@@ -63,7 +69,6 @@ def _reconcile_diary_date_display_block_runs(blocks: List[Dict[str, Any]], layou
         if blocks[i].get("type") in FLOAT_LIKE_TYPES:
             i += 1
             continue
-        text = str(blocks[i].get("text", "")).strip()
         if not _is_era_month_header(blocks[i], layout):
             i += 1
             continue
@@ -82,7 +87,6 @@ def _reconcile_diary_date_display_block_runs(blocks: List[Dict[str, Any]], layou
             if blocks[end].get("type") in FLOAT_LIKE_TYPES:
                 end += 1
                 continue
-            t = str(blocks[end].get("text", "")).strip()
             if _is_era_month_header(blocks[end], layout):
                 break
             if _is_lunar_day_entry(blocks[end], layout):
@@ -98,6 +102,8 @@ def _reconcile_diary_date_display_block_runs(blocks: List[Dict[str, Any]], layou
         )
 
 
-def reconcile_display_block_pair_and_date_structures(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_display_block_pair_and_date_structures(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     _reconcile_attribution_display_blocks(blocks, layout)
     _reconcile_diary_date_display_block_runs(blocks, layout)

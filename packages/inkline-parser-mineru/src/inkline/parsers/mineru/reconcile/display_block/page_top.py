@@ -7,11 +7,12 @@ from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
 from ...schema.block_types import FOOTNOTE, PARAGRAPH
+from ..block_access import block_bbox as _bbox
+from ..block_access import block_page as _block_page
+from ..block_nav import _prev_text_non_float
 from ..constants import FLOAT_LIKE_TYPES
-from ..block_access import block_bbox as _bbox, block_page as _block_page
 from ..layout_helpers import _is_near_page_top, _page_coord_heights
 from .helpers import force_generic_display_block_attrs
-from ..block_nav import _prev_text_non_float
 
 
 @dataclass(frozen=True)
@@ -34,7 +35,9 @@ class _PageTopSetOffDisplayDetector:
             return False
         return self._has_following_same_page_separation(blocks, idx, page, bb)
 
-    def _has_candidate_position_and_measure(self, cur: Dict[str, Any], text: str, bb: List[float]) -> bool:
+    def _has_candidate_position_and_measure(
+        self, cur: Dict[str, Any], text: str, bb: List[float]
+    ) -> bool:
         if not _is_near_page_top(cur, self.page_heights):
             return False
         if len(text) < 45 or len(text) > 220:
@@ -46,7 +49,9 @@ class _PageTopSetOffDisplayDetector:
             return False
         return width <= self.layout.body_width * 0.96
 
-    def _has_prior_same_page_content(self, blocks: List[Dict[str, Any]], idx: int, page: int, top: float) -> bool:
+    def _has_prior_same_page_content(
+        self, blocks: List[Dict[str, Any]], idx: int, page: int, top: float
+    ) -> bool:
         for j in range(idx - 1, -1, -1):
             prev = blocks[j]
             if prev.get("type") in FLOAT_LIKE_TYPES or prev.get("type") == FOOTNOTE:
@@ -71,7 +76,9 @@ class _PageTopSetOffDisplayDetector:
                 return True
         return False
 
-    def _has_following_same_page_separation(self, blocks: List[Dict[str, Any]], idx: int, page: int, bb: List[float]) -> bool:
+    def _has_following_same_page_separation(
+        self, blocks: List[Dict[str, Any]], idx: int, page: int, bb: List[float]
+    ) -> bool:
         block_height = float(bb[3]) - float(bb[1])
         min_gap = max(20.0, block_height * 0.30)
         for j in range(idx + 1, min(len(blocks), idx + 5)):
@@ -87,9 +94,13 @@ class _PageTopSetOffDisplayDetector:
         return False
 
 
-def reconcile_page_top_set_off_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_page_top_set_off_display_blocks(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     """Promote page-top paragraphs that are laid out as standalone display text."""
-    detector = _PageTopSetOffDisplayDetector(layout=layout, page_heights=_page_coord_heights(blocks))
+    detector = _PageTopSetOffDisplayDetector(
+        layout=layout, page_heights=_page_coord_heights(blocks)
+    )
     for i, cur in enumerate(blocks):
         if not detector.matches(blocks, i):
             continue

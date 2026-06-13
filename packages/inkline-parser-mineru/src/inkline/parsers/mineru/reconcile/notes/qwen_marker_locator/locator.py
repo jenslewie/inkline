@@ -20,20 +20,18 @@ monkeypatching the definition module namespace works correctly.
 
 from __future__ import annotations
 
-from copy import deepcopy
 import time
+from copy import deepcopy
 from dataclasses import replace
 from typing import Any, Callable, Dict, List, Sequence, cast
 
+from ....extraction.text import normalize_ws
+from ....schema.models import CanonicalBlock
 from . import api as qwen_api
 from . import evidence as qwen_evidence
 from . import page_plan as qwen_page_plan
 from . import prompt as qwen_prompt
 from . import types as qwen_types
-from ....extraction.text import normalize_ws
-from ....schema.models import CanonicalBlock
-
-
 
 QwenMarkerLocatorConfig = qwen_types.QwenMarkerLocatorConfig
 QwenMarkerPageEvidence = qwen_types.QwenMarkerPageEvidence
@@ -43,11 +41,15 @@ QwenMarkerPageEvidence = qwen_types.QwenMarkerPageEvidence
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def run_qwen_marker_locator_repairs(
     blocks: List[Dict[str, Any]],
     config: qwen_types.QwenMarkerLocatorConfig,
     *,
-    missing_body_ref_pages_after_page: Callable[[List[qwen_types.QwenMarkerPageEvidence]], Sequence[int]] | None = None,
+    missing_body_ref_pages_after_page: Callable[
+        [List[qwen_types.QwenMarkerPageEvidence]], Sequence[int]
+    ]
+    | None = None,
 ) -> List[qwen_types.QwenMarkerPageEvidence]:
     """Collect Qwen marker evidence and apply footnote-definition marker fixes.
 
@@ -67,7 +69,9 @@ def run_qwen_marker_locator_repairs(
     run_started, run_timer = _init_marker_locator_run(config, typed_blocks, pages, plan)
 
     # Initial evidence pass (page DPI or single block pass)
-    initial_config = _body_pass_config(config, "page" if config.body_mode == "page_then_block" else config.body_mode)
+    initial_config = _body_pass_config(
+        config, "page" if config.body_mode == "page_then_block" else config.body_mode
+    )
     evidence = qwen_evidence._collect_qwen_marker_evidence(
         typed_blocks,
         sorted(pages),
@@ -80,9 +84,13 @@ def run_qwen_marker_locator_repairs(
     apply_qwen_footnote_markers(typed_blocks, evidence)
 
     # Retry pass for pages still missing body refs
-    missing_pages = _missing_body_ref_pages(config, typed_blocks, plan, evidence, missing_body_ref_pages_after_page)
+    missing_pages = _missing_body_ref_pages(
+        config, typed_blocks, plan, evidence, missing_body_ref_pages_after_page
+    )
     if missing_pages:
-        retry_config = _body_pass_config(config, "block" if config.body_mode == "page_then_block" else config.body_mode)
+        retry_config = _body_pass_config(
+            config, "block" if config.body_mode == "page_then_block" else config.body_mode
+        )
         evidence.extend(
             qwen_evidence._collect_qwen_marker_evidence(
                 typed_blocks,
@@ -91,7 +99,9 @@ def run_qwen_marker_locator_repairs(
                 pass_name="body_ref_retry",
                 footnote_pages=set(),
                 body_ref_pages=set(missing_pages),
-                expected_body_markers_by_page=qwen_evidence._page_footnote_markers_by_page(typed_blocks),
+                expected_body_markers_by_page=qwen_evidence._page_footnote_markers_by_page(
+                    typed_blocks
+                ),
             )
         )
 
@@ -148,7 +158,10 @@ def _missing_body_ref_pages(
     blocks: List[CanonicalBlock],
     plan: Any,
     evidence: List[qwen_types.QwenMarkerPageEvidence],
-    missing_body_ref_pages_after_page: Callable[[List[qwen_types.QwenMarkerPageEvidence]], Sequence[int]] | None,
+    missing_body_ref_pages_after_page: Callable[
+        [List[qwen_types.QwenMarkerPageEvidence]], Sequence[int]
+    ]
+    | None,
 ) -> List[int]:
     """Determine which pages need a retry pass for body refs."""
     if config.body_mode == "page_then_block":
@@ -158,7 +171,10 @@ def _missing_body_ref_pages(
             else []
         )
         log = qwen_evidence._log_info if missing_pages else qwen_evidence._log_debug
-        log("Qwen marker locator retry planning: {} page(s) still need body refs", len(missing_pages))
+        log(
+            "Qwen marker locator retry planning: {} page(s) still need body refs",
+            len(missing_pages),
+        )
         return missing_pages
     body_plan = qwen_page_plan._problem_page_plan(blocks)
     return sorted(set(body_plan.body_ref_pages) - set(plan.body_ref_pages))
@@ -209,7 +225,9 @@ def _finish_marker_locator_run(
     )
 
 
-def _body_pass_config(config: qwen_types.QwenMarkerLocatorConfig, body_mode: str) -> qwen_types.QwenMarkerLocatorConfig:
+def _body_pass_config(
+    config: qwen_types.QwenMarkerLocatorConfig, body_mode: str
+) -> qwen_types.QwenMarkerLocatorConfig:
     if body_mode == "page":
         return replace(config, body_mode="page", dpi=config.page_dpi)
     if body_mode == "block":
@@ -217,7 +235,9 @@ def _body_pass_config(config: qwen_types.QwenMarkerLocatorConfig, body_mode: str
     return config
 
 
-def apply_qwen_footnote_markers(blocks: List[CanonicalBlock], evidence_pages: Sequence[qwen_types.QwenMarkerPageEvidence]) -> None:
+def apply_qwen_footnote_markers(
+    blocks: List[CanonicalBlock], evidence_pages: Sequence[qwen_types.QwenMarkerPageEvidence]
+) -> None:
     evidence_by_page: Dict[int, qwen_types.QwenMarkerPageEvidence] = {}
     for item in evidence_pages:
         existing = evidence_by_page.get(item.page)
@@ -234,9 +254,13 @@ def apply_qwen_footnote_markers(blocks: List[CanonicalBlock], evidence_pages: Se
         if len(defs) > len(page_blocks):
             _split_merged_footnote_blocks(blocks, page, defs)
             page_blocks = qwen_page_plan._page_footnotes_by_page(blocks).get(page, [])
-        if len(defs) == len(page_blocks) and qwen_prompt._footnote_defs_match_blocks(defs, page_blocks):
-            for block, item in zip(page_blocks, defs):
-                qwen_prompt._apply_qwen_footnote_marker(block, item["marker"], page, evidence=evidence)
+        if len(defs) == len(page_blocks) and qwen_prompt._footnote_defs_match_blocks(
+            defs, page_blocks
+        ):
+            for block, item in zip(page_blocks, defs, strict=True):
+                qwen_prompt._apply_qwen_footnote_marker(
+                    block, item["marker"], page, evidence=evidence
+                )
             continue
         qwen_prompt._apply_unique_near_text_matches(page_blocks, defs, page, evidence)
 

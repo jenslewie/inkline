@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from ...extraction.text import normalize_ws
 from ...normalize.builders import union_bbox
 from ...schema.block_types import FOOTNOTE
-from ...extraction.text import normalize_ws
-from ..block_access import block_bbox as _bbox, block_page as _block_page
+from ..block_access import block_bbox as _bbox
+from ..block_access import block_page as _block_page
 from ..notes.keys import leading_note_marker as _leading_note_marker
 
 _FN_CONT_Y_GAP_MIN = -5.0
@@ -35,7 +36,9 @@ def _drop_duplicate_adjacent_footnotes(blocks: List[Dict[str, Any]]) -> None:
         if _block_page(cur) != _block_page(nxt):
             i += 1
             continue
-        if _compact_footnote_text(cur.get("text", "")) != _compact_footnote_text(nxt.get("text", "")):
+        if _compact_footnote_text(cur.get("text", "")) != _compact_footnote_text(
+            nxt.get("text", "")
+        ):
             i += 1
             continue
         _merge_duplicate_footnote_attrs(cur, nxt)
@@ -71,7 +74,11 @@ def _merge_same_page_unmarked_footnotes(blocks: List[Dict[str, Any]]) -> None:
             and nxt.get("type") == FOOTNOTE
             and _block_page(cur) == _block_page(nxt)
             and _footnote_marker(nxt) is None
-            and (_footnote_marker(cur) is not None or _has_next_page_continuation(cur) or _has_previous_page_continuation(cur))
+            and (
+                _footnote_marker(cur) is not None
+                or _has_next_page_continuation(cur)
+                or _has_previous_page_continuation(cur)
+            )
             and _is_footnote_continuation_layout(cur, nxt)
         ):
             _merge_footnote_pair(cur, nxt, "same_page_unmarked_footnote_continuation")
@@ -94,7 +101,11 @@ def _merge_explicit_cross_page_footnotes(blocks: List[Dict[str, Any]]) -> None:
             np = _block_page(nxt)
             if np is not None and cp is not None and np > cp + 1:
                 break
-            if nxt.get("type") == FOOTNOTE and np == (cp or 0) + 1 and _has_previous_page_continuation(nxt):
+            if (
+                nxt.get("type") == FOOTNOTE
+                and np == (cp or 0) + 1
+                and _has_previous_page_continuation(nxt)
+            ):
                 previous_fragment = nxt
                 _merge_footnote_pair(cur, nxt, "explicit_cross_page_footnote_continuation")
                 del blocks[j]
@@ -106,7 +117,9 @@ def _merge_explicit_cross_page_footnotes(blocks: List[Dict[str, Any]]) -> None:
                     and _is_footnote_continuation_layout(previous_fragment, blocks[j])
                 ):
                     previous_fragment = blocks[j]
-                    _merge_footnote_pair(cur, blocks[j], "explicit_cross_page_footnote_continuation")
+                    _merge_footnote_pair(
+                        cur, blocks[j], "explicit_cross_page_footnote_continuation"
+                    )
                     del blocks[j]
                 break
             j += 1
@@ -122,11 +135,15 @@ def _has_previous_page_marker(text: str) -> bool:
 
 
 def _has_next_page_continuation(blk: Dict[str, Any]) -> bool:
-    return _has_next_page_marker(blk.get("text", "")) or bool((blk.get("attrs") or {}).get("continues_on_next_page"))
+    return _has_next_page_marker(blk.get("text", "")) or bool(
+        (blk.get("attrs") or {}).get("continues_on_next_page")
+    )
 
 
 def _has_previous_page_continuation(blk: Dict[str, Any]) -> bool:
-    return _has_previous_page_marker(blk.get("text", "")) or bool((blk.get("attrs") or {}).get("continues_from_previous_page"))
+    return _has_previous_page_marker(blk.get("text", "")) or bool(
+        (blk.get("attrs") or {}).get("continues_from_previous_page")
+    )
 
 
 def _footnote_marker(blk: Dict[str, Any]) -> str | None:
@@ -163,20 +180,30 @@ def _merge_footnote_pair(left: Dict[str, Any], right: Dict[str, Any], reason: st
     source = left.setdefault("source", {})
     spans = source.setdefault("spans", [])
     if not spans:
-        spans.append({"page": source.get("page"), "bbox": source.get("bbox"), "block_id": left.get("block_id")})
+        spans.append(
+            {
+                "page": source.get("page"),
+                "bbox": source.get("bbox"),
+                "block_id": left.get("block_id"),
+            }
+        )
     right_source = right.get("source") or {}
     right_spans = right_source.get("spans") or []
     if right_spans:
         spans.extend(right_spans)
     else:
-        spans.append({
-            "page": right_source.get("page"),
-            "bbox": right_source.get("bbox"),
-            "block_id": right.get("block_id"),
-        })
+        spans.append(
+            {
+                "page": right_source.get("page"),
+                "bbox": right_source.get("bbox"),
+                "block_id": right.get("block_id"),
+            }
+        )
     source["bbox"] = union_bbox([source.get("bbox"), (right.get("source") or {}).get("bbox")])
     pages = source.setdefault("pages", [source.get("page")])
-    for page in (right.get("source") or {}).get("pages") or [(right.get("source") or {}).get("page")]:
+    for page in (right.get("source") or {}).get("pages") or [
+        (right.get("source") or {}).get("page")
+    ]:
         if page is not None and page not in pages:
             pages.append(page)
     attrs = left.setdefault("attrs", {})
@@ -189,7 +216,7 @@ def _merge_footnote_pair(left: Dict[str, Any], right: Dict[str, Any], reason: st
         attrs.pop("continues_from_previous_page", None)
     merged = attrs.setdefault("merged_from", [])
     right_merged = (right.get("attrs") or {}).get("merged_from") or []
-    for bid in [left.get("block_id"), right.get("block_id")] + list(right_merged):
+    for bid in [left.get("block_id"), right.get("block_id"), *list(right_merged)]:
         if bid and bid not in merged:
             merged.append(bid)
     attrs["merge_reason"] = reason

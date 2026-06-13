@@ -1,5 +1,5 @@
-from argparse import Namespace
 import sys
+from argparse import Namespace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -10,23 +10,23 @@ from inkline.parsers.mineru.normalize.core import (
     _missing_or_unreliable_body_ref_pages,
 )
 from inkline.parsers.mineru.reconcile.notes import qwen_marker_locator
-from inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.evidence import (
-    _collect_qwen_marker_evidence,
-    _page_footnote_markers_by_page,
-    _retry_missing_single_marker_body_refs,
-)
 from inkline.parsers.mineru.reconcile.notes.qwen_marker_locator import (
     QwenMarkerLocatorConfig,
     QwenMarkerPageEvidence,
     run_qwen_marker_locator_repairs,
 )
-from inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.api import _call_qwen_marker_locator
+from inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.evidence import (
+    _collect_qwen_marker_evidence,
+    _retry_missing_single_marker_body_refs,
+)
 from inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.page_plan import _problem_page_plan
 from inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.types import _PROMPT_VERSION
 
 
 def test_marker_locator_page_and_block_dpi_config() -> None:
-    args = Namespace(marker_locator_dpi=None, marker_locator_page_dpi=300, marker_locator_block_dpi=200)
+    args = Namespace(
+        marker_locator_dpi=None, marker_locator_page_dpi=300, marker_locator_block_dpi=200
+    )
 
     assert _marker_locator_page_dpi(args) == 300
     assert _marker_locator_block_dpi(args) == 200
@@ -40,7 +40,9 @@ def test_marker_locator_page_and_block_dpi_config() -> None:
     assert _marker_locator_page_dpi(default_args) == 150
     assert _marker_locator_block_dpi(default_args) == 200
 
-    legacy_args = Namespace(marker_locator_dpi=250, marker_locator_page_dpi=None, marker_locator_block_dpi=None)
+    legacy_args = Namespace(
+        marker_locator_dpi=250, marker_locator_page_dpi=None, marker_locator_block_dpi=None
+    )
 
     assert _marker_locator_page_dpi(legacy_args) == 250
     assert _marker_locator_block_dpi(legacy_args) == 250
@@ -52,7 +54,16 @@ def test_page_then_block_retries_missing_pages_with_block_dpi(monkeypatch, tmp_p
     def fake_problem_page_plan(_blocks):
         return SimpleNamespace(footnote_pages={1}, body_ref_pages={1, 2})
 
-    def fake_collect(_blocks, pages, config, *, pass_name, footnote_pages, body_ref_pages, expected_body_markers_by_page):
+    def fake_collect(
+        _blocks,
+        pages,
+        config,
+        *,
+        pass_name,
+        footnote_pages,
+        body_ref_pages,
+        expected_body_markers_by_page,
+    ):
         calls.append(
             {
                 "pages": list(pages),
@@ -76,8 +87,14 @@ def test_page_then_block_retries_missing_pages_with_block_dpi(monkeypatch, tmp_p
         ]
 
     # Patch at the definition module (monkeypatch principle)
-    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.page_plan._problem_page_plan", fake_problem_page_plan)
-    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.evidence._collect_qwen_marker_evidence", fake_collect)
+    monkeypatch.setattr(
+        "inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.page_plan._problem_page_plan",
+        fake_problem_page_plan,
+    )
+    monkeypatch.setattr(
+        "inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.evidence._collect_qwen_marker_evidence",
+        fake_collect,
+    )
 
     config = QwenMarkerLocatorConfig(
         source_pdf=tmp_path / "source.pdf",
@@ -278,7 +295,10 @@ def test_single_marker_retry_merges_missing_marker(monkeypatch, tmp_path: Path) 
         }
 
     # Patch at the definition module (monkeypatch principle)
-    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.api._call_qwen_marker_locator", fake_call)
+    monkeypatch.setattr(
+        "inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.api._call_qwen_marker_locator",
+        fake_call,
+    )
     config = QwenMarkerLocatorConfig(
         source_pdf=tmp_path / "source.pdf",
         artifact_dir=tmp_path / "qwen",
@@ -308,7 +328,13 @@ def test_single_marker_retry_merges_missing_marker(monkeypatch, tmp_path: Path) 
 
 def test_problem_page_plan_keeps_scoped_endnote_body_candidates() -> None:
     blocks = [
-        {"block_id": "b_chapter", "type": "heading", "text": "1 第一章", "source": {"page": 1}, "attrs": {}},
+        {
+            "block_id": "b_chapter",
+            "type": "heading",
+            "text": "1 第一章",
+            "source": {"page": 1},
+            "attrs": {},
+        },
         {
             "block_id": "b_ref_1",
             "type": "paragraph",
@@ -330,10 +356,34 @@ def test_problem_page_plan_keeps_scoped_endnote_body_candidates() -> None:
             "source": {"page": 2, "bbox": [10, 70, 100, 90]},
             "attrs": {"note_refs": [{"marker": "3"}]},
         },
-        {"block_id": "b_notes", "type": "heading", "text": "注释", "source": {"page": 10}, "attrs": {}},
-        {"block_id": "b_note_1", "type": "list_item", "text": "1. 第一条注释。", "source": {"page": 10}, "attrs": {}},
-        {"block_id": "b_note_2", "type": "list_item", "text": "2. 第二条注释。", "source": {"page": 10}, "attrs": {}},
-        {"block_id": "b_note_3", "type": "list_item", "text": "3. 第三条注释。", "source": {"page": 10}, "attrs": {}},
+        {
+            "block_id": "b_notes",
+            "type": "heading",
+            "text": "注释",
+            "source": {"page": 10},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_note_1",
+            "type": "list_item",
+            "text": "1. 第一条注释。",
+            "source": {"page": 10},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_note_2",
+            "type": "list_item",
+            "text": "2. 第二条注释。",
+            "source": {"page": 10},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_note_3",
+            "type": "list_item",
+            "text": "3. 第三条注释。",
+            "source": {"page": 10},
+            "attrs": {},
+        },
     ]
 
     plan = _problem_page_plan(blocks)
@@ -389,11 +439,20 @@ def test_complete_cache_hit_does_not_raise_unboundlocalerror(monkeypatch, tmp_pa
     monkeypatch.setitem(sys.modules, "fitz", fake_fitz)
 
     # Patch _read_existing_evidence to return our cache
-    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.evidence._read_existing_evidence", MagicMock(return_value=fake_cache))
+    monkeypatch.setattr(
+        "inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.evidence._read_existing_evidence",
+        MagicMock(return_value=fake_cache),
+    )
     # Patch render to avoid real PDF rendering
-    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.prompt._render_full_page", MagicMock())
+    monkeypatch.setattr(
+        "inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.prompt._render_full_page",
+        MagicMock(),
+    )
     # Patch timing to avoid needing a real config with all fields
-    monkeypatch.setattr("inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.evidence._write_timing_event", MagicMock())
+    monkeypatch.setattr(
+        "inkline.parsers.mineru.reconcile.notes.qwen_marker_locator.evidence._write_timing_event",
+        MagicMock(),
+    )
 
     config = QwenMarkerLocatorConfig(
         source_pdf=tmp_path / "source.pdf",

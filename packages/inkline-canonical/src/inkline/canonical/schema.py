@@ -240,7 +240,14 @@ def _validate_page(page: dict[str, Any], index: int) -> None:
         raise ValidationError(f"pages[{index}].physical_page must be int")
     if page.get("region") not in {"front_matter", "content", "back_matter", "unknown"}:
         raise ValidationError(f"pages[{index}].region is invalid: {page.get('region')}")
-    if page.get("page_role") not in {"cover", "title_page", "copyright_page", "back_cover", "generic", "unknown"}:
+    if page.get("page_role") not in {
+        "cover",
+        "title_page",
+        "copyright_page",
+        "back_cover",
+        "generic",
+        "unknown",
+    }:
         raise ValidationError(f"pages[{index}].page_role is invalid: {page.get('page_role')}")
     snapshot = page.get("snapshot", {})
     if snapshot is not None and not isinstance(snapshot, dict):

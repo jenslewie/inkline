@@ -76,7 +76,10 @@ def trace_note_calls(path: str | Path | None) -> Iterator[None]:
             "called_count": len(called_keys),
             "defined_count": len(definitions),
             "uncalled_count": len(uncalled),
-            "called": sorted(counts.values(), key=lambda item: (-int(item["calls"]), str(item["file"]), str(item["qualname"]))),
+            "called": sorted(
+                counts.values(),
+                key=lambda item: (-int(item["calls"]), str(item["file"]), str(item["qualname"])),
+            ),
             "uncalled": uncalled,
         }
         output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -96,7 +99,9 @@ def _collect_note_definitions(notes_dir: Path) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def _collect_defs_from_body(nodes: list[ast.stmt], relative: str, parents: list[str], out: Dict[str, Dict[str, Any]]) -> None:
+def _collect_defs_from_body(
+    nodes: list[ast.stmt], relative: str, parents: list[str], out: Dict[str, Dict[str, Any]]
+) -> None:
     for node in nodes:
         if isinstance(node, ast.ClassDef):
             _collect_defs_from_body(node.body, relative, [*parents, node.name], out)

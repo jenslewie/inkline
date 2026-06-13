@@ -36,7 +36,9 @@ def test_export_epub_renders_figure_placeholder(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        html = "\n".join(zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml"))
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
     assert "Image placeholder" in html
     assert "page 3" in html
     assert "#/pictures/0" in html
@@ -71,7 +73,9 @@ def test_export_epub_renders_inline_note_refs(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        html = "\n".join(zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml"))
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
     assert 'epub:type="noteref"' in html
     assert 'href="#note_b000002"' in html
     assert '<aside epub:type="footnote" id="note_b000002">' in html
@@ -120,7 +124,9 @@ def test_export_epub_renders_display_blocks_and_list_items(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        html = "\n".join(zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml"))
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
     assert 'class="display-block display-block-standalone"' in html
     assert 'class="display-block display-block-right"' in html
@@ -169,7 +175,9 @@ def test_export_epub_renders_table_from_attrs_html(tmp_path):
             "type": "table",
             "text": "",
             "source": {"page": 1, "bbox": None},
-            "attrs": {"html": '<table><tr><td colspan="2">Title</td></tr><tr><td>A</td><td>B</td></tr></table>'},
+            "attrs": {
+                "html": '<table><tr><td colspan="2">Title</td></tr><tr><td>A</td><td>B</td></tr></table>'
+            },
         }
     ]
     output = tmp_path / "book.epub"
@@ -177,7 +185,9 @@ def test_export_epub_renders_table_from_attrs_html(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        html = "\n".join(zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml"))
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
     assert 'colspan="2"' in html
     assert "<td>A</td>" in html
     assert "<td>B</td>" in html
@@ -202,6 +212,7 @@ def test_export_epub_sanitizes_attrs_html_with_unescaped_ampersand(tmp_path):
         chapter_names = [n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n]
         for name in chapter_names:
             from xml.etree import ElementTree as ET
+
             content = zf.read(name).decode("utf-8")
             ET.fromstring(content)
         html = "\n".join(zf.read(name).decode("utf-8") for name in chapter_names)
@@ -224,7 +235,9 @@ def test_export_epub_renders_table_from_markdown_text(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        html = "\n".join(zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml"))
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
     assert "<td>Name</td>" in html
     assert "<td>A</td>" in html
     assert "<td>1</td>" in html
@@ -253,13 +266,15 @@ def test_export_epub_caption_merged_into_figure(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        html = "\n".join(zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml"))
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
     assert "图例说明" in html
     figcaption_positions = [m.start() for m in re.finditer(r"<figcaption>", html)]
     figure_starts = [m.start() for m in re.finditer(r"<figure", html)]
     figure_ends = [m.start() for m in re.finditer(r"</figure>", html)]
     for cap_pos in figcaption_positions:
-        inside = any(fs < cap_pos < fe for fs, fe in zip(figure_starts, figure_ends))
+        inside = any(fs < cap_pos < fe for fs, fe in zip(figure_starts, figure_ends, strict=True))
         assert inside, f"<figcaption> at {cap_pos} is outside <figure>"
 
 
@@ -287,7 +302,9 @@ def test_export_epub_orphan_caption_renders_as_paragraph(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        html = "\n".join(zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml"))
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
     assert '<p class="caption">印度洋</p>' in html
     assert "<figcaption>" not in html
 
@@ -408,7 +425,7 @@ def test_export_epub_empty_table_and_continuation_skipped(tmp_path):
             "type": "table",
             "text": "",
             "source": {"page": 1, "bbox": None},
-            "attrs": {"html": '<table><tr><td>A</td></tr></table>'},
+            "attrs": {"html": "<table><tr><td>A</td></tr></table>"},
         },
         {
             "block_id": "b000002",
@@ -430,7 +447,9 @@ def test_export_epub_empty_table_and_continuation_skipped(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        html = "\n".join(zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml"))
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
     assert "<td>A</td>" in html
     assert html.count("<table>") == 1
 
@@ -447,7 +466,7 @@ def test_export_epub_figure_with_inline_image_path(tmp_path):
             "type": "figure",
             "text": "",
             "source": {"page": 1, "bbox": None},
-            "attrs": {"image_path": f"images/test.jpg"},
+            "attrs": {"image_path": "images/test.jpg"},
         }
     ]
     output = tmp_path / "book.epub"
@@ -455,7 +474,9 @@ def test_export_epub_figure_with_inline_image_path(tmp_path):
     export_epub(document, output, base_dir=tmp_path)
 
     with zipfile.ZipFile(output) as zf:
-        html = "\n".join(zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml"))
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
         names = set(zf.namelist())
     assert '<img src="images/b000001_test.jpg"' in html
     assert "EPUB/images/b000001_test.jpg" in names
@@ -531,7 +552,9 @@ def test_export_epub_figure_with_broken_image_id_falls_back_to_image_path(tmp_pa
     export_epub(document, output, base_dir=tmp_path)
 
     with zipfile.ZipFile(output) as zf:
-        html = "\n".join(zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml"))
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
         names = set(zf.namelist())
     assert '<img src="images/b000001_fallback.jpg"' in html
     assert "EPUB/images/b000001_fallback.jpg" in names
@@ -564,7 +587,9 @@ def test_export_epub_figure_with_missing_asset_file_falls_back_to_image_path(tmp
     export_epub(document, output, base_dir=tmp_path)
 
     with zipfile.ZipFile(output) as zf:
-        html = "\n".join(zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml"))
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
         names = set(zf.namelist())
     assert '<img src="images/b000001_fallback.jpg"' in html
     assert "EPUB/images/b000001_fallback.jpg" in names
@@ -589,6 +614,7 @@ def test_export_epub_sanitizes_attrs_html_with_nbsp_entity(tmp_path):
     with zipfile.ZipFile(output) as zf:
         chapter_names = [n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n]
         from xml.etree import ElementTree as ET
+
         for name in chapter_names:
             content = zf.read(name).decode("utf-8")
             ET.fromstring(content)

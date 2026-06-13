@@ -1,16 +1,20 @@
-from inkline.parsers.mineru.reconcile.notes.markers import (
-    _locate_qwen_body_ref,
-    _qwen_marker_offset_in_text,
-    _update_existing_qwen_ref_inline_location,
-    recover_missing_note_refs,
-)
 from inkline.parsers.mineru.reconcile.notes.marker_inline import (
-    _InlineMarkerLocation,
     _inline_runs_text,
+    _InlineMarkerLocation,
     _insert_inline_note_run,
+)
+from inkline.parsers.mineru.reconcile.notes.marker_location import (
+    _locate_qwen_body_ref,
+)
+from inkline.parsers.mineru.reconcile.notes.marker_offsets import (
+    _qwen_marker_offset_in_text,
 )
 from inkline.parsers.mineru.reconcile.notes.marker_recovery import (
     _strip_qwen_visible_marker,
+    _update_existing_qwen_ref_inline_location,
+)
+from inkline.parsers.mineru.reconcile.notes.markers import (
+    recover_missing_note_refs,
 )
 from inkline.parsers.mineru.reconcile.notes.resolver import _NoteContext, resolve_note_links
 
@@ -185,7 +189,9 @@ def test_qwen_insertion_preserves_other_mineru_inline_runs() -> None:
         "1",
         1,
         {"marker": "1", "before_text": "乙", "after_text": "丙", "quote": "乙1丙"},
-        _InlineMarkerLocation(char_index=3, source="qwen_marker_locator", confidence="high", evidence={}),
+        _InlineMarkerLocation(
+            char_index=3, source="qwen_marker_locator", confidence="high", evidence={}
+        ),
     )
 
     assert changed is True
@@ -473,11 +479,7 @@ def test_qwen_recovers_scoped_chapter_endnote_ref() -> None:
     )
     resolve_note_links(blocks)
 
-    refs = [
-        run
-        for run in blocks[1]["attrs"]["inline_runs"]
-        if run.get("type") == "note_ref"
-    ]
+    refs = [run for run in blocks[1]["attrs"]["inline_runs"] if run.get("type") == "note_ref"]
     assert len(refs) == 1
     assert refs[0]["source"] == "qwen_marker_locator"
     assert refs[0]["target_block_id"] == "b_note_1"
@@ -547,7 +549,9 @@ def test_qwen_recovers_adjacent_visible_symbol_and_numeric_markers() -> None:
     assert {ref["marker"] for ref in refs} == {"*", "3"}
     assert "note_refs" not in blocks[0]["attrs"]
     assert [run["marker"] for run in runs if run["type"] == "note_ref"] == ["*", "3"]
-    assert "".join(run.get("text", "") for run in runs if run["type"] == "text") == blocks[0]["text"]
+    assert (
+        "".join(run.get("text", "") for run in runs if run["type"] == "text") == blocks[0]["text"]
+    )
 
 
 def test_qwen_uses_unique_visible_star_in_requested_block_when_ocr_context_differs() -> None:
@@ -735,4 +739,6 @@ def test_qwen_refinement_strips_visible_marker_for_existing_ref() -> None:
     assert blocks[0]["text"] == "若言有苦无是处”。摩尼鼓励。"
     runs = blocks[0]["attrs"]["inline_runs"]
     assert [run["marker"] for run in runs if run["type"] == "note_ref"] == ["2"]
-    assert "".join(run.get("text", "") for run in runs if run["type"] == "text") == blocks[0]["text"]
+    assert (
+        "".join(run.get("text", "") for run in runs if run["type"] == "text") == blocks[0]["text"]
+    )

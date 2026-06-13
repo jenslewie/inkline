@@ -35,7 +35,11 @@ def _display_layout_form(b: Dict[str, Any]) -> str:
 def _normalize_display_item_attrs(item: Dict[str, Any]) -> None:
     text = str(item.get("text", ""))
     lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-    item["layout_form"] = "short_line_group" if len(lines) >= 2 and max((len(ln) for ln in lines), default=0) <= 60 else "set_off_text"
+    item["layout_form"] = (
+        "short_line_group"
+        if len(lines) >= 2 and max((len(ln) for ln in lines), default=0) <= 60
+        else "set_off_text"
+    )
     item["line_count"] = len(lines)
     item["has_attribution_line"] = any(ATTR_RE.match(ln) for ln in lines)
     for key in INTERNAL_DISPLAY_ATTR_KEYS:

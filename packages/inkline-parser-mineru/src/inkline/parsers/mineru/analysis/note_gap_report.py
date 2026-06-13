@@ -24,7 +24,9 @@ def note_ref_gap_report_path(canonical_path: Path) -> Path:
     return canonical_path.with_name(report_stem + ".json")
 
 
-def build_note_ref_gap_report(document: Dict[str, Any], *, canonical_path: Optional[Path] = None) -> Dict[str, Any]:
+def build_note_ref_gap_report(
+    document: Dict[str, Any], *, canonical_path: Optional[Path] = None
+) -> Dict[str, Any]:
     blocks = [block for block in document.get("blocks") or [] if isinstance(block, dict)]
     referenced_note_ids = _referenced_note_ids(blocks)
     missing_notes = [
@@ -35,7 +37,9 @@ def build_note_ref_gap_report(document: Dict[str, Any], *, canonical_path: Optio
     missing_notes = [entry for entry in missing_notes if entry is not None]
     unresolved_refs = _unresolved_body_note_refs(blocks)
     independent_notes = [block for block in blocks if _is_independent_note(block)]
-    referenced_notes = [block for block in independent_notes if _has_body_ref(block, referenced_note_ids)]
+    referenced_notes = [
+        block for block in independent_notes if _has_body_ref(block, referenced_note_ids)
+    ]
 
     metadata = _dict_value(document.get("metadata"))
     report: Dict[str, Any] = {
@@ -48,8 +52,12 @@ def build_note_ref_gap_report(document: Dict[str, Any], *, canonical_path: Optio
             "independent_notes": len(independent_notes),
             "referenced_notes": len(referenced_notes),
             "missing_body_ref_notes": len(missing_notes),
-            "missing_body_ref_notes_with_marker": sum(1 for item in missing_notes if item.get("note_marker")),
-            "missing_body_ref_notes_without_marker": sum(1 for item in missing_notes if not item.get("note_marker")),
+            "missing_body_ref_notes_with_marker": sum(
+                1 for item in missing_notes if item.get("note_marker")
+            ),
+            "missing_body_ref_notes_without_marker": sum(
+                1 for item in missing_notes if not item.get("note_marker")
+            ),
             "unresolved_body_note_refs": len(unresolved_refs),
         },
         "missing_by_page": _missing_by_page(missing_notes),
@@ -59,7 +67,9 @@ def build_note_ref_gap_report(document: Dict[str, Any], *, canonical_path: Optio
     return report
 
 
-def write_note_ref_gap_report(document: Dict[str, Any], canonical_path: Path) -> tuple[Path, Dict[str, Any]]:
+def write_note_ref_gap_report(
+    document: Dict[str, Any], canonical_path: Path
+) -> tuple[Path, Dict[str, Any]]:
     report_path = note_ref_gap_report_path(canonical_path)
     report = build_note_ref_gap_report(document, canonical_path=canonical_path)
     with report_path.open("w", encoding="utf-8") as f:
@@ -78,7 +88,9 @@ def _referenced_by(block: Dict[str, Any]) -> List[Dict[str, Any]]:
     return refs if isinstance(refs, list) else []
 
 
-def _is_independent_note_without_body_ref(block: Dict[str, Any], referenced_note_ids: set[str]) -> bool:
+def _is_independent_note_without_body_ref(
+    block: Dict[str, Any], referenced_note_ids: set[str]
+) -> bool:
     return _is_independent_note(block) and not _has_body_ref(block, referenced_note_ids)
 
 
@@ -166,11 +178,11 @@ def _unresolved_body_note_refs(blocks: List[Dict[str, Any]]) -> List[Dict[str, A
 def _body_note_refs(block: Dict[str, Any]) -> List[Dict[str, Any]]:
     attrs = _dict_value(block.get("attrs"))
     runs = attrs.get("inline_runs")
-    inline_refs = [
-        run
-        for run in runs
-        if isinstance(run, dict) and run.get("type") == "note_ref"
-    ] if isinstance(runs, list) else []
+    inline_refs = (
+        [run for run in runs if isinstance(run, dict) and run.get("type") == "note_ref"]
+        if isinstance(runs, list)
+        else []
+    )
     if inline_refs:
         return inline_refs
     refs = attrs.get("note_refs")

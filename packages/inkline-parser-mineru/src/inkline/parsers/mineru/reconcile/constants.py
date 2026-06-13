@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from ..schema.block_types import CAPTION, DISPLAY_BLOCK, FIGURE, LIST_ITEM, PARAGRAPH, TABLE_CONTINUATION
+from ..schema.block_types import (
+    CAPTION,
+    DISPLAY_BLOCK,
+    FIGURE,
+    LIST_ITEM,
+    PARAGRAPH,
+    TABLE_CONTINUATION,
+)
 
-TERMINAL_PUNCT = set('。？！!?；;：:.”’\"\'）】》」』')
+TERMINAL_PUNCT = set("。？！!?；;：:.”’\"'）】》」』")
 FLOAT_LIKE_TYPES = {FIGURE, CAPTION, TABLE_CONTINUATION}
 MERGEABLE_TEXT_TYPES = {PARAGRAPH, LIST_ITEM, DISPLAY_BLOCK}
 DISPLAY_BLOCK_TYPES = {DISPLAY_BLOCK}

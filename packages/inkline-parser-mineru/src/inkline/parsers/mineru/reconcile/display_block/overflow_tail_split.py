@@ -7,16 +7,22 @@ from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
 from ...schema.block_types import DISPLAY_BLOCK, PARAGRAPH
-from ..block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
+from ..block_access import block_page as _block_page
+from ..block_access import block_pages as _block_pages
 from ..block_merge import _merge_block_pair, _refresh_display_block_attrs
-from ..layout_helpers import (
-    _ends_with_terminal, _is_near_page_bottom, _is_near_page_top, _page_coord_heights,
-)
 from ..block_nav import _prev_text_non_float
+from ..layout_helpers import (
+    _ends_with_terminal,
+    _is_near_page_bottom,
+    _is_near_page_top,
+    _page_coord_heights,
+)
 from ..notes.keys import note_ref_key as _note_ref_key
 
 
-def reconcile_page_bottom_overflow_tail_from_display_block(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_page_bottom_overflow_tail_from_display_block(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     page_heights = _page_coord_heights(blocks)
     i = 0
     while i + 1 < len(blocks):
@@ -46,8 +52,12 @@ def reconcile_page_bottom_overflow_tail_from_display_block(blocks: List[Dict[str
         if not _ends_with_terminal(kept_display_block_text) or _ends_with_terminal(tail):
             i += 1
             continue
-        display_block_runs, tail_runs = _split_inline_runs_at_last_newline((b.get("attrs") or {}).get("inline_runs"))
-        display_block_refs, tail_refs = _split_note_refs_by_runs((b.get("attrs") or {}).get("note_refs"), display_block_runs, tail_runs)
+        display_block_runs, tail_runs = _split_inline_runs_at_last_newline(
+            (b.get("attrs") or {}).get("inline_runs")
+        )
+        display_block_refs, tail_refs = _split_note_refs_by_runs(
+            (b.get("attrs") or {}).get("note_refs"), display_block_runs, tail_runs
+        )
         b["text"] = kept_display_block_text
         _refresh_display_block_attrs(b, prev_text=_prev_text_non_float(blocks, i))
         attrs = b.setdefault("attrs", {})
@@ -65,7 +75,15 @@ def reconcile_page_bottom_overflow_tail_from_display_block(blocks: List[Dict[str
         new_para["text"] = tail
         new_para.pop("level", None)
         nattrs = new_para.setdefault("attrs", {})
-        for k in ["role", "content_form", "content_form_confidence", "content_form_scores", "classification_evidence", "quote_text", "attribution"]:
+        for k in [
+            "role",
+            "content_form",
+            "content_form_confidence",
+            "content_form_scores",
+            "classification_evidence",
+            "quote_text",
+            "attribution",
+        ]:
             nattrs.pop(k, None)
         nattrs["split_from_display_block_id"] = b.get("block_id")
         if tail_runs:
@@ -73,13 +91,21 @@ def reconcile_page_bottom_overflow_tail_from_display_block(blocks: List[Dict[str
         if tail_refs is not None:
             nattrs["note_refs"] = tail_refs
         new_para["block_id"] = nxt.get("block_id", new_para["block_id"])
-        _merge_block_pair(new_para, nxt, "split_display_block_tail_joined_to_page_top_paragraph", {"narrative_tail": True}, [])
+        _merge_block_pair(
+            new_para,
+            nxt,
+            "split_display_block_tail_joined_to_page_top_paragraph",
+            {"narrative_tail": True},
+            [],
+        )
         del blocks[i + 1]
         blocks.insert(i + 1, new_para)
         i += 2
 
 
-def _split_inline_runs_at_last_newline(runs: Any) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def _split_inline_runs_at_last_newline(
+    runs: Any,
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     if not isinstance(runs, list):
         return [], []
     split_run_index = -1
@@ -107,7 +133,7 @@ def _split_inline_runs_at_last_newline(runs: Any) -> tuple[List[Dict[str, Any]],
         else:
             text = str(copied.get("text", ""))
             before = text[:split_char_index].rstrip()
-            after = text[split_char_index + 1:].lstrip()
+            after = text[split_char_index + 1 :].lstrip()
             if before:
                 display_block_runs.append({"type": "text", "text": before})
             if after:

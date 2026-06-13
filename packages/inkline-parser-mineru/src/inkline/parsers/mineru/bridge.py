@@ -16,7 +16,6 @@ from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_OLLAMA_KEEP_ALIVE, DEFA
 from inkline.parse.state import write_run_state
 from inkline.parse.types import ParseRequest, ParseResult
 
-
 DEFAULT_MINERU_BACKEND = "vlm-auto-engine"
 DEFAULT_MINERU_METHOD = "auto"
 _MINERU_LOGGING_CONFIGURED = False
@@ -81,10 +80,10 @@ def normalize_mineru_outputs(
     the monorepo can run without a MinerU/PyMuPDF environment.
     """
 
-    from inkline.parsers.mineru.normalize.core import build_canonical
-    from inkline.parsers.mineru.normalize.assets import materialize_image_assets
-    from inkline.parsers.mineru.extraction.io import load_inputs
     from inkline.parsers.mineru.analysis.note_gap_report import write_note_ref_gap_report
+    from inkline.parsers.mineru.extraction.io import load_inputs
+    from inkline.parsers.mineru.normalize.assets import materialize_image_assets
+    from inkline.parsers.mineru.normalize.core import build_canonical
 
     args = Namespace(
         content_list=None,
@@ -185,7 +184,9 @@ def run_mineru_raw(
         from mineru.cli.common import do_parse, read_fn  # pyright: ignore[reportMissingImports]
         from mineru.utils.enum_class import MakeMode  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
-        raise RuntimeError("MinerU is required for PDF ingestion. Run this command in a MinerU environment.") from exc
+        raise RuntimeError(
+            "MinerU is required for PDF ingestion. Run this command in a MinerU environment."
+        ) from exc
 
     pdf = Path(pdf_path).expanduser().resolve()
     raw_root = Path(output_dir).expanduser().resolve()
@@ -363,7 +364,10 @@ def _write_local_config(work_dir: Path) -> Path:
     pipeline_model = _cached_pipeline_model_root(required=False)
     if pipeline_model is not None:
         models_dir["pipeline"] = str(pipeline_model)
-    config_path.write_text(json.dumps({"models-dir": models_dir}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    config_path.write_text(
+        json.dumps({"models-dir": models_dir}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     return config_path
 
 
@@ -388,7 +392,10 @@ def _cached_vlm_model_root(*, required: bool) -> Path | None:
         for snapshot_root in snapshot_roots:
             if not snapshot_root.exists():
                 continue
-            snapshots = sorted((path for path in snapshot_root.iterdir() if path.is_dir()), key=lambda path: path.stat().st_mtime)
+            snapshots = sorted(
+                (path for path in snapshot_root.iterdir() if path.is_dir()),
+                key=lambda path: path.stat().st_mtime,
+            )
             for snapshot in reversed(snapshots):
                 if (snapshot / "config.json").exists() and any(snapshot.glob("*.safetensors")):
                     return snapshot
@@ -441,7 +448,8 @@ def get_mineru_version_info(backend: str = DEFAULT_MINERU_BACKEND) -> dict[str, 
       - mineru_vl_utils_version: str | None  — mineru-vl-utils package version
       - vlm_model: dict | None  — VLM model identity when backend is VLM-based
     """
-    from importlib.metadata import PackageNotFoundError, version as pkg_version
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as pkg_version
 
     info: dict[str, Any] = {}
     try:

@@ -12,5 +12,7 @@ NOTE_MARKER_RE = re.compile(r"^(?:\d{1,3}[*＊]{0,3}|[*＊]{1,3})$")
 CHINESE_RE = re.compile(r"[\u4e00-\u9fff]")
 TOC_LINE_RE = re.compile(r"^(?P<title>.+?)\s*(?:[/／]+|\s+)\s*(?P<page>\d{1,4})\s*$")
 PART_RE = re.compile(r"^第[一二三四五六七八九十百]+部分")
-CHAPTER_RE = re.compile(r"^(?P<num>\d+|[IiVvXxLl]+|[一二三四五六七八九十百]+)[\s、.．]*(?P<title>.+)")
+CHAPTER_RE = re.compile(
+    r"^(?P<num>\d+|[IiVvXxLl]+|[一二三四五六七八九十百]+)[\s、.．]*(?P<title>.+)"
+)
 CN_LIST_ITEM_RE = re.compile(r"^\s*[一二三四五六七八九十百]+、")

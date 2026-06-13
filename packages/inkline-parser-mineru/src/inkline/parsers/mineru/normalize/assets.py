@@ -18,14 +18,21 @@ def materialize_image_assets(
 ) -> None:
     materialize_page_snapshot_assets(canonical, source_pdf, output_dir, dpi=dpi)
     materialize_full_page_image_assets(canonical, source_pdf, output_dir, dpi=dpi)
-    materialize_repaired_figure_image_assets(canonical, source_pdf, output_dir, page_sizes=page_sizes, dpi=dpi)
+    materialize_repaired_figure_image_assets(
+        canonical, source_pdf, output_dir, page_sizes=page_sizes, dpi=dpi
+    )
     materialize_figure_path_assets(canonical, output_dir)
 
 
-def materialize_page_snapshot_assets(canonical: Dict[str, Any], source_pdf: Optional[str], output_dir: Path, dpi: int = 150) -> None:
+def materialize_page_snapshot_assets(
+    canonical: Dict[str, Any], source_pdf: Optional[str], output_dir: Path, dpi: int = 150
+) -> None:
     pages = [
-        p for p in canonical.get("pages", [])
-        if isinstance(p, dict) and isinstance(p.get("snapshot"), dict) and p["snapshot"].get("required")
+        p
+        for p in canonical.get("pages", [])
+        if isinstance(p, dict)
+        and isinstance(p.get("snapshot"), dict)
+        and p["snapshot"].get("required")
     ]
     if not pages or not source_pdf:
         return
@@ -57,7 +64,11 @@ def materialize_page_snapshot_assets(canonical: Dict[str, Any], source_pdf: Opti
             snapshot["asset_id"] = image_id
             snapshot["image_render_source"] = "source_pdf"
             snapshot["image_render_dpi"] = dpi
-            role = page.get("page_role") if page.get("page_role") in {"cover", "back_cover"} else "page_snapshot"
+            role = (
+                page.get("page_role")
+                if page.get("page_role") in {"cover", "back_cover"}
+                else "page_snapshot"
+            )
             _upsert_image_asset(
                 canonical,
                 {
@@ -74,12 +85,16 @@ def materialize_page_snapshot_assets(canonical: Dict[str, Any], source_pdf: Opti
         doc.close()
 
 
-def materialize_full_page_image_assets(canonical: Dict[str, Any], source_pdf: Optional[str], output_dir: Path, dpi: int = 150) -> None:
+def materialize_full_page_image_assets(
+    canonical: Dict[str, Any], source_pdf: Optional[str], output_dir: Path, dpi: int = 150
+) -> None:
     if not source_pdf:
         return
     full_page_figures = [
-        b for b in canonical.get("blocks", [])
-        if b.get("type") == FIGURE and (b.get("attrs") or {}).get("layout_role") == "full_page_image"
+        b
+        for b in canonical.get("blocks", [])
+        if b.get("type") == FIGURE
+        and (b.get("attrs") or {}).get("layout_role") == "full_page_image"
     ]
     if not full_page_figures:
         return
@@ -87,7 +102,9 @@ def materialize_full_page_image_assets(canonical: Dict[str, Any], source_pdf: Op
         import fitz  # type: ignore
     except Exception as exc:
         for b in full_page_figures:
-            b.setdefault("attrs", {})["full_page_image_render_error"] = f"PyMuPDF unavailable: {exc}"
+            b.setdefault("attrs", {})["full_page_image_render_error"] = (
+                f"PyMuPDF unavailable: {exc}"
+            )
         return
 
     pdf_path = Path(source_pdf)
@@ -139,7 +156,8 @@ def materialize_repaired_figure_image_assets(
     if not source_pdf:
         return
     repaired_figures = [
-        b for b in canonical.get("blocks", [])
+        b
+        for b in canonical.get("blocks", [])
         if b.get("type") == FIGURE and _needs_repaired_figure_asset(b)
     ]
     if not repaired_figures:
@@ -184,7 +202,9 @@ def materialize_repaired_figure_image_assets(
             attrs["image_id"] = image_id
             attrs["image_render_source"] = "source_pdf_crop"
             attrs["image_render_dpi"] = dpi
-            attrs["image_render_bbox"] = _pdf_rect_to_coord_bbox(page, doc[page - 1].rect, rect, geometry)
+            attrs["image_render_bbox"] = _pdf_rect_to_coord_bbox(
+                page, doc[page - 1].rect, rect, geometry
+            )
             _upsert_image_asset(
                 canonical,
                 {
@@ -242,7 +262,9 @@ def _source_search_dirs(canonical: Dict[str, Any], output_dir: Path) -> List[Pat
     return dirs
 
 
-def _resolve_figure_image_path(image_path: str, output_dir: Path, doc_id: str = "", source_dirs: Optional[List[Path]] = None) -> Optional[Path]:
+def _resolve_figure_image_path(
+    image_path: str, output_dir: Path, doc_id: str = "", source_dirs: Optional[List[Path]] = None
+) -> Optional[Path]:
     candidate = Path(image_path)
     if candidate.is_absolute() and candidate.exists():
         return candidate
@@ -326,7 +348,9 @@ def _repaired_figure_crop_bbox(block: Dict[str, Any]) -> Optional[list[float]]:
     return [float(v) for v in bbox[:4]]
 
 
-def _page_geometry(canonical: Dict[str, Any], page_sizes: Optional[Dict[int, Tuple[float, float]]]) -> PageGeometry:
+def _page_geometry(
+    canonical: Dict[str, Any], page_sizes: Optional[Dict[int, Tuple[float, float]]]
+) -> PageGeometry:
     if page_sizes:
         return PageGeometry(
             coord_widths={page: size[0] for page, size in page_sizes.items()},
@@ -335,20 +359,24 @@ def _page_geometry(canonical: Dict[str, Any], page_sizes: Optional[Dict[int, Tup
     return PageGeometry.from_canonical_blocks(canonical.get("blocks", []))
 
 
-def _scale_bbox_to_pdf_rect(page: int, pdf_rect: Any, bbox: list[float], geometry: PageGeometry) -> Any:
+def _scale_bbox_to_pdf_rect(
+    page: int, pdf_rect: Any, bbox: list[float], geometry: PageGeometry
+) -> Any:
     import fitz  # type: ignore
 
     return fitz.Rect(*geometry.scale_bbox(page, bbox, pdf_rect))
 
 
-def _pdf_rect_to_coord_bbox(page: int, pdf_page_rect: Any, rect: Any, geometry: PageGeometry) -> list[float]:
+def _pdf_rect_to_coord_bbox(
+    page: int, pdf_page_rect: Any, rect: Any, geometry: PageGeometry
+) -> list[float]:
     return geometry.scale_bbox_inverse(page, rect, pdf_page_rect)
 
 
 def _expand_rect_to_visible_content(page: Any, rect: Any) -> Any:
     try:
-        from PIL import Image  # type: ignore
         import fitz  # type: ignore
+        from PIL import Image  # type: ignore
     except Exception:
         return rect
 

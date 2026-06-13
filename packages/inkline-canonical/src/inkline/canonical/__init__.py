@@ -1,7 +1,7 @@
 from inkline.canonical.schema import (
     BLOCK_TYPES,
-    MigrationError,
     SCHEMA_VERSION,
+    MigrationError,
     ValidationError,
     make_block,
     make_document,
@@ -14,11 +14,11 @@ from inkline.canonical.types import CanonicalBlock, CanonicalSource, NoteRef
 
 __all__ = [
     "BLOCK_TYPES",
+    "SCHEMA_VERSION",
     "CanonicalBlock",
     "CanonicalSource",
     "MigrationError",
     "NoteRef",
-    "SCHEMA_VERSION",
     "ValidationError",
     "make_block",
     "make_document",

@@ -11,6 +11,7 @@ from .text import extract_text_notes_and_runs, normalize_note_marker, normalize_
 
 _CONTENT_COORD_SIZE = 1000.0
 
+
 def load_json(path: Optional[str]) -> Any:
     if not path:
         return None
@@ -72,20 +73,41 @@ def flatten_content_list_v2(content_list_v2: List[Any]) -> Dict[int, List[RawBlo
             else:
                 text, notes, inline_runs = extract_text_notes_and_runs(item.get("content", {}))
             bbox = item.get("bbox")
-            pages[p_idx].append(RawBlock(page=p_idx, index=i, raw_type=typ, text=text, bbox=bbox, raw=item, note_refs=notes, inline_runs=inline_runs))
+            pages[p_idx].append(
+                RawBlock(
+                    page=p_idx,
+                    index=i,
+                    raw_type=typ,
+                    text=text,
+                    bbox=bbox,
+                    raw=item,
+                    note_refs=notes,
+                    inline_runs=inline_runs,
+                )
+            )
     return pages
 
 
 def flatten_content_list_legacy(content_list: List[Any]) -> Dict[int, List[RawBlock]]:
     pages: Dict[int, List[RawBlock]] = {}
-    for i, item in enumerate(content_list):
+    for _i, item in enumerate(content_list):
         if not isinstance(item, dict):
             continue
         p = int(item.get("page_idx", 0)) + 1
         pages.setdefault(p, [])
         typ = item.get("type", "unknown")
         text = normalize_ws(str(item.get("text", "")))
-        pages[p].append(RawBlock(page=p, index=len(pages[p]), raw_type=typ, text=text, bbox=item.get("bbox"), raw=item, note_refs=[]))
+        pages[p].append(
+            RawBlock(
+                page=p,
+                index=len(pages[p]),
+                raw_type=typ,
+                text=text,
+                bbox=item.get("bbox"),
+                raw=item,
+                note_refs=[],
+            )
+        )
     return pages
 
 
@@ -104,9 +126,7 @@ def replace_footnote_sources_from_middle(
     all_pages = set(pages) | set(middle_footnotes)
     for page in sorted(all_pages):
         body_blocks = [
-            block
-            for block in pages.get(page, [])
-            if not _is_content_list_footnote_source(block)
+            block for block in pages.get(page, []) if not _is_content_list_footnote_source(block)
         ]
         body_blocks.extend(middle_footnotes.get(page, []))
         body_blocks.sort(key=_raw_block_reading_key)

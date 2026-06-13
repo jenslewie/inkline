@@ -6,12 +6,15 @@ import re
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
-from ..block_access import block_bbox as _bbox, block_page as _block_page
-from ..block_merge import _merge_block_pair, _refresh_display_block_attrs
 from ...extraction.text import normalize_ws
 from ...schema.block_types import DISPLAY_BLOCK, HEADING, PARAGRAPH
+from ..block_access import block_bbox as _bbox
+from ..block_access import block_page as _block_page
+from ..block_merge import _merge_block_pair, _refresh_display_block_attrs
 
-ERA_MONTH_RE = re.compile(r"^\s*[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]年[正一二三四五六七八九十冬腊]+月\s*$")
+ERA_MONTH_RE = re.compile(
+    r"^\s*[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]年[正一二三四五六七八九十冬腊]+月\s*$"
+)
 LUNAR_DAY_ENTRY_RE = re.compile(
     r"^\s*(?:初[一二三四五六七八九十]|十[一二三四五六七八九]?|二十[一二三四五六七八九]?|三十)日?[甲乙丙丁戊己庚辛壬癸]?[子丑寅卯辰巳午未申酉戌亥]?\b"
 )
@@ -30,9 +33,7 @@ def is_era_month_header(block: Dict[str, Any], layout: LayoutStats) -> bool:
     if not bb:
         return True
     bbox_width = float(bb[2]) - float(bb[0])
-    if bbox_width > layout.body_width * 0.85:
-        return False
-    return True
+    return not bbox_width > layout.body_width * 0.85
 
 
 def is_lunar_day_entry(block: Dict[str, Any], layout: LayoutStats) -> bool:
@@ -85,7 +86,9 @@ def merge_display_block_run(
 # ── display block continuation helpers ──────────────────────────────────────
 
 
-def display_block_run_is_intro_continuation_candidate(b: Dict[str, Any], layout: LayoutStats) -> bool:
+def display_block_run_is_intro_continuation_candidate(
+    b: Dict[str, Any], layout: LayoutStats
+) -> bool:
     from ..layout_helpers import _display_block_layout
 
     if b.get("type") != DISPLAY_BLOCK:
@@ -108,10 +111,14 @@ def is_short_display_text_block(b: Dict[str, Any], layout: LayoutStats, max_len:
         body_width = width >= layout.body_width * 0.88
         if near_body_indent and body_width:
             return False
-    return _display_block_layout(b, layout) or (bb is not None and float(bb[0]) >= layout.body_left + 35)
+    return _display_block_layout(b, layout) or (
+        bb is not None and float(bb[0]) >= layout.body_left + 35
+    )
 
 
-def is_left_shifted_intro_before_display_lane_ds(blocks: List[Dict[str, Any]], i: int, layout: LayoutStats) -> bool:
+def is_left_shifted_intro_before_display_lane_ds(
+    blocks: List[Dict[str, Any]], i: int, layout: LayoutStats
+) -> bool:
     b = blocks[i]
     if b.get("type") != PARAGRAPH:
         return False
@@ -135,7 +142,9 @@ def is_left_shifted_intro_before_display_lane_ds(blocks: List[Dict[str, Any]], i
         return False
     current_width = max(0.0, float(bb[2]) - float(bb[0]))
     compact_next = next_width <= layout.body_width * 0.58
-    return compact_next and (current_width >= next_width * 1.15 or current_width >= layout.body_width * 0.25)
+    return compact_next and (
+        current_width >= next_width * 1.15 or current_width >= layout.body_width * 0.25
+    )
 
 
 def looks_like_record_display_text(text: str) -> bool:
@@ -149,9 +158,7 @@ def looks_like_record_display_text(text: str) -> bool:
     short_ratio = sum(len(ln) <= 24 for ln in lines) / max(1, len(lines))
     if date_count >= 1 and (label_count >= 1 or short_ratio >= 0.75):
         return True
-    if date_count >= 2 and short_ratio >= 0.65:
-        return True
-    return False
+    return bool(date_count >= 2 and short_ratio >= 0.65)
 
 
 def display_block_multiline_seed(text: str) -> bool:
@@ -160,7 +167,10 @@ def display_block_multiline_seed(text: str) -> bool:
         return False
     if looks_like_record_display_text(text):
         return True
-    return max(len(ln) for ln in lines) <= 60 and (sum(len(ln) <= 36 for ln in lines) / len(lines)) >= 0.6
+    return (
+        max(len(ln) for ln in lines) <= 60
+        and (sum(len(ln) <= 36 for ln in lines) / len(lines)) >= 0.6
+    )
 
 
 def has_display_attribution_line(text: str) -> bool:
@@ -168,7 +178,9 @@ def has_display_attribution_line(text: str) -> bool:
     return any(ln.startswith(("——", "--", "- ")) for ln in lines[1:])
 
 
-def is_single_line_display_continuation_fragment(block: Dict[str, Any], layout: LayoutStats) -> bool:
+def is_single_line_display_continuation_fragment(
+    block: Dict[str, Any], layout: LayoutStats
+) -> bool:
     text = str(block.get("text", "")).strip()
     bb = _bbox(block)
     if not text or "\n" in text or not bb:
@@ -178,7 +190,9 @@ def is_single_line_display_continuation_fragment(block: Dict[str, Any], layout: 
     return height <= 30.0 and len(text) <= 60 and width <= layout.body_width * 0.55
 
 
-def display_lanes_compatible(left: Dict[str, Any], right: Dict[str, Any], layout: LayoutStats) -> bool:
+def display_lanes_compatible(
+    left: Dict[str, Any], right: Dict[str, Any], layout: LayoutStats
+) -> bool:
     lbb = _bbox(left)
     rbb = _bbox(right)
     if not lbb or not rbb:
@@ -191,7 +205,12 @@ def display_lanes_compatible(left: Dict[str, Any], right: Dict[str, Any], layout
     right_width = max(0.0, float(rbb[2]) - right_x0)
     left_compact = left_width <= layout.body_width * 0.58
     right_compact = right_width <= layout.body_width * 0.58
-    return left_compact and right_compact and left_x0 >= layout.body_left + 70 and right_x0 >= layout.body_left + 70
+    return (
+        left_compact
+        and right_compact
+        and left_x0 >= layout.body_left + 70
+        and right_x0 >= layout.body_left + 70
+    )
 
 
 _is_era_month_header = is_era_month_header

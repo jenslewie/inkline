@@ -14,8 +14,8 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from ....analysis.page_geometry import PageGeometry
 from ....extraction.text import normalize_note_marker, normalize_ws
-from ...block_access import block_bbox, block_id, block_page, block_pages
 from ....schema.models import CanonicalBlock
+from ...block_access import block_bbox, block_id, block_page, block_pages
 from ..keys import leading_note_marker
 from . import types as qwen_types
 
@@ -32,8 +32,8 @@ def _body_prompt_for_markers(default_prompt: str, markers: Sequence[str]) -> str
         "请逐个marker查找，能确定就输出，不能确定就省略。"
         "特别注意：如果某个marker印在标点之后，before_text必须包含这个标点并以这个标点结尾，after_text从标点后的正文开始；"
         "如果marker印在标点之前，after_text必须以这个标点开头。"
-        + qwen_types._PUNCTUATION_BOUNDARY_INSTRUCTION +
-        "输出格式:{\"body_refs\":[{\"marker\":\"\",\"before_text\":\"\",\"after_text\":\"\",\"quote\":\"\",\"confidence\":\"high|medium|low\"}]}。"
+        + qwen_types._PUNCTUATION_BOUNDARY_INSTRUCTION
+        + '输出格式:{"body_refs":[{"marker":"","before_text":"","after_text":"","quote":"","confidence":"high|medium|low"}]}。'
         "before_text和after_text都必须是紧邻marker的2到8个原文字符，不要输出超过8个字符的before_text或after_text。"
         "quote必须是before_text+marker+after_text的连续原文片段。"
         "多个marker相邻时，quote必须保留相对位置。"
@@ -47,9 +47,9 @@ def _single_marker_body_prompt(marker: str) -> str:
         f"只定位正文脚注引用marker：{marker}。不要找其他marker。"
         f"如果正文中找到 {marker}，输出一条；找不到返回空数组。"
         "before_text是marker左侧紧邻2到8个原文字符，after_text是marker右侧紧邻2到8个原文字符，"
-        + qwen_types._PUNCTUATION_BOUNDARY_INSTRUCTION +
-        f"quote=before_text+{marker}+after_text。不要输出整句或脚注定义。"
-        "输出格式:{\"body_refs\":[{\"marker\":\"\",\"before_text\":\"\",\"after_text\":\"\",\"quote\":\"\",\"confidence\":\"high|medium|low\"}]}。"
+        + qwen_types._PUNCTUATION_BOUNDARY_INSTRUCTION
+        + f"quote=before_text+{marker}+after_text。不要输出整句或脚注定义。"
+        '输出格式:{"body_refs":[{"marker":"","before_text":"","after_text":"","quote":"","confidence":"high|medium|low"}]}。'
     )
 
 
@@ -90,18 +90,20 @@ def _paragraph_body_prompt_for_markers(markers: Sequence[str], block: CanonicalB
         f"只返回JSON，不要解释。当前图片是正文中的一个段落crop，block_id={block_label}。"
         f"只在这个段落crop内定位这些脚注上标marker：{marker_list}。"
         "不要识别页底脚注定义，不要根据脚注意义推测，只看真实印刷的小号上标、数字或星号。"
-        "如果看不到任何marker，返回{\"body_refs\":[]}。"
+        '如果看不到任何marker，返回{"body_refs":[]}。'
         "before_text必须是marker左侧紧邻的2到8个原文字符，并以marker左边那个字符结尾；"
         "after_text必须是marker右侧紧邻的2到8个原文字符，并以marker右边那个字符开头。"
         "如果marker右边紧邻标点，after_text必须以该标点开头；如果marker左边紧邻标点，before_text必须以该标点结尾。"
-        + qwen_types._PUNCTUATION_BOUNDARY_INSTRUCTION +
-        "quote必须等于连续原文片段 before_text + marker + after_text，多个marker相邻时必须保留相对位置。"
-        "输出格式:{\"body_refs\":[{\"marker\":\"\",\"before_text\":\"\",\"after_text\":\"\",\"quote\":\"\",\"confidence\":\"high|medium|low\"}]}。"
+        + qwen_types._PUNCTUATION_BOUNDARY_INSTRUCTION
+        + "quote必须等于连续原文片段 before_text + marker + after_text，多个marker相邻时必须保留相对位置。"
+        '输出格式:{"body_refs":[{"marker":"","before_text":"","after_text":"","quote":"","confidence":"high|medium|low"}]}。'
         "看不清或无法确定紧邻字符就省略该项。"
     )
 
 
-def _body_markers_for_prompt(footnote_defs: Sequence[Dict[str, Any]], expected_markers: Sequence[str]) -> List[str]:
+def _body_markers_for_prompt(
+    footnote_defs: Sequence[Dict[str, Any]], expected_markers: Sequence[str]
+) -> List[str]:
     markers = [str(item.get("marker") or "") for item in footnote_defs]
     return list(dict.fromkeys([marker for marker in [*markers, *expected_markers] if marker]))
 
@@ -109,7 +111,9 @@ def _body_markers_for_prompt(footnote_defs: Sequence[Dict[str, Any]], expected_m
 def _body_blocks_by_page(blocks: Sequence[CanonicalBlock]) -> Dict[int, List[CanonicalBlock]]:
     out: Dict[int, List[CanonicalBlock]] = {}
     for block in blocks:
-        if block.get("type") not in qwen_types._BODY_REF_BLOCK_TYPES or not normalize_ws(str(block.get("text") or "")):
+        if block.get("type") not in qwen_types._BODY_REF_BLOCK_TYPES or not normalize_ws(
+            str(block.get("text") or "")
+        ):
             continue
         for page in block_pages(block):
             if _block_bbox_for_page(block, page) is not None:
@@ -166,7 +170,9 @@ def _render_block_crop(
     try:
         import fitz  # type: ignore
     except Exception as exc:
-        raise RuntimeError("Qwen marker locator paragraph rendering requires PyMuPDF (`fitz`).") from exc
+        raise RuntimeError(
+            "Qwen marker locator paragraph rendering requires PyMuPDF (`fitz`)."
+        ) from exc
     scaled = geometry.scale_bbox(page, list(bbox[:4]), pdf_page.rect)
     rect = fitz.Rect(*scaled)
     page_rect = pdf_page.rect
@@ -182,13 +188,22 @@ def _render_block_crop(
     scale = config.dpi / 72
     megapixels = max(1, int(rect.width * scale)) * max(1, int(rect.height * scale)) / 1_000_000
     if config.max_megapixels > 0 and megapixels > config.max_megapixels:
-        raise RuntimeError(f"Refusing Qwen paragraph crop {image_path.name} ({megapixels:.1f}MP) above max {config.max_megapixels}MP.")
+        raise RuntimeError(
+            f"Refusing Qwen paragraph crop {image_path.name} ({megapixels:.1f}MP) above max {config.max_megapixels}MP."
+        )
     pix = pdf_page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=rect, alpha=False)
     if pix.width <= 0 or pix.height <= 0:
-        raise RuntimeError(f"Invalid Qwen paragraph crop dimensions for {image_path.name}: {pix.width}x{pix.height}.")
+        raise RuntimeError(
+            f"Invalid Qwen paragraph crop dimensions for {image_path.name}: {pix.width}x{pix.height}."
+        )
     image_path.parent.mkdir(parents=True, exist_ok=True)
     pix.save(str(image_path))
-    return [round(float(rect.x0), 3), round(float(rect.y0), 3), round(float(rect.x1), 3), round(float(rect.y1), 3)]
+    return [
+        round(float(rect.x0), 3),
+        round(float(rect.y0), 3),
+        round(float(rect.x1), 3),
+        round(float(rect.y1), 3),
+    ]
 
 
 def _safe_filename_part(value: str) -> str:
@@ -196,23 +211,37 @@ def _safe_filename_part(value: str) -> str:
     return cleaned or "block"
 
 
-def _render_full_page(pdf_page: Any, image_path: Path, config: qwen_types.QwenMarkerLocatorConfig) -> None:
+def _render_full_page(
+    pdf_page: Any, image_path: Path, config: qwen_types.QwenMarkerLocatorConfig
+) -> None:
     try:
         import fitz  # type: ignore
     except Exception as exc:
         raise RuntimeError("Qwen marker locator page rendering requires PyMuPDF (`fitz`).") from exc
     scale = config.dpi / 72
-    megapixels = max(1, int(pdf_page.rect.width * scale)) * max(1, int(pdf_page.rect.height * scale)) / 1_000_000
+    megapixels = (
+        max(1, int(pdf_page.rect.width * scale))
+        * max(1, int(pdf_page.rect.height * scale))
+        / 1_000_000
+    )
     if config.max_megapixels > 0 and megapixels > config.max_megapixels:
-        raise RuntimeError(f"Refusing Qwen marker locator image {image_path.name} ({megapixels:.1f}MP) above max {config.max_megapixels}MP.")
+        raise RuntimeError(
+            f"Refusing Qwen marker locator image {image_path.name} ({megapixels:.1f}MP) above max {config.max_megapixels}MP."
+        )
     pix = pdf_page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
     if pix.width <= 0 or pix.height <= 0:
-        raise RuntimeError(f"Invalid Qwen marker locator image dimensions for {image_path.name}: {pix.width}x{pix.height}.")
+        raise RuntimeError(
+            f"Invalid Qwen marker locator image dimensions for {image_path.name}: {pix.width}x{pix.height}."
+        )
     pix.save(str(image_path))
 
 
-def _footnote_defs_match_blocks(defs: Sequence[Dict[str, Any]], blocks: Sequence[CanonicalBlock]) -> bool:
-    return all(_footnote_def_matches_block(item, block) for item, block in zip(defs, blocks))
+def _footnote_defs_match_blocks(
+    defs: Sequence[Dict[str, Any]], blocks: Sequence[CanonicalBlock]
+) -> bool:
+    return all(
+        _footnote_def_matches_block(item, block) for item, block in zip(defs, blocks, strict=True)
+    )
 
 
 def _apply_unique_near_text_matches(
@@ -237,7 +266,9 @@ def _apply_unique_near_text_matches(
 
 def _footnote_def_matches_block(item: Dict[str, Any], block: CanonicalBlock) -> bool:
     marker = str(item.get("marker") or "")
-    existing = normalize_note_marker((block.get("attrs") or {}).get("note_marker", "")) or leading_note_marker(str(block.get("text") or ""), include_superscript=True)
+    existing = normalize_note_marker(
+        (block.get("attrs") or {}).get("note_marker", "")
+    ) or leading_note_marker(str(block.get("text") or ""), include_superscript=True)
     if existing and existing != marker:
         return False
     near_text = _strip_leading_marker(str(item.get("near_text") or ""))
@@ -247,7 +278,9 @@ def _footnote_def_matches_block(item: Dict[str, Any], block: CanonicalBlock) -> 
     return _text_similarity(near_text, block_text) >= 0.18
 
 
-def _apply_qwen_footnote_marker(block: CanonicalBlock, marker: str, page: int, *, evidence: qwen_types.QwenMarkerPageEvidence) -> None:
+def _apply_qwen_footnote_marker(
+    block: CanonicalBlock, marker: str, page: int, *, evidence: qwen_types.QwenMarkerPageEvidence
+) -> None:
     existing = leading_note_marker(str(block.get("text") or ""), include_superscript=True)
     if not existing:
         separator = "" if marker.startswith("*") else ". "

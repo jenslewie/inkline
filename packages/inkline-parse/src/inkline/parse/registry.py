@@ -66,7 +66,9 @@ def get_parser(name: str) -> DocumentParser:
         return _PARSERS[name.strip().lower()]
     except KeyError:
         available = ", ".join(available_parsers()) or "none"
-        raise ParserNotFoundError(f"Unknown parser {name!r}; available parsers: {available}") from None
+        raise ParserNotFoundError(
+            f"Unknown parser {name!r}; available parsers: {available}"
+        ) from None
 
 
 def parse_document(request: ParseRequest, parser: str | DocumentParser) -> ParseResult:

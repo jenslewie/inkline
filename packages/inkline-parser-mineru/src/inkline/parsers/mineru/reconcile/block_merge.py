@@ -31,7 +31,14 @@ def _merge_block_pair(
     if right_was_display and not left_was_display:
         left["type"] = DISPLAY_BLOCK
         for k, v in (right.get("attrs") or {}).items():
-            if k in {"layout_role", "layout_form", "line_count", "has_attribution_line", "line_layouts", "raw_types"}:
+            if k in {
+                "layout_role",
+                "layout_form",
+                "line_count",
+                "has_attribution_line",
+                "line_layouts",
+                "raw_types",
+            }:
                 left.setdefault("attrs", {})[k] = v
     lsrc = left.setdefault("source", {})
     rsrc = right.get("source", {})
@@ -43,8 +50,12 @@ def _merge_block_pair(
         lsrc["pages"] = sorted(lpages)
     spans = lsrc.setdefault("spans", [])
     if not spans:
-        spans.append({"page": lsrc.get("page"), "bbox": lsrc.get("bbox"), "block_id": left.get("block_id")})
-    spans.append({"page": rsrc.get("page"), "bbox": rsrc.get("bbox"), "block_id": right.get("block_id")})
+        spans.append(
+            {"page": lsrc.get("page"), "bbox": lsrc.get("bbox"), "block_id": left.get("block_id")}
+        )
+    spans.append(
+        {"page": rsrc.get("page"), "bbox": rsrc.get("bbox"), "block_id": right.get("block_id")}
+    )
     if interruptions:
         ints = lsrc.setdefault("interruption_spans", [])
         ints.extend(interruptions)
@@ -54,7 +65,7 @@ def _merge_block_pair(
     if left.get("block_id") not in merged:
         merged.append(left.get("block_id"))
     right_merged = (right.get("attrs") or {}).get("merged_from") or []
-    for rb in [right.get("block_id")] + list(right_merged):
+    for rb in [right.get("block_id"), *list(right_merged)]:
         if rb is not None and rb not in merged:
             merged.append(rb)
     attrs["merge_reason"] = reason
@@ -88,7 +99,9 @@ def _merge_inline_runs(
 
     left_side = _runs_or_text(left_runs, original_left_text)
     right_side = _runs_or_text(right_runs, original_right_text)
-    separator = _inline_join_separator(str(left.get("text") or ""), original_left_text, original_right_text)
+    separator = _inline_join_separator(
+        str(left.get("text") or ""), original_left_text, original_right_text
+    )
     if left_side:
         _trim_last_text_run_right(left_side)
     if right_side:
@@ -169,7 +182,15 @@ def _refresh_display_block_attrs(
     attrs = b.setdefault("attrs", {})
     existing_note_refs = list(attrs.get("note_refs", []))
     existing_raw_types = attrs.get("raw_types")
-    for k in ["role", "content_form", "content_form_confidence", "content_form_scores", "classification_evidence", "quote_text", "attribution"]:
+    for k in [
+        "role",
+        "content_form",
+        "content_form_confidence",
+        "content_form_scores",
+        "classification_evidence",
+        "quote_text",
+        "attribution",
+    ]:
         attrs.pop(k, None)
     attrs["layout_role"] = attrs.get("layout_role", layout_role)
     attrs["line_count"] = len(lines)

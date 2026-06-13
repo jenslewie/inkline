@@ -30,11 +30,11 @@ def test_run_mineru_raw_writes_run_state(tmp_path, monkeypatch):
         assert kwargs["backend"] == "vlm-auto-engine"
         assert kwargs["parse_method"] == "auto"
 
-    setattr(common, "read_fn", read_fn)
-    setattr(common, "do_parse", do_parse)
+    common.read_fn = read_fn
+    common.do_parse = do_parse
 
     enum_class = types.ModuleType("mineru.utils.enum_class")
-    setattr(enum_class, "MakeMode", types.SimpleNamespace(MM_MD="mm_markdown"))
+    enum_class.MakeMode = types.SimpleNamespace(MM_MD="mm_markdown")
 
     monkeypatch.setitem(sys.modules, "mineru", types.ModuleType("mineru"))
     monkeypatch.setitem(sys.modules, "mineru.cli", types.ModuleType("mineru.cli"))
@@ -96,10 +96,7 @@ def test_find_mineru_run_version_info_from_nested_raw_file(tmp_path):
 
 def test_model_info_uses_huggingface_repository_name(tmp_path):
     model_root = (
-        tmp_path
-        / "models--opendatalab--MinerU2.5-Pro-2605-1.2B"
-        / "snapshots"
-        / "revision"
+        tmp_path / "models--opendatalab--MinerU2.5-Pro-2605-1.2B" / "snapshots" / "revision"
     )
     model_root.mkdir(parents=True)
     (model_root / "config.json").write_text(
@@ -127,10 +124,7 @@ def test_cached_vlm_model_root_uses_mineru_default_repo(tmp_path, monkeypatch):
         / "models--opendatalab--MinerU2.5-Pro-2605-1.2B"
         / "snapshots"
     )
-    model_root = (
-        snapshot_root
-        / "revision"
-    )
+    model_root = snapshot_root / "revision"
     model_root.mkdir(parents=True)
     (model_root / "config.json").write_text("{}", encoding="utf-8")
     (model_root / "model.safetensors").write_bytes(b"weights")

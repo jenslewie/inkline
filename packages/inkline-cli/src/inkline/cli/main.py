@@ -16,7 +16,9 @@ from inkline.rag.types import dataclass_to_dict
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="inkline", description="Composable document parsing, export, and RAG pipeline.")
+    parser = argparse.ArgumentParser(
+        prog="inkline", description="Composable document parsing, export, and RAG pipeline."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ingest = subparsers.add_parser("ingest", help="Ingest source documents.")
@@ -41,7 +43,9 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_pdf.add_argument("--output", required=True)
     ingest_pdf.set_defaults(handler=_ingest_pdf)
 
-    import_cmd = subparsers.add_parser("import", help="Import an existing document format to canonical.")
+    import_cmd = subparsers.add_parser(
+        "import", help="Import an existing document format to canonical."
+    )
     import_sub = import_cmd.add_subparsers(dest="kind", required=True)
     import_epub_cmd = import_sub.add_parser("epub", help="Import EPUB to canonical.")
     import_epub_cmd.add_argument("input")
@@ -64,7 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
     rag_chunk.add_argument("--output", required=True)
     rag_chunk.set_defaults(handler=_rag_chunk)
 
-    rag_embed = rag_sub.add_parser("embed", help="Embed chunk JSONL with an OpenAI-compatible service.")
+    rag_embed = rag_sub.add_parser(
+        "embed", help="Embed chunk JSONL with an OpenAI-compatible service."
+    )
     rag_embed.add_argument("chunks")
     rag_embed.add_argument("--output", required=True)
     rag_embed.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
@@ -142,7 +148,10 @@ def _rag_embed(args: argparse.Namespace) -> int:
     for start in range(0, len(rows), args.batch_size):
         batch = rows[start : start + args.batch_size]
         vectors = client.embed([row["text"] for row in batch])
-        output_rows.extend({**row, "embedding": vector, "embedding_model": args.model} for row, vector in zip(batch, vectors))
+        output_rows.extend(
+            {**row, "embedding": vector, "embedding_model": args.model}
+            for row, vector in zip(batch, vectors, strict=True)
+        )
     count = write_jsonl(args.output, output_rows)
     print(f"Wrote embeddings: {args.output} rows={count}")
     return 0
@@ -151,7 +160,9 @@ def _rag_embed(args: argparse.Namespace) -> int:
 def _rag_index(args: argparse.Namespace) -> int:
     rows = list(read_jsonl(args.embeddings))
     vectors = [row["embedding"] for row in rows]
-    docstore_rows = [{key: value for key, value in row.items() if key != "embedding"} for row in rows]
+    docstore_rows = [
+        {key: value for key, value in row.items() if key != "embedding"} for row in rows
+    ]
     output_dir = Path(args.output)
     result = build_faiss_index(
         vectors,
@@ -160,7 +171,9 @@ def _rag_index(args: argparse.Namespace) -> int:
         output_dir / "docstore.jsonl",
         output_dir / "metadata.json",
     )
-    print(f"Wrote FAISS index: {output_dir} vectors={result.vector_count} dimension={result.dimension}")
+    print(
+        f"Wrote FAISS index: {output_dir} vectors={result.vector_count} dimension={result.dimension}"
+    )
     return 0
 
 
@@ -176,7 +189,9 @@ def _rag_search(args: argparse.Namespace) -> int:
             print(json.dumps(dataclass_to_dict(result), ensure_ascii=False))
     else:
         for result in results:
-            print(f"[{result.rank}] score={result.score:.4f} {result.title} / {result.chapter_title}")
+            print(
+                f"[{result.rank}] score={result.score:.4f} {result.title} / {result.chapter_title}"
+            )
             print(result.text[:500].strip())
             print()
     return 0

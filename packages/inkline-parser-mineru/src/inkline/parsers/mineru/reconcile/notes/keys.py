@@ -7,8 +7,20 @@ from typing import Any, Dict, Optional
 
 from ...extraction.text import normalize_note_marker, normalize_ws
 
-
-_CHINESE_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_CHINESE_DIGITS = {
+    "零": 0,
+    "〇": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
 
 
 def note_ref_key(ref: Dict[str, Any]) -> tuple[str, str, int | None]:
@@ -31,7 +43,10 @@ def leading_note_marker(text: str, include_superscript: bool = False) -> Optiona
     m = re.match(r"^([*\uff0a]{1,3})", text)
     if m:
         return normalize_note_marker(m.group(1).replace("\uff0a", "*"))
-    m = re.match(r"^(\d{1,3})(?=$|\s|[.\uff0e\uff61\u3001)%)\uff09\u300a\u300e\u201c\"'\u2018\u300c\u300e])", text)
+    m = re.match(
+        r"^(\d{1,3})(?=$|\s|[.\uff0e\uff61\u3001)%)\uff09\u300a\u300e\u201c\"'\u2018\u300c\u300e])",
+        text,
+    )
     if m:
         return normalize_note_marker(m.group(1))
     head = text.split(" ", 1)[0].rstrip(".\uff0e\uff61\u3001)")

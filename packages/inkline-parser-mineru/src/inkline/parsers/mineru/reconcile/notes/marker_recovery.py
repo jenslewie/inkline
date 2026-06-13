@@ -15,10 +15,10 @@ from ...extraction.text import normalize_note_marker, normalize_ws
 from ...schema.models import CanonicalBlock
 from .keys import leading_note_marker
 from .marker_inline import (
-    _InlineMarkerLocation,
     _append_note_ref,
-    _inline_runs_text,
     _inline_note_run_char_index,
+    _inline_runs_text,
+    _InlineMarkerLocation,
     _insert_inline_note_run,
     _note_refs,
     _raw_index_for_normalized_text,
@@ -27,7 +27,6 @@ from .marker_location import (
     _existing_ref_marker_on_page,
     _locate_qwen_body_ref,
     _qwen_marker_page_items,
-    _qwen_context_without_neighbor_markers,
 )
 from .marker_offsets import (
     _offset_after_terminal_punctuation_cluster,
@@ -35,7 +34,6 @@ from .marker_offsets import (
     _qwen_marker_offset_in_text,
 )
 from .marker_patterns import BODY_TYPES, TERMINAL_PUNCTUATION, _marker_int, _visible_note_candidates
-from .resolver import _PageFootnoteStrategy
 from .scopes import _EndnoteSectionStrategy, _NoteContext
 
 
@@ -68,8 +66,7 @@ def _recover_direct_page_footnote_qwen_refs(
                 existing_by_page.setdefault(page, set()).add(marker)
 
     defs_by_page: Dict[int, Set[str]] = {
-        page: {str(marker) for marker in markers}
-        for page, markers in page_defs.items()
+        page: {str(marker) for marker in markers} for page, markers in page_defs.items()
     }
     for page, markers in page_symbol_defs.items():
         defs_by_page.setdefault(page, set()).update(markers)
@@ -90,13 +87,27 @@ def _recover_direct_page_footnote_qwen_refs(
 
         # Match phase: locate body refs, refine existing refs, collect new-match candidates
         located_items, ambiguous_keys, ambiguous_anchor_keys = _collect_page_footnote_qwen_matches(
-            blocks, context, blocks_by_id, page, page_defs_text, existing, evidence,
+            blocks,
+            context,
+            blocks_by_id,
+            page,
+            page_defs_text,
+            existing,
+            evidence,
         )
 
         # Apply phase: write non-ambiguous new note refs
         _apply_page_footnote_qwen_matches(
-            blocks, context, blocks_by_id, block_index, refs_by_page, existing, page,
-            located_items, ambiguous_keys, ambiguous_anchor_keys,
+            blocks,
+            context,
+            blocks_by_id,
+            block_index,
+            refs_by_page,
+            existing,
+            page,
+            located_items,
+            ambiguous_keys,
+            ambiguous_anchor_keys,
         )
 
 
@@ -134,7 +145,9 @@ def _collect_page_footnote_qwen_matches(
         target, inline_location = located
         if _existing_ref_marker_on_page(target, marker, page, context):
             _update_existing_qwen_ref_inline_location(target, marker, page, item, inline_location)
-            _align_symbol_refs_from_qwen_footnote_context(blocks_by_id, target, page, item, inline_location)
+            _align_symbol_refs_from_qwen_footnote_context(
+                blocks_by_id, target, page, item, inline_location
+            )
             continue
         located_items.append((target, marker, item, inline_location))
     ambiguous_keys = _ambiguous_qwen_location_keys(located_items)
@@ -185,7 +198,9 @@ def _apply_page_footnote_qwen_matches(
         if marker_int is not None:
             refs_by_page.setdefault(page, []).append((block_index[id(target)], target, marker_int))
             refs_by_page[page].sort(key=lambda value: (value[0], value[2]))
-        _align_symbol_refs_from_qwen_footnote_context(blocks_by_id, target, page, item, inline_location)
+        _align_symbol_refs_from_qwen_footnote_context(
+            blocks_by_id, target, page, item, inline_location
+        )
 
 
 def _recover_direct_scoped_endnote_qwen_refs(
@@ -200,7 +215,9 @@ def _recover_direct_scoped_endnote_qwen_refs(
     if not defs_by_scope:
         return
     existing_by_scope = _existing_body_ref_markers_by_scope(blocks, context)
-    located_items: List[Tuple[CanonicalBlock, str, int, Dict[str, Any], _InlineMarkerLocation, Optional[str]]] = []
+    located_items: List[
+        Tuple[CanonicalBlock, str, int, Dict[str, Any], _InlineMarkerLocation, Optional[str]]
+    ] = []
     for evidence in _qwen_marker_page_items(qwen_marker_pages):
         page = evidence.get("page")
         if not isinstance(page, int):
@@ -223,14 +240,22 @@ def _recover_direct_scoped_endnote_qwen_refs(
             located_items.append((target, marker, page, item, inline_location, scope))
 
     ambiguous_keys = _ambiguous_qwen_location_keys(
-        [(target, marker, item, inline_location) for target, marker, _page, item, inline_location, _scope in located_items]
+        [
+            (target, marker, item, inline_location)
+            for target, marker, _page, item, inline_location, _scope in located_items
+        ]
     )
     ambiguous_anchor_keys = _ambiguous_qwen_anchor_keys(
-        [(target, marker, item, inline_location) for target, marker, _page, item, inline_location, _scope in located_items]
+        [
+            (target, marker, item, inline_location)
+            for target, marker, _page, item, inline_location, _scope in located_items
+        ]
     )
     located_items.sort(key=lambda located: (blocks.index(located[0]), -located[4].char_index))
     for target, marker, page, item, inline_location, scope in located_items:
-        if (id(target), inline_location.char_index) in ambiguous_keys or _qwen_anchor_key(target, marker, item) in ambiguous_anchor_keys:
+        if (id(target), inline_location.char_index) in ambiguous_keys or _qwen_anchor_key(
+            target, marker, item
+        ) in ambiguous_anchor_keys:
             continue
         if marker in existing_by_scope.get(scope, set()):
             continue
@@ -259,12 +284,16 @@ def _scoped_endnote_definition_markers(
     context: _NoteContext,
 ) -> Dict[Optional[str], Set[str]]:
     counts: Dict[Optional[str], Dict[str, int]] = {}
-    for candidate in _EndnoteSectionStrategy("chapter_endnote", scope_required=True).collect(blocks, context):
+    for candidate in _EndnoteSectionStrategy("chapter_endnote", scope_required=True).collect(
+        blocks, context
+    ):
         marker = normalize_note_marker(candidate.marker or "")
         if marker and candidate.scope_key:
             scope_counts = counts.setdefault(candidate.scope_key, {})
             scope_counts[marker] = scope_counts.get(marker, 0) + 1
-    for candidate in _EndnoteSectionStrategy("book_endnote", scope_required=False).collect(blocks, context):
+    for candidate in _EndnoteSectionStrategy("book_endnote", scope_required=False).collect(
+        blocks, context
+    ):
         marker = normalize_note_marker(candidate.marker or "")
         if marker:
             book_counts = counts.setdefault(None, {})
@@ -319,7 +348,10 @@ def _has_block_specific_qwen_ref(
         if page not in context.pages_for(block):
             continue
         for ref in _note_refs(block):
-            if normalize_note_marker(ref.get("marker", "")) != marker or ref.get("source_page") != page:
+            if (
+                normalize_note_marker(ref.get("marker", "")) != marker
+                or ref.get("source_page") != page
+            ):
                 continue
             raw_evidence = ref.get("evidence")
             evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
@@ -349,7 +381,10 @@ def _update_existing_qwen_ref_inline_location(
             changed = True
             continue
         verified_location = _user_verified_inline_location(block, ref)
-        if verified_location is not None and verified_location.char_index != inline_location.char_index:
+        if (
+            verified_location is not None
+            and verified_location.char_index != inline_location.char_index
+        ):
             if _inline_note_run_char_index(block, ref) == verified_location.char_index:
                 continue
             ref.setdefault("evidence", {}).update(verified_location.evidence)
@@ -373,7 +408,11 @@ def _update_existing_qwen_ref_inline_location(
 
 
 def _has_valid_existing_structured_inline_run(block: CanonicalBlock, ref: Dict[str, Any]) -> bool:
-    if str(ref.get("source") or "") not in {"equation_inline", "equation_interline", "trailing_text"}:
+    if str(ref.get("source") or "") not in {
+        "equation_inline",
+        "equation_interline",
+        "trailing_text",
+    }:
         return False
     runs = (block.get("attrs") or {}).get("inline_runs") or block.get("inline_runs")
     if not isinstance(runs, list):
@@ -405,7 +444,9 @@ def _structured_inline_runs_match_text(runs: Sequence[Any], text: str) -> bool:
     return reconstructed == text or normalize_ws(reconstructed) == normalize_ws(text)
 
 
-def _visible_raw_marker_inline_location(block: CanonicalBlock, ref: Dict[str, Any]) -> Optional[_InlineMarkerLocation]:
+def _visible_raw_marker_inline_location(
+    block: CanonicalBlock, ref: Dict[str, Any]
+) -> Optional[_InlineMarkerLocation]:
     raw_marker = str(ref.get("raw_marker") or "")
     marker = normalize_note_marker(ref.get("marker", ""))
     text = str(block.get("text") or "")
@@ -424,7 +465,10 @@ def _visible_raw_marker_inline_location(block: CanonicalBlock, ref: Dict[str, An
     if len(offsets) != 1:
         return None
     offset = offsets[0]
-    if not any(raw == raw_marker and normalized == marker for raw, normalized, _reason in _visible_note_candidates(text)):
+    if not any(
+        raw == raw_marker and normalized == marker
+        for raw, normalized, _reason in _visible_note_candidates(text)
+    ):
         return None
     block["text"] = text[:offset] + text[offset + len(raw_marker) :]
     return _InlineMarkerLocation(
@@ -438,7 +482,9 @@ def _visible_raw_marker_inline_location(block: CanonicalBlock, ref: Dict[str, An
     )
 
 
-def _user_verified_inline_location(block: CanonicalBlock, ref: Dict[str, Any]) -> Optional[_InlineMarkerLocation]:
+def _user_verified_inline_location(
+    block: CanonicalBlock, ref: Dict[str, Any]
+) -> Optional[_InlineMarkerLocation]:
     raw_evidence = ref.get("evidence")
     evidence = raw_evidence if isinstance(raw_evidence, dict) else {}
     reason = str(evidence.get("manual_correction_reason") or "")
@@ -470,7 +516,6 @@ def _align_symbol_refs_from_qwen_footnote_context(
     after = normalize_ws(str(item.get("after_text") or ""))
     if not after:
         return
-    changed = False
     for ref in _note_refs(block):
         marker = normalize_note_marker(ref.get("marker", ""))
         if not marker.startswith("*") or ref.get("source_page") != page:
@@ -481,7 +526,9 @@ def _align_symbol_refs_from_qwen_footnote_context(
         ref.setdefault("evidence", {})["qwen_symbol_context_after_text"] = after
         if _inline_note_run_char_index(block, ref) != inline_location.char_index:
             _insert_inline_note_run(block, ref, inline_location.char_index)
-    _split_adjacent_symbol_numeric_refs_around_terminal_punctuation(block, page, inline_location.char_index)
+    _split_adjacent_symbol_numeric_refs_around_terminal_punctuation(
+        block, page, inline_location.char_index
+    )
 
 
 def _qwen_after_text_matches_note_definition(after: str, note_block: CanonicalBlock) -> bool:
@@ -490,24 +537,29 @@ def _qwen_after_text_matches_note_definition(after: str, note_block: CanonicalBl
         return False
     marker = leading_note_marker(note_text, include_superscript=True) or ""
     if marker:
-        note_text = normalize_ws(note_text[len(marker):])
+        note_text = normalize_ws(note_text[len(marker) :])
     note_text = note_text.lstrip("*＊.．、 \t")
-    return note_text.startswith(after) or _qwen_fold_bracket_width(note_text).startswith(_qwen_fold_bracket_width(after))
+    return note_text.startswith(after) or _qwen_fold_bracket_width(note_text).startswith(
+        _qwen_fold_bracket_width(after)
+    )
 
 
-def _split_adjacent_symbol_numeric_refs_around_terminal_punctuation(block: CanonicalBlock, page: int, offset: int) -> bool:
+def _split_adjacent_symbol_numeric_refs_around_terminal_punctuation(
+    block: CanonicalBlock, page: int, offset: int
+) -> bool:
     text = str(block.get("text") or "")
     if offset < 0 or offset >= len(text) or text[offset] not in TERMINAL_PUNCTUATION:
         return False
     refs = [
         ref
         for ref in _note_refs(block)
-        if ref.get("source_page") == page
-        and _inline_note_run_char_index(block, ref) == offset
+        if ref.get("source_page") == page and _inline_note_run_char_index(block, ref) == offset
     ]
     if not any(normalize_note_marker(ref.get("marker", "")).startswith("*") for ref in refs):
         return False
-    numeric_refs = [ref for ref in refs if _marker_int(normalize_note_marker(ref.get("marker", ""))) is not None]
+    numeric_refs = [
+        ref for ref in refs if _marker_int(normalize_note_marker(ref.get("marker", ""))) is not None
+    ]
     if not numeric_refs:
         return False
     adjusted_offset = _offset_after_terminal_punctuation_cluster(text, offset)
@@ -520,7 +572,7 @@ def _split_adjacent_symbol_numeric_refs_around_terminal_punctuation(block: Canon
 
 
 def _ambiguous_qwen_location_keys(
-    located_items: Sequence[Tuple[CanonicalBlock, str, Dict[str, Any], _InlineMarkerLocation]]
+    located_items: Sequence[Tuple[CanonicalBlock, str, Dict[str, Any], _InlineMarkerLocation]],
 ) -> Set[Tuple[int, int]]:
     markers_by_key: Dict[Tuple[int, int], Set[str]] = {}
     for target, marker, _item, inline_location in located_items:
@@ -529,21 +581,32 @@ def _ambiguous_qwen_location_keys(
 
 
 def _ambiguous_qwen_anchor_keys(
-    located_items: Sequence[Tuple[CanonicalBlock, str, Dict[str, Any], _InlineMarkerLocation]]
+    located_items: Sequence[Tuple[CanonicalBlock, str, Dict[str, Any], _InlineMarkerLocation]],
 ) -> Set[Tuple[int, str, str, str]]:
     markers_by_anchor: Dict[Tuple[int, str, str], Set[str]] = {}
     for target, marker, item, _inline_location in located_items:
-        key = (id(target), normalize_ws(str(item.get("before_text") or "")), normalize_ws(str(item.get("after_text") or "")))
+        key = (
+            id(target),
+            normalize_ws(str(item.get("before_text") or "")),
+            normalize_ws(str(item.get("after_text") or "")),
+        )
         markers_by_anchor.setdefault(key, set()).add(marker)
     ambiguous_anchors = {key for key, markers in markers_by_anchor.items() if len(markers) > 1}
     return {
         _qwen_anchor_key(target, marker, item)
         for target, marker, item, _inline_location in located_items
-        if (id(target), normalize_ws(str(item.get("before_text") or "")), normalize_ws(str(item.get("after_text") or ""))) in ambiguous_anchors
+        if (
+            id(target),
+            normalize_ws(str(item.get("before_text") or "")),
+            normalize_ws(str(item.get("after_text") or "")),
+        )
+        in ambiguous_anchors
     }
 
 
-def _qwen_anchor_key(target: CanonicalBlock, marker: str, item: Dict[str, Any]) -> Tuple[int, str, str, str]:
+def _qwen_anchor_key(
+    target: CanonicalBlock, marker: str, item: Dict[str, Any]
+) -> Tuple[int, str, str, str]:
     return (
         id(target),
         marker,
@@ -552,7 +615,9 @@ def _qwen_anchor_key(target: CanonicalBlock, marker: str, item: Dict[str, Any]) 
     )
 
 
-def _strip_qwen_visible_marker(block: CanonicalBlock, inline_location: _InlineMarkerLocation) -> None:
+def _strip_qwen_visible_marker(
+    block: CanonicalBlock, inline_location: _InlineMarkerLocation
+) -> None:
     marker_text = str(inline_location.evidence.get("qwen_visible_marker_text") or "")
     offset = inline_location.char_index
     if not marker_text:
@@ -580,9 +645,7 @@ def _strip_qwen_visible_marker(block: CanonicalBlock, inline_location: _InlineMa
     block["text"] = new_text
 
 
-def _strip_marker_from_text_runs(
-    runs: List[Any], offset: int, marker_len: int
-) -> None:
+def _strip_marker_from_text_runs(runs: List[Any], offset: int, marker_len: int) -> None:
     removal_end = offset + marker_len
     consumed = 0
     for run in runs:
@@ -622,9 +685,7 @@ def _strip_marker_walk_runs_with_refs(
             block_pos += ref_len
 
 
-def _note_ref_text_len_in_block(
-    run: Dict[str, Any], block_text: str, block_pos: int
-) -> int:
+def _note_ref_text_len_in_block(run: Dict[str, Any], block_text: str, block_pos: int) -> int:
     raw_marker = str(run.get("raw_marker") or "")
     marker = str(run.get("marker") or "")
     for candidate in [raw_marker, marker]:

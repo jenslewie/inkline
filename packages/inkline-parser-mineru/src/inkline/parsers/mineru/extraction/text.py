@@ -6,7 +6,14 @@ import re
 from typing import Any, Dict, List, Sequence, Tuple
 
 from ..schema.models import NoteRef, RawBlock
-from ..schema.patterns import ATTR_RE, CHINESE_RE, EQUATION_NOTE_RE, NOTE_MARKER_RE, PAGE_NUM_RE, TOC_LINE_RE, TRAILING_NOTE_RE
+from ..schema.patterns import (
+    ATTR_RE,
+    CHINESE_RE,
+    EQUATION_NOTE_RE,
+    NOTE_MARKER_RE,
+    PAGE_NUM_RE,
+    TRAILING_NOTE_RE,
+)
 
 _LATEX_GREEK = {
     r"\alpha": "α",
@@ -104,12 +111,14 @@ def extract_text_notes_and_runs(obj: Any) -> Tuple[str, List[NoteRef], List[Dict
                 marker = _equation_to_marker(raw_marker)
                 if marker and NOTE_MARKER_RE.fullmatch(marker):
                     notes.append(NoteRef(marker=marker, source=typ, raw_marker=raw_marker))
-                    runs.append({
-                        "type": "note_ref",
-                        "marker": marker,
-                        "raw_marker": raw_marker,
-                        "source": typ,
-                    })
+                    runs.append(
+                        {
+                            "type": "note_ref",
+                            "marker": marker,
+                            "raw_marker": raw_marker,
+                            "source": typ,
+                        }
+                    )
                 else:
                     append_text(_equation_text(raw_marker))
             else:
@@ -183,7 +192,11 @@ def merge_inline_runs(blocks: Sequence[RawBlock], separator: str = "\n") -> List
 
 def _inline_runs_for_raw_block(block: RawBlock) -> List[Dict[str, Any]]:
     text, extra = strip_trailing_text_note(block.text)
-    runs: List[Dict[str, Any]] = [dict(run) for run in block.inline_runs] if block.inline_runs else [{"type": "text", "text": text}]
+    runs: List[Dict[str, Any]] = (
+        [dict(run) for run in block.inline_runs]
+        if block.inline_runs
+        else [{"type": "text", "text": text}]
+    )
     if extra and not any(run.get("type") == "note_ref" for run in runs):
         runs = [{"type": "text", "text": text}]
         for ref in extra:
@@ -212,6 +225,7 @@ def _append_inline_text(runs: List[Dict[str, Any]], text: str) -> None:
         runs[-1]["text"] = str(runs[-1].get("text", "")) + text
     else:
         runs.append({"type": "text", "text": text})
+
 
 def normalize_toc_number(s: str) -> str:
     # Common OCR confusions in this book: I->1, II->11, io->10, i6->16, 3。->30.

@@ -6,11 +6,10 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Sequence
 
-from .page_detectors import body_text_like_page, should_snapshot_layout_page
 from ..extraction.text import normalize_ws
 from ..schema.block_types import DISPLAY_BLOCK, HEADING, LIST_ITEM, PARAGRAPH, TABLE
 from ..schema.models import LayoutStats, RawBlock
-
+from .page_detectors import body_text_like_page, should_snapshot_layout_page
 
 _COPYRIGHT_RE = re.compile(r"(?:ISBN|CIP|版权|Copyright|出版|印刷|定价|版权所有)")
 _STRICT_COPYRIGHT_RE = re.compile(r"(?:CIP|版权|Copyright|版权所有)")
@@ -108,7 +107,10 @@ def _first_content_page(blocks: Sequence[dict[str, Any]]) -> int | None:
         page = (block.get("source") or {}).get("page")
         if not isinstance(page, int):
             continue
-        if role in {"chapter_title", "part_title"} or re.match(r"^(?:第[一二三四五六七八九十百零〇0-9]+[章节部篇]|[一二三四五六七八九十百零〇0-9]+[、.．])", text):
+        if role in {"chapter_title", "part_title"} or re.match(
+            r"^(?:第[一二三四五六七八九十百零〇0-9]+[章节部篇]|[一二三四五六七八九十百零〇0-9]+[、.．])",
+            text,
+        ):
             return page
     return None
 
@@ -117,12 +119,15 @@ def _last_content_page(blocks: Sequence[dict[str, Any]]) -> int | None:
     pages = [
         (block.get("source") or {}).get("page")
         for block in blocks
-        if block.get("type") in {HEADING, PARAGRAPH, DISPLAY_BLOCK, TABLE, LIST_ITEM} and (block.get("source") or {}).get("page")
+        if block.get("type") in {HEADING, PARAGRAPH, DISPLAY_BLOCK, TABLE, LIST_ITEM}
+        and (block.get("source") or {}).get("page")
     ]
     return max((int(page) for page in pages if isinstance(page, int)), default=None)
 
 
-def _region_for_page(page: int, first_content_page: int | None, last_content_page: int | None) -> str:
+def _region_for_page(
+    page: int, first_content_page: int | None, last_content_page: int | None
+) -> str:
     if first_content_page is not None and page < first_content_page:
         return "front_matter"
     if last_content_page is not None and page > last_content_page:
@@ -155,10 +160,22 @@ def _page_role_for_page(
 
     if page == first_page and snapshot and compact_title and compact_title in compact_text:
         return "cover", "high", [*signals, "first_page"]
-    if region == "front_matter" and _STRICT_COPYRIGHT_RE.search(text) and len(_COPYRIGHT_RE.findall(text)) >= 3:
+    if (
+        region == "front_matter"
+        and _STRICT_COPYRIGHT_RE.search(text)
+        and len(_COPYRIGHT_RE.findall(text)) >= 3
+    ):
         return "copyright_page", "high", [*signals, "copyright_markers"]
-    text_like_count = sum(1 for block in raw_blocks if block.raw_type in {"paragraph", "title"} and block.text)
-    if region == "front_matter" and text_like_count <= 8 and compact_title and compact_title in compact_text and _AUTHOR_RE.search(text):
+    text_like_count = sum(
+        1 for block in raw_blocks if block.raw_type in {"paragraph", "title"} and block.text
+    )
+    if (
+        region == "front_matter"
+        and text_like_count <= 8
+        and compact_title
+        and compact_title in compact_text
+        and _AUTHOR_RE.search(text)
+    ):
         return "title_page", "high", [*signals, "title_author_publisher_markers"]
     if page == last_page and snapshot and region == "back_matter":
         return "back_cover", "medium", [*signals, "last_page"]

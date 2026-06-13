@@ -6,7 +6,6 @@ from typing import Any, Iterator
 from inkline.canonical.io import write_jsonl
 from inkline.canonical.source_map import bbox_ref
 
-
 TEXT_TYPES = {
     "paragraph",
     "display_block",
@@ -60,7 +59,11 @@ def _make_text_chunk(
     heading_path: list[str],
     blocks: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    pages = [block.get("source", {}).get("page") for block in blocks if block.get("source", {}).get("page")]
+    pages = [
+        block.get("source", {}).get("page")
+        for block in blocks
+        if block.get("source", {}).get("page")
+    ]
     bbox_refs = [ref for block in blocks if (ref := bbox_ref(block))]
     text = "\n\n".join(block["text"] for block in blocks if block.get("text"))
     return {
@@ -77,7 +80,9 @@ def _make_text_chunk(
         "chunk_strategy": "canonical_heading_path",
         "text": text,
         "heading_path": list(heading_path),
-        "chapter_title": heading_path[-1] if heading_path else metadata.get("title") or metadata["doc_id"],
+        "chapter_title": heading_path[-1]
+        if heading_path
+        else metadata.get("title") or metadata["doc_id"],
         "page_start": min(pages) if pages else None,
         "page_end": max(pages) if pages else None,
         "block_ids": [block["block_id"] for block in blocks],
@@ -109,7 +114,9 @@ def _make_table_chunk(
         "chunk_strategy": "canonical_heading_path",
         "text": text,
         "heading_path": list(heading_path),
-        "chapter_title": heading_path[-1] if heading_path else metadata.get("title") or metadata["doc_id"],
+        "chapter_title": heading_path[-1]
+        if heading_path
+        else metadata.get("title") or metadata["doc_id"],
         "page_start": page,
         "page_end": page,
         "block_ids": [block["block_id"]],

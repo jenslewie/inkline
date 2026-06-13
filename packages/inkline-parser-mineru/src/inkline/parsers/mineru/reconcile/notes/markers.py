@@ -9,13 +9,10 @@ from ...extraction.text import normalize_note_marker
 from ...schema.block_types import FOOTNOTE
 from ...schema.models import CanonicalBlock
 from .keys import leading_note_marker
-from .marker_location import _locate_qwen_body_ref  # compatibility re-export
-from .marker_offsets import _qwen_marker_offset_in_text  # compatibility re-export
 from .marker_patterns import _marker_int
 from .marker_recovery import (
     _recover_direct_page_footnote_qwen_refs,
-    _recover_direct_scoped_endnote_qwen_refs,
-    _update_existing_qwen_ref_inline_location,  # compatibility re-export
+    _recover_direct_scoped_endnote_qwen_refs,  # compatibility re-export
 )
 from .resolver import _PageFootnoteStrategy
 from .scopes import _EndnoteSectionStrategy, _NoteContext
@@ -23,7 +20,13 @@ from .scopes import _EndnoteSectionStrategy, _NoteContext
 __all__ = ["recover_missing_note_refs"]
 
 
-def recover_missing_note_refs(blocks: List[Dict[str, Any]], source_pdf: Any = None, *_args: Any, pdf_cache: Optional[PdfPageCache] = None, **_kwargs: Any) -> None:
+def recover_missing_note_refs(
+    blocks: List[Dict[str, Any]],
+    source_pdf: Any = None,
+    *_args: Any,
+    pdf_cache: Optional[PdfPageCache] = None,
+    **_kwargs: Any,
+) -> None:
     """Recover conservative inline note refs before final note linking.
 
     MinerU sometimes preserves note bodies but flattens body-side markers into
@@ -86,7 +89,9 @@ def _collect_note_definition_markers(
     return scope_defs, page_defs, book_defs
 
 
-def _collect_page_symbol_definition_markers(blocks: List[CanonicalBlock], context: _NoteContext) -> Dict[int, Set[str]]:
+def _collect_page_symbol_definition_markers(
+    blocks: List[CanonicalBlock], context: _NoteContext
+) -> Dict[int, Set[str]]:
     out: Dict[int, Set[str]] = {}
     for block in blocks:
         if block.get("type") != FOOTNOTE:
@@ -94,7 +99,9 @@ def _collect_page_symbol_definition_markers(blocks: List[CanonicalBlock], contex
         attrs = block.get("attrs") or {}
         if attrs.get("role") != "page_footnote":
             continue
-        marker = normalize_note_marker(attrs.get("note_marker", "")) or (leading_note_marker(str(block.get("text") or ""), include_superscript=True) or "")
+        marker = normalize_note_marker(attrs.get("note_marker", "")) or (
+            leading_note_marker(str(block.get("text") or ""), include_superscript=True) or ""
+        )
         if not marker.startswith("*"):
             continue
         for page in context.pages_for(block):

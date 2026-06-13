@@ -5,13 +5,13 @@ from dataclasses import dataclass
 import pytest
 
 from inkline.canonical import sample_document
-from inkline.parse import registry
 from inkline.parse import (
     ParseRequest,
     ParseResult,
     ParserNotFoundError,
     parse_document,
     register_parser,
+    registry,
 )
 
 

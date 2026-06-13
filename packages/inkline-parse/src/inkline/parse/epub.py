@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from html.parser import HTMLParser
-from pathlib import Path
-from typing import Any
 import hashlib
 import re
 import zipfile
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Any
 
 from inkline.canonical.schema import make_block, make_document, make_toc_entry
 
 
-def import_epub(path: str | Path, *, doc_id: str | None = None, title: str | None = None) -> dict[str, Any]:
+def import_epub(
+    path: str | Path, *, doc_id: str | None = None, title: str | None = None
+) -> dict[str, Any]:
     epub_path = Path(path)
     if not epub_path.exists():
         raise FileNotFoundError(epub_path)
@@ -31,7 +33,11 @@ def import_epub(path: str | Path, *, doc_id: str | None = None, title: str | Non
             parsed.feed(html)
             chapter_title = parsed.title or f"Section {spine_index}"
             heading_id = f"b{block_no:06d}"
-            blocks.append(make_block(heading_id, "heading", chapter_title, level=1, attrs={"source_href": name}))
+            blocks.append(
+                make_block(
+                    heading_id, "heading", chapter_title, level=1, attrs={"source_href": name}
+                )
+            )
             toc.append(make_toc_entry(chapter_title, level=1, block_id=heading_id))
             block_no += 1
             for paragraph in parsed.paragraphs:
@@ -74,7 +80,9 @@ def _content_documents(archive: zipfile.ZipFile) -> list[str]:
 def _read_package_metadata(epub_path: Path) -> dict[str, str]:
     try:
         with zipfile.ZipFile(epub_path) as archive:
-            opf_name = next((name for name in archive.namelist() if name.lower().endswith(".opf")), None)
+            opf_name = next(
+                (name for name in archive.namelist() if name.lower().endswith(".opf")), None
+            )
             if opf_name is None:
                 return {}
             opf = archive.read(opf_name).decode("utf-8", errors="replace")

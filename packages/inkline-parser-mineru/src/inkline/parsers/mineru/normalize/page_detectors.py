@@ -10,15 +10,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence, Tuple
 
-from .builders import union_bbox
 from ..extraction.text import block_text
 from ..schema.models import LayoutStats, RawBlock
+from .builders import union_bbox
 
 
 def coord_page_size(blocks: Sequence[RawBlock], layout: LayoutStats) -> Tuple[float, float]:
     max_x = max((b.x1 for b in blocks if b.bbox), default=layout.page_width)
     max_y = max((b.y1 for b in blocks if b.bbox), default=layout.page_height)
-    if max_x > layout.page_width * 1.2 or max_y > layout.page_height * 1.2 or max_x > 650 or max_y > 750:
+    if (
+        max_x > layout.page_width * 1.2
+        or max_y > layout.page_height * 1.2
+        or max_x > 650
+        or max_y > 750
+    ):
         return 1000.0, 1000.0
     return layout.page_width, layout.page_height
 
@@ -39,7 +44,8 @@ def body_text_like_page(blocks: Sequence[RawBlock], layout: LayoutStats) -> bool
     meaningful = [
         b
         for b in blocks
-        if b.raw_type not in {"page_number", "page_header", "page_footer"} and (block_text(b) or b.raw_type in {"image", "chart", "table"})
+        if b.raw_type not in {"page_number", "page_header", "page_footer"}
+        and (block_text(b) or b.raw_type in {"image", "chart", "table"})
     ]
     if any(b.raw_type in {"image", "chart", "table"} for b in meaningful):
         return False
@@ -68,19 +74,23 @@ class _LayoutSnapshotPageDetector:
             return False, ""
 
         page_edge_blocks = [b for b in blocks if b.raw_type in {"page_header", "page_footer"}]
-        content_blocks = [b for b in blocks if b.raw_type not in {"page_number", "page_header", "page_footer"}]
+        content_blocks = [
+            b for b in blocks if b.raw_type not in {"page_number", "page_header", "page_footer"}
+        ]
         meaningful = [
-            b
-            for b in content_blocks
-            if block_text(b) or b.raw_type in {"image", "chart", "table"}
+            b for b in content_blocks if block_text(b) or b.raw_type in {"image", "chart", "table"}
         ]
         if not meaningful:
             return False, ""
 
-        text_like = [b for b in meaningful if b.raw_type in {"paragraph", "title"} and block_text(b)]
+        text_like = [
+            b for b in meaningful if b.raw_type in {"paragraph", "title"} and block_text(b)
+        ]
         media_like = [b for b in meaningful if b.raw_type in {"image", "chart", "table"}]
         short_texts = [b for b in text_like if len(block_text(b)) <= 40]
-        dense_metadata_layout = len(text_like) >= 18 and len(short_texts) >= max(14, int(len(text_like) * 0.8))
+        dense_metadata_layout = len(text_like) >= 18 and len(short_texts) >= max(
+            14, int(len(text_like) * 0.8)
+        )
         page_width, _page_height = coord_page_size(meaningful, self.layout)
         body_width_long_text = [
             b
@@ -90,7 +100,9 @@ class _LayoutSnapshotPageDetector:
             and b.width / max(1.0, page_width) >= 0.55
         ]
 
-        if any(b.raw_type == "chart" and dominant_block(b, meaningful, self.layout) for b in meaningful):
+        if any(
+            b.raw_type == "chart" and dominant_block(b, meaningful, self.layout) for b in meaningful
+        ):
             return True, "page_chart"
         if self._is_dense_media_diagram(meaningful, media_like, text_like, short_texts):
             return True, "page_diagram"
@@ -154,8 +166,12 @@ class _LayoutSnapshotPageDetector:
             return False
         if x_spread < 0.35 or y_spread < 0.25:
             return False
-        return has_media or (len(text_like) >= 12 and coverage_width >= 0.65 and coverage_height >= 0.55)
+        return has_media or (
+            len(text_like) >= 12 and coverage_width >= 0.65 and coverage_height >= 0.55
+        )
 
 
-def should_snapshot_layout_page(blocks: Sequence[RawBlock], layout: LayoutStats) -> Tuple[bool, str]:
+def should_snapshot_layout_page(
+    blocks: Sequence[RawBlock], layout: LayoutStats
+) -> Tuple[bool, str]:
     return _LayoutSnapshotPageDetector(layout=layout).detect(blocks)

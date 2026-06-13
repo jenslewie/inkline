@@ -5,24 +5,25 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
-from .page_top import reconcile_page_top_set_off_display_blocks
-
 from .date_fragments import (
-    reconcile_false_short_date_display_blocks,
-    reconcile_demoted_date_start_cross_page_paragraphs,
     reconcile_date_start_cross_page_paragraph_attrs,
+    reconcile_demoted_date_start_cross_page_paragraphs,
+    reconcile_false_short_date_display_blocks,
 )
+from .footnote_interruptions import reconcile_display_block_across_footnote_interruptions
 from .intro_runs import (
+    reconcile_intro_display_block_continuations,
     reconcile_parenthetical_header_display_block_runs,
     reconcile_short_display_intro_display_block_runs,
-    reconcile_intro_display_block_continuations,
 )
-from .record_runs import reconcile_record_style_display_block_runs
 from .overflow_tail_split import reconcile_page_bottom_overflow_tail_from_display_block
-from .footnote_interruptions import reconcile_display_block_across_footnote_interruptions
+from .page_top import reconcile_page_top_set_off_display_blocks
+from .record_runs import reconcile_record_style_display_block_runs
 
 
-def reconcile_display_block_cleanup_structures(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_display_block_cleanup_structures(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     reconcile_false_short_date_display_blocks(blocks, layout)
     reconcile_demoted_date_start_cross_page_paragraphs(blocks, layout)
     reconcile_date_start_cross_page_paragraph_attrs(blocks, layout)

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import Any, List, Optional, Tuple
 
-from ...extraction.text import normalize_note_marker, normalize_ws
+from ...extraction.text import normalize_note_marker
 from ...schema.block_types import CAPTION, DISPLAY_BLOCK, PARAGRAPH
-
 
 TERMINAL_PUNCTUATION = set("。！？；：.!?;:")
 CLOSING_PUNCTUATION = set("」』”’）】》)]}")
@@ -86,8 +85,14 @@ def _visible_note_candidates(text: str) -> List[Tuple[str, str, str]]:
                 end += 1
         raw = text[index:end]
         marker = _normalize_marker_digits(raw)
-        if 1 <= len(marker) <= MAX_NOTE_MARKER_DIGITS and _is_candidate_marker(text, index, end, raw):
-            reason = "superscript_digit" if _is_superscript_marker(raw) else "digit_after_terminal_punctuation"
+        if 1 <= len(marker) <= MAX_NOTE_MARKER_DIGITS and _is_candidate_marker(
+            text, index, end, raw
+        ):
+            reason = (
+                "superscript_digit"
+                if _is_superscript_marker(raw)
+                else "digit_after_terminal_punctuation"
+            )
             out.append((raw, marker, reason))
         index = end
     return out
@@ -133,7 +138,7 @@ def _next_text_disqualifies_marker(next_text: str) -> bool:
     stripped = next_text.lstrip()
     if not stripped:
         return False
-    if stripped[0].isdigit() or stripped[0].isascii() and stripped[0].isalpha():
+    if stripped[0].isdigit() or (stripped[0].isascii() and stripped[0].isalpha()):
         return True
     return any(stripped.startswith(prefix) for prefix in DISQUALIFY_NEXT_PREFIXES)
 

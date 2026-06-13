@@ -28,7 +28,9 @@ def test_cli_import_epub(tmp_path):
     write_canonical(canonical, sample_document())
 
     assert main(["export", "epub", str(canonical), "--output", str(epub)]) == 0
-    assert main(["import", "epub", str(epub), "--doc-id", "roundtrip", "--output", str(imported)]) == 0
+    assert (
+        main(["import", "epub", str(epub), "--doc-id", "roundtrip", "--output", str(imported)]) == 0
+    )
 
     payload = json.loads(imported.read_text(encoding="utf-8"))
     assert payload["metadata"]["doc_id"] == "roundtrip"
@@ -44,9 +46,7 @@ def test_cli_accepts_parser_names_not_known_at_build_time():
 
 
 def test_cli_disables_qwen_marker_repair_at_150_dpi_by_default():
-    args = build_parser().parse_args(
-        ["ingest", "pdf", "input.pdf", "--output", "canonical.json"]
-    )
+    args = build_parser().parse_args(["ingest", "pdf", "input.pdf", "--output", "canonical.json"])
 
     assert args.marker_locator_repair is False
     assert args.marker_locator_page_dpi == 150

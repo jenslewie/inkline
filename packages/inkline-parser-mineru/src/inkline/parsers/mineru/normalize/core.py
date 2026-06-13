@@ -58,34 +58,40 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 from inkline.canonical import SCHEMA_VERSION
 from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_OLLAMA_KEEP_ALIVE, DEFAULT_QWEN_MODEL
 
-from ..analysis.note_gap_report import build_note_ref_gap_report
-from ..extraction.text import normalize_note_marker, normalize_ws
 from ..analysis.layout import infer_layout_stats
+from ..analysis.note_gap_report import build_note_ref_gap_report
 from ..analysis.pdf_page_metrics import PdfPageCache
 from ..analysis.text_style import TextStyleAnalyzer
-from ..schema.block_types import CANONICAL_BLOCK_TYPES, FOOTNOTE
-from ..schema.models import IdFactory, RawBlock
-from .output_schema import normalize_display_blocks_for_layout_schema, remove_internal_note_ref_indexes
-from .page_processing import build_toc_from_blocks, extend_table_source_pages, process_page
-from .page_roles import build_page_metadata
+from ..extraction.text import normalize_note_marker, normalize_ws
 from ..reconcile import (
     merge_continuation_footnotes,
     merge_cross_page_paragraphs,
     promote_cross_page_footnote_continuation_paragraphs,
     promote_page_reference_list_footnotes,
-    recover_unmarked_page_footnote_markers,
-    recover_missing_note_refs,
     reconcile_cjk_numbered_display_blocks,
     reconcile_display_blocks,
     reconcile_figure_captions,
     reconcile_generic_display_block_structures,
     reconcile_table_continuations,
+    recover_missing_note_refs,
+    recover_unmarked_page_footnote_markers,
     resolve_note_links,
     split_page_footnote_blocks,
 )
-from ..reconcile.notes.qwen_marker_locator import QwenMarkerLocatorConfig, run_qwen_marker_locator_repairs
 from ..reconcile.notes.marker_inline import _note_refs
+from ..reconcile.notes.qwen_marker_locator import (
+    QwenMarkerLocatorConfig,
+    run_qwen_marker_locator_repairs,
+)
 from ..reconcile.notes.trace import trace_note_calls
+from ..schema.block_types import CANONICAL_BLOCK_TYPES, FOOTNOTE
+from ..schema.models import IdFactory, RawBlock
+from .output_schema import (
+    normalize_display_blocks_for_layout_schema,
+    remove_internal_note_ref_indexes,
+)
+from .page_processing import build_toc_from_blocks, extend_table_source_pages, process_page
+from .page_roles import build_page_metadata
 
 
 def build_canonical(
@@ -98,7 +104,9 @@ def build_canonical(
     blocks: List[Dict[str, Any]] = []
     prev_major_type: Optional[str] = None
     in_toc = False
-    text_style = TextStyleAnalyzer.from_raw_pages(getattr(args, "source_pdf", None), cast(Dict[int, Sequence[Any]], pages))
+    text_style = TextStyleAnalyzer.from_raw_pages(
+        getattr(args, "source_pdf", None), cast(Dict[int, Sequence[Any]], pages)
+    )
 
     try:
         for page in sorted(pages):
@@ -123,23 +131,35 @@ def build_canonical(
     recover_unmarked_page_footnote_markers(blocks)
     promote_cross_page_footnote_continuation_paragraphs(blocks)
     merge_continuation_footnotes(blocks)
-    merge_cross_page_paragraphs(blocks, args.source_pdf, layout, allow_missing_pdf_text=getattr(args, "allow_missing_pdf_text", False))
+    merge_cross_page_paragraphs(
+        blocks,
+        args.source_pdf,
+        layout,
+        allow_missing_pdf_text=getattr(args, "allow_missing_pdf_text", False),
+    )
     marker_locator_evidence = []
     marker_locator_enabled = bool(getattr(args, "marker_locator_repair", False))
     with trace_note_calls(getattr(args, "note_trace_log", None)):
-        note_cache = PdfPageCache(getattr(args, "source_pdf", None), {p: (layout.page_width, layout.page_height) for p in sorted(pages)}, allow_missing=True, render_zoom=3.0)
+        note_cache = PdfPageCache(
+            getattr(args, "source_pdf", None),
+            dict.fromkeys(sorted(pages), (layout.page_width, layout.page_height)),
+            allow_missing=True,
+            render_zoom=3.0,
+        )
         try:
             if marker_locator_enabled:
                 marker_locator_config = _qwen_marker_locator_config(args)
                 marker_locator_evidence = run_qwen_marker_locator_repairs(
                     blocks,
                     marker_locator_config,
-                    missing_body_ref_pages_after_page=lambda evidence: _recover_note_refs_and_missing_pages(
-                        blocks,
-                        args,
-                        layout,
-                        note_cache,
-                        qwen_marker_pages=evidence,
+                    missing_body_ref_pages_after_page=lambda evidence: (
+                        _recover_note_refs_and_missing_pages(
+                            blocks,
+                            args,
+                            layout,
+                            note_cache,
+                            qwen_marker_pages=evidence,
+                        )
                     ),
                 )
             _recover_and_resolve_note_refs(
@@ -175,7 +195,9 @@ def build_canonical(
         p["physical_page"] for p in page_metadata if p.get("page_role") == "title_page"
     }
     author = None
-    _AUTHOR_RE = re.compile(r"(?:著者[：:]\s*(.+?)(?:\s|$)|作者[：:]\s*(.+?)(?:\s|$)|(.+?)著(?:\s|$))")
+    _AUTHOR_RE = re.compile(
+        r"(?:著者[：:]\s*(.+?)(?:\s|$)|作者[：:]\s*(.+?)(?:\s|$)|(.+?)著(?:\s|$))"
+    )
     for b in blocks:
         source = b.get("source") or {}
         if source.get("page") not in title_page_nums:
@@ -218,7 +240,9 @@ def build_canonical(
                         "enabled": marker_locator_enabled,
                         "repair_enabled": marker_locator_enabled,
                         "model": getattr(args, "marker_locator_model", DEFAULT_QWEN_MODEL),
-                        "keep_alive": getattr(args, "marker_locator_keep_alive", DEFAULT_OLLAMA_KEEP_ALIVE),
+                        "keep_alive": getattr(
+                            args, "marker_locator_keep_alive", DEFAULT_OLLAMA_KEEP_ALIVE
+                        ),
                         "body_mode": getattr(args, "marker_locator_body_mode", "page_then_block"),
                         "page_dpi": _marker_locator_page_dpi(args),
                         "block_dpi": _marker_locator_block_dpi(args),
@@ -227,8 +251,12 @@ def build_canonical(
                             {"page": item.page, "kind": item.kind}
                             for item in marker_locator_evidence
                         ],
-                        "artifact_dir": str(_qwen_marker_locator_artifact_dir(args)) if marker_locator_enabled else None,
-                        "timing_log": str(_qwen_marker_locator_timing_log_path(args)) if marker_locator_enabled else None,
+                        "artifact_dir": str(_qwen_marker_locator_artifact_dir(args))
+                        if marker_locator_enabled
+                        else None,
+                        "timing_log": str(_qwen_marker_locator_timing_log_path(args))
+                        if marker_locator_enabled
+                        else None,
                     }
                 },
                 "note_trace_log": getattr(args, "note_trace_log", None) or None,
@@ -307,7 +335,9 @@ def _missing_body_ref_pages(blocks: List[Dict[str, Any]]) -> List[int]:
     return sorted(pages)
 
 
-def _missing_or_unreliable_body_ref_pages(blocks: List[Dict[str, Any]], *, qwen_marker_pages: List[Any] | None = None) -> List[int]:
+def _missing_or_unreliable_body_ref_pages(
+    blocks: List[Dict[str, Any]], *, qwen_marker_pages: List[Any] | None = None
+) -> List[int]:
     pages = set(_missing_body_ref_pages(blocks))
     qwen_markers_by_page = _qwen_body_ref_markers_by_page(qwen_marker_pages or [])
     refs_by_note_id: Dict[str, List[Tuple[Dict[str, Any], Dict[str, Any]]]] = {}

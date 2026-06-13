@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 from ..schema.models import BBox
+
 
 @dataclass
 class PageGeometry:
@@ -73,7 +74,9 @@ class PageGeometry:
         return self.coord_widths.get(page, self.RENDERED)
 
     def size(self, page: int) -> Tuple[float, float]:
-        return self.coord_widths.get(page, self.RENDERED), self.coord_heights.get(page, self.RENDERED)
+        return self.coord_widths.get(page, self.RENDERED), self.coord_heights.get(
+            page, self.RENDERED
+        )
 
     def is_near_bottom(self, b: Dict[str, Any], threshold: float = 0.82) -> bool:
         p = _block_page(b)
@@ -89,15 +92,26 @@ class PageGeometry:
             return False
         return float(bb[1]) <= self.height(p) * threshold
 
-    def scale_bbox(self, page: int, bb: BBox, pdf_rect: Any, fallback_w: Optional[float] = None, fallback_h: Optional[float] = None) -> Tuple[float, float, float, float]:
+    def scale_bbox(
+        self,
+        page: int,
+        bb: BBox,
+        pdf_rect: Any,
+        fallback_w: Optional[float] = None,
+        fallback_h: Optional[float] = None,
+    ) -> Tuple[float, float, float, float]:
         """Scale a coordinate-space bbox into PDF-point space.
 
         ``pdf_rect`` must have ``.width`` and ``.height`` attributes (e.g. a
         fitz page rect).  When ``fallback_w`` / ``fallback_h`` are omitted,
         they default to the ``pdf_rect`` dimensions.
         """
-        coord_w = self.coord_widths.get(page, fallback_w or getattr(pdf_rect, "width", self.RENDERED))
-        coord_h = self.coord_heights.get(page, fallback_h or getattr(pdf_rect, "height", self.RENDERED))
+        coord_w = self.coord_widths.get(
+            page, fallback_w or getattr(pdf_rect, "width", self.RENDERED)
+        )
+        coord_h = self.coord_heights.get(
+            page, fallback_h or getattr(pdf_rect, "height", self.RENDERED)
+        )
         rect_w = pdf_rect.width
         rect_h = pdf_rect.height
         width_mismatch = abs(coord_w - rect_w) / max(coord_w, rect_w, 1.0)
@@ -108,7 +122,14 @@ class PageGeometry:
             return (float(bb[0]) * sx, float(bb[1]) * sy, float(bb[2]) * sx, float(bb[3]) * sy)
         return (float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3]))
 
-    def scale_bbox_inverse(self, page: int, rect: Any, pdf_page_rect: Any, coord_w: Optional[float] = None, coord_h: Optional[float] = None) -> list[float]:
+    def scale_bbox_inverse(
+        self,
+        page: int,
+        rect: Any,
+        pdf_page_rect: Any,
+        coord_w: Optional[float] = None,
+        coord_h: Optional[float] = None,
+    ) -> list[float]:
         """Scale a PDF-point rect back into coordinate space.
 
         ``rect`` is the rectangle to convert.  ``pdf_page_rect`` is the full
@@ -124,7 +145,12 @@ class PageGeometry:
         if width_mismatch > 0.15 or height_mismatch > 0.15:
             sx = cw / pdf_w
             sy = ch / pdf_h
-            return [round(rect.x0 * sx, 3), round(rect.y0 * sy, 3), round(rect.x1 * sx, 3), round(rect.y1 * sy, 3)]
+            return [
+                round(rect.x0 * sx, 3),
+                round(rect.y0 * sy, 3),
+                round(rect.x1 * sx, 3),
+                round(rect.y1 * sy, 3),
+            ]
         return [round(rect.x0, 3), round(rect.y0, 3), round(rect.x1, 3), round(rect.y1, 3)]
 
 

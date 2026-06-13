@@ -16,12 +16,18 @@ from ....extraction.text import normalize_note_marker
 from . import types as qwen_types
 
 
-def _call_qwen_marker_locator(image_path: Any, config: qwen_types.QwenMarkerLocatorConfig, *, prompt: str) -> Dict[str, Any]:
+def _call_qwen_marker_locator(
+    image_path: Any, config: qwen_types.QwenMarkerLocatorConfig, *, prompt: str
+) -> Dict[str, Any]:
     try:
-        parsed = vision_chat_json(image_path, config.locator_model_config().to_ollama_config(), prompt=prompt)
+        parsed = vision_chat_json(
+            image_path, config.locator_model_config().to_ollama_config(), prompt=prompt
+        )
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            raise RuntimeError(f"Qwen marker locator model `{config.model}` is not available. Run `ollama pull {config.model}`.") from exc
+            raise RuntimeError(
+                f"Qwen marker locator model `{config.model}` is not available. Run `ollama pull {config.model}`."
+            ) from exc
         raise
     if isinstance(parsed.get("items"), list):
         return {"body_refs": parsed["items"]}

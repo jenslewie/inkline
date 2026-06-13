@@ -48,9 +48,13 @@ class RawSetOffDisplayRunDetector:
         if block_text(first).rstrip().endswith(("：", ":")):
             return False
         gap_threshold = max(20.0, min(first.height, last.height) * 0.55)
-        return self._has_previous_body_boundary(blocks, start, first, gap_threshold) and self._has_next_body_boundary(blocks, end, last, gap_threshold)
+        return self._has_previous_body_boundary(
+            blocks, start, first, gap_threshold
+        ) and self._has_next_body_boundary(blocks, end, last, gap_threshold)
 
-    def _has_previous_body_boundary(self, blocks: List[RawBlock], start: int, first: RawBlock, gap_threshold: float) -> bool:
+    def _has_previous_body_boundary(
+        self, blocks: List[RawBlock], start: int, first: RawBlock, gap_threshold: float
+    ) -> bool:
         if start <= 0:
             return False
         prev = blocks[start - 1]
@@ -60,7 +64,9 @@ class RawSetOffDisplayRunDetector:
             return False
         return len(block_text(prev)) >= 60 and prev.width >= self.layout.body_width * 0.88
 
-    def _has_next_body_boundary(self, blocks: List[RawBlock], end: int, last: RawBlock, gap_threshold: float) -> bool:
+    def _has_next_body_boundary(
+        self, blocks: List[RawBlock], end: int, last: RawBlock, gap_threshold: float
+    ) -> bool:
         if end >= len(blocks):
             return False
         nxt = blocks[end]

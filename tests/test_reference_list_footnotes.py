@@ -1,8 +1,8 @@
+from inkline.parsers.mineru.reconcile.footnote.merge import merge_continuation_footnotes
 from inkline.parsers.mineru.reconcile.footnote.promote import (
     promote_page_reference_list_footnotes,
     recover_unmarked_page_footnote_markers,
 )
-from inkline.parsers.mineru.reconcile.footnote.merge import merge_continuation_footnotes
 from inkline.parsers.mineru.reconcile.notes.resolver import resolve_note_links
 
 
@@ -47,10 +47,7 @@ def test_reference_list_uses_body_marker_order_for_unmarked_item() -> None:
         "3 第三条注释。",
     ]
     blocks = [_body_block("b_body", ["1", "*", "2", "3"])]
-    blocks.extend(
-        _reference_item(f"b_note_{index}", text)
-        for index, text in enumerate(texts)
-    )
+    blocks.extend(_reference_item(f"b_note_{index}", text) for index, text in enumerate(texts))
 
     promote_page_reference_list_footnotes(blocks)
     resolve_note_links(blocks)
@@ -59,11 +56,7 @@ def test_reference_list_uses_body_marker_order_for_unmarked_item() -> None:
     assert [block["type"] for block in notes] == ["footnote"] * 4
     assert [block["attrs"]["note_marker"] for block in notes] == ["1", "*", "2", "3"]
     assert notes[1]["attrs"]["note_marker_source"] == "reference_list_order"
-    refs = [
-        run
-        for run in blocks[0]["attrs"]["inline_runs"]
-        if run.get("type") == "note_ref"
-    ]
+    refs = [run for run in blocks[0]["attrs"]["inline_runs"] if run.get("type") == "note_ref"]
     assert [ref["target_block_id"] for ref in refs] == [
         "b_note_0",
         "b_note_1",
@@ -75,10 +68,7 @@ def test_reference_list_uses_body_marker_order_for_unmarked_item() -> None:
 def test_reference_list_does_not_guess_when_marker_order_disagrees() -> None:
     texts = ["1 第一条注释。", "无标记条目。", "2 第二条注释。"]
     blocks = [_body_block("b_body", ["1", "2", "*"])]
-    blocks.extend(
-        _reference_item(f"b_note_{index}", text)
-        for index, text in enumerate(texts)
-    )
+    blocks.extend(_reference_item(f"b_note_{index}", text) for index, text in enumerate(texts))
 
     promote_page_reference_list_footnotes(blocks)
 

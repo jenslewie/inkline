@@ -102,10 +102,7 @@ def _insert_inline_note_run(block: CanonicalBlock, ref: Dict[str, Any], char_ind
         dict(run)
         for run in runs
         if isinstance(run, dict)
-        and not (
-            run.get("type") == "note_ref"
-            and _same_inline_note_ref(run, ref)
-        )
+        and not (run.get("type") == "note_ref" and _same_inline_note_ref(run, ref))
     ]
     note_run = _inline_note_run_from_ref(ref)
 
@@ -142,7 +139,8 @@ def _insert_inline_note_run(block: CanonicalBlock, ref: Dict[str, Any], char_ind
 
 def _same_inline_note_ref(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
     return (
-        normalize_note_marker(left.get("marker", "")) == normalize_note_marker(right.get("marker", ""))
+        normalize_note_marker(left.get("marker", ""))
+        == normalize_note_marker(right.get("marker", ""))
         and str(left.get("source") or "") == str(right.get("source") or "")
         and left.get("source_page") == right.get("source_page")
     )
@@ -213,7 +211,15 @@ def _order_adjacent_note_runs(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]
         ):
             group.append(runs[index])
             index += 1
-        out.extend(sorted(group, key=lambda item: (_inline_marker_sort_value(item.get("marker")), str(item.get("marker") or ""))))
+        out.extend(
+            sorted(
+                group,
+                key=lambda item: (
+                    _inline_marker_sort_value(item.get("marker")),
+                    str(item.get("marker") or ""),
+                ),
+            )
+        )
     return out
 
 
@@ -249,11 +255,11 @@ def _note_refs(block: Mapping[str, Any]) -> List[Dict[str, Any]]:
     raw_attrs = block.get("attrs")
     attrs: Mapping[str, Any] = raw_attrs if isinstance(raw_attrs, dict) else {}
     runs = attrs.get("inline_runs")
-    inline_refs = [
-        run
-        for run in runs
-        if isinstance(run, dict) and run.get("type") == "note_ref"
-    ] if isinstance(runs, list) else []
+    inline_refs = (
+        [run for run in runs if isinstance(run, dict) and run.get("type") == "note_ref"]
+        if isinstance(runs, list)
+        else []
+    )
     refs = attrs.get("note_refs")
     legacy_refs = [ref for ref in refs if isinstance(ref, dict)] if isinstance(refs, list) else []
     if not inline_refs:

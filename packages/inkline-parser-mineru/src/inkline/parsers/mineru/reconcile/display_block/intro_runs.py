@@ -6,22 +6,25 @@ from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
 from ...schema.block_types import DISPLAY_BLOCK, PARAGRAPH
-from ..constants import FLOAT_LIKE_TYPES
-from ..block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
-from ..layout_helpers import _display_block_layout
+from ..block_access import block_bbox as _bbox
+from ..block_access import block_page as _block_page
+from ..block_access import block_pages as _block_pages
 from ..block_nav import _prev_text_non_float
+from ..constants import FLOAT_LIKE_TYPES
+from ..layout_helpers import _display_block_layout
 from .helpers import (
     display_block_multiline_seed,
-    force_generic_display_block_attrs,
+    display_block_run_is_intro_continuation_candidate,
     is_left_shifted_intro_before_display_lane_ds,
     is_parenthetical_time_header,
     is_short_display_text_block,
     merge_display_block_run,
-    display_block_run_is_intro_continuation_candidate,
 )
 
 
-def reconcile_parenthetical_header_display_block_runs(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_parenthetical_header_display_block_runs(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     i = 0
     while i < len(blocks):
         cur = blocks[i]
@@ -67,7 +70,9 @@ def reconcile_parenthetical_header_display_block_runs(blocks: List[Dict[str, Any
         i += 1
 
 
-def reconcile_short_display_intro_display_block_runs(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_short_display_intro_display_block_runs(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     i = 0
     while i + 1 < len(blocks):
         cur, nxt = blocks[i], blocks[i + 1]
@@ -98,12 +103,19 @@ def reconcile_short_display_intro_display_block_runs(blocks: List[Dict[str, Any]
             continue
         nbb_check = _bbox(nxt)
         if nbb_check and nxt.get("type") == PARAGRAPH:
-            near_body = float(nbb_check[0]) <= layout.body_left + max(48.0, layout.body_width * 0.055)
+            near_body = float(nbb_check[0]) <= layout.body_left + max(
+                48.0, layout.body_width * 0.055
+            )
             full_width = (float(nbb_check[2]) - float(nbb_check[0])) >= layout.body_width * 0.88
             if near_body and full_width:
                 cbb_check = _bbox(cur)
-                cur_near_body = cbb_check and float(cbb_check[0]) <= layout.body_left + max(48.0, layout.body_width * 0.055)
-                cur_full_width = cbb_check and (float(cbb_check[2]) - float(cbb_check[0])) >= layout.body_width * 0.88
+                cur_near_body = cbb_check and float(cbb_check[0]) <= layout.body_left + max(
+                    48.0, layout.body_width * 0.055
+                )
+                cur_full_width = (
+                    cbb_check
+                    and (float(cbb_check[2]) - float(cbb_check[0])) >= layout.body_width * 0.88
+                )
                 if not (cur_near_body and cur_full_width):
                     i += 1
                     continue
@@ -117,7 +129,9 @@ def reconcile_short_display_intro_display_block_runs(blocks: List[Dict[str, Any]
         continue
 
 
-def reconcile_intro_display_block_continuations(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_intro_display_block_continuations(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     i = 0
     while i < len(blocks):
         cur = blocks[i]

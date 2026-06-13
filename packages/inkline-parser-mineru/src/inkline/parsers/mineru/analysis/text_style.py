@@ -51,7 +51,9 @@ class TextStyleAnalyzer:
         self._page_body_cache: Dict[int, Optional[TextStyleMetrics]] = {}
 
     @classmethod
-    def from_blocks(cls, pdf_path: Optional[str], blocks: Sequence[Dict[str, Any]]) -> "TextStyleAnalyzer":
+    def from_blocks(
+        cls, pdf_path: Optional[str], blocks: Sequence[Dict[str, Any]]
+    ) -> "TextStyleAnalyzer":
         from .page_geometry import PageGeometry
 
         geo = PageGeometry.from_canonical_blocks(blocks)
@@ -59,7 +61,9 @@ class TextStyleAnalyzer:
         return cls(pdf_path, sizes)
 
     @classmethod
-    def from_raw_pages(cls, pdf_path: Optional[str], pages: Dict[int, Sequence[Any]]) -> "TextStyleAnalyzer":
+    def from_raw_pages(
+        cls, pdf_path: Optional[str], pages: Dict[int, Sequence[Any]]
+    ) -> "TextStyleAnalyzer":
         from .page_geometry import PageGeometry
 
         geo = PageGeometry.from_raw_pages(pages)
@@ -99,7 +103,9 @@ class TextStyleAnalyzer:
             pseudo_blocks.append(_raw_block_as_canonical(block))
         return self.page_body_style_size(page, pseudo_blocks)
 
-    def page_body_metrics(self, page: int, blocks: Sequence[Dict[str, Any]]) -> Optional[TextStyleMetrics]:
+    def page_body_metrics(
+        self, page: int, blocks: Sequence[Dict[str, Any]]
+    ) -> Optional[TextStyleMetrics]:
         if page in self._page_body_cache:
             return self._page_body_cache[page]
         sizes: List[float] = []
@@ -238,7 +244,9 @@ class TextStyleAnalyzer:
 def _raw_block_as_canonical(block: Any) -> Dict[str, Any]:
     return {
         "block_id": f"raw:{getattr(block, 'page', '')}:{getattr(block, 'index', '')}",
-        "type": PARAGRAPH if getattr(block, "raw_type", None) == "paragraph" else str(getattr(block, "raw_type", "text")),
+        "type": PARAGRAPH
+        if getattr(block, "raw_type", None) == "paragraph"
+        else str(getattr(block, "raw_type", "text")),
         "text": str(getattr(block, "text", "") or ""),
         "source": {"page": getattr(block, "page", None), "bbox": getattr(block, "bbox", None)},
     }

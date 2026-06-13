@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from inkline.canonical.types import CanonicalBlock, CanonicalSource, NoteRef as NoteRefDict
+from inkline.canonical.types import CanonicalBlock
 
 BBox = List[float]
 

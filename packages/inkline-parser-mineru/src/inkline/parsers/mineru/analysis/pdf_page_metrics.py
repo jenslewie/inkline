@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .page_geometry import PageGeometry
 from ..schema.models import BBox
+from .page_geometry import PageGeometry
 
 
 class PdfPageCache:
@@ -65,7 +65,9 @@ class PdfPageCache:
             return None
         return self._doc[page - 1].rect
 
-    def coord_size(self, page: int, default: Tuple[float, float] = (1000.0, 1000.0)) -> Tuple[float, float]:
+    def coord_size(
+        self, page: int, default: Tuple[float, float] = (1000.0, 1000.0)
+    ) -> Tuple[float, float]:
         return (
             self._geometry.coord_widths.get(page, default[0]),
             self._geometry.coord_heights.get(page, default[1]),
@@ -114,8 +116,8 @@ class PdfPageCache:
             self._image_cache[page] = None
             return None
         try:
-            from PIL import Image  # type: ignore
             import fitz  # type: ignore
+            from PIL import Image  # type: ignore
 
             pix = self._doc[page - 1].get_pixmap(
                 matrix=fitz.Matrix(self.render_zoom, self.render_zoom),

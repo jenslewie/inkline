@@ -11,8 +11,8 @@ new code; import them directly from their real modules instead:
 from __future__ import annotations
 
 __all__ = [
-    "resolve_note_links",
     "recover_missing_note_refs",
+    "resolve_note_links",
 ]
 
 

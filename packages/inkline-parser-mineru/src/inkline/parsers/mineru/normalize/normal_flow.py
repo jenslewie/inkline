@@ -10,13 +10,27 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from ..analysis.layout import is_right_aligned_short
+from ..extraction.text import block_text, extract_list_item_text, normalize_ws
+from ..schema.block_types import (
+    DISPLAY_BLOCK,
+    FIGURE,
+    FOOTNOTE,
+    HEADING,
+    LIST_ITEM,
+    PARAGRAPH,
+    TABLE,
+    TABLE_CONTINUATION,
+)
+from ..schema.models import IdFactory, LayoutStats, RawBlock, canonical_block
+from ..schema.patterns import CHAPTER_RE, CN_LIST_ITEM_RE
 from .builders import (
-    make_flush_right_terminal_block,
     make_chart_table,
+    make_display_block,
     make_figure,
+    make_flush_right_terminal_block,
     make_heading,
     make_paragraph,
-    make_display_block,
     make_table,
 )
 from .page_detectors import coord_page_size as _coord_page_size
@@ -24,15 +38,14 @@ from .raw_display_blocks import (
     _RawTextStyleProvider,
     collect_display_block,
     ends_with_terminal_punctuation,
-    next_meaningful_block as _next_meaningful_block,
-    previous_meaningful_block as _previous_meaningful_block,
     should_start_display_block,
 )
-from ..analysis.layout import is_right_aligned_short
-from ..schema.block_types import DISPLAY_BLOCK, FIGURE, FOOTNOTE, HEADING, LIST_ITEM, PARAGRAPH, TABLE, TABLE_CONTINUATION
-from ..schema.models import IdFactory, LayoutStats, RawBlock, canonical_block
-from ..schema.patterns import CHAPTER_RE, CN_LIST_ITEM_RE
-from ..extraction.text import block_text, extract_list_item_text, normalize_ws
+from .raw_display_blocks import (
+    next_meaningful_block as _next_meaningful_block,
+)
+from .raw_display_blocks import (
+    previous_meaningful_block as _previous_meaningful_block,
+)
 
 
 def process_normal_flow(
@@ -53,22 +66,35 @@ def process_normal_flow(
             i += 1
             continue
         if b.raw_type == "page_footer" and _looks_like_note_definition_footer(b):
-            out.append(make_paragraph(
-                ids,
-                b,
-                block_type=LIST_ITEM,
-                extra_attrs={"promoted_from": "page_footer", "promote_reason": "note_definition_footer"},
-            ))
+            out.append(
+                make_paragraph(
+                    ids,
+                    b,
+                    block_type=LIST_ITEM,
+                    extra_attrs={
+                        "promoted_from": "page_footer",
+                        "promote_reason": "note_definition_footer",
+                    },
+                )
+            )
             prev_major_type = LIST_ITEM
             i += 1
             continue
         if b.raw_type == "title":
             group = [b]
             j = i + 1
-            while j < len(content_blocks) and content_blocks[j].raw_type == "title" and abs(content_blocks[j].y0 - group[-1].y1) < 80:
+            while (
+                j < len(content_blocks)
+                and content_blocks[j].raw_type == "title"
+                and abs(content_blocks[j].y0 - group[-1].y1) < 80
+            ):
                 group.append(content_blocks[j])
                 j += 1
-            role = "chapter_title" if any(CHAPTER_RE.match(block_text(x)) for x in group) or len(group) > 1 else HEADING
+            role = (
+                "chapter_title"
+                if any(CHAPTER_RE.match(block_text(x)) for x in group) or len(group) > 1
+                else HEADING
+            )
             level = 2 if role == "chapter_title" else 1
             out.append(make_heading(ids, group, level=level, role=role))
             prev_major_type = role
@@ -91,7 +117,16 @@ def process_normal_flow(
                 out.append(make_table(ids, b))
                 prev_major_type = TABLE
             else:
-                out.append(canonical_block(ids.next(), TABLE_CONTINUATION, "", b.page, b.bbox, attrs={"role": "continued_table_region", "html_empty": True}))
+                out.append(
+                    canonical_block(
+                        ids.next(),
+                        TABLE_CONTINUATION,
+                        "",
+                        b.page,
+                        b.bbox,
+                        attrs={"role": "continued_table_region", "html_empty": True},
+                    )
+                )
             prev_major_type = TABLE_CONTINUATION
             i += 1
             continue
@@ -110,9 +145,18 @@ def process_normal_flow(
             for li in items:
                 t, _ = extract_list_item_text(li)
                 if t:
-                    pseudo = RawBlock(page=b.page, index=b.index, raw_type="list_item", text=t, bbox=b.bbox, raw=li)
+                    pseudo = RawBlock(
+                        page=b.page,
+                        index=b.index,
+                        raw_type="list_item",
+                        text=t,
+                        bbox=b.bbox,
+                        raw=li,
+                    )
                     list_attrs = {"list_type": list_type} if list_type else None
-                    out.append(make_paragraph(ids, pseudo, block_type=LIST_ITEM, extra_attrs=list_attrs))
+                    out.append(
+                        make_paragraph(ids, pseudo, block_type=LIST_ITEM, extra_attrs=list_attrs)
+                    )
             prev_major_type = "list"
             i += 1
             continue
@@ -129,24 +173,33 @@ def process_normal_flow(
                 i += 1
                 continue
 
-            terminal_after_body_line = _following_flush_right_terminal_lines(content_blocks, i, layout)
-            if terminal_after_body_line and _is_left_body_line_before_terminal_block(content_blocks, i, layout):
+            terminal_after_body_line = _following_flush_right_terminal_lines(
+                content_blocks, i, layout
+            )
+            if terminal_after_body_line and _is_left_body_line_before_terminal_block(
+                content_blocks, i, layout
+            ):
                 out.append(make_paragraph(ids, b))
                 out.append(make_flush_right_terminal_block(ids, terminal_after_body_line))
                 prev_major_type = "flush_right_terminal_block"
                 i += 1 + len(terminal_after_body_line)
                 continue
 
-            tail_blocks = [x for x in content_blocks[i:] if block_text(x) or x.raw_type in {"image", "table", "title", "list"}]
+            tail_blocks = [
+                x
+                for x in content_blocks[i:]
+                if block_text(x) or x.raw_type in {"image", "table", "title", "list"}
+            ]
             remaining = [x for x in tail_blocks if x.raw_type == "paragraph" and block_text(x)]
             if (
                 len(remaining) == len(tail_blocks)
                 and 1 <= len(remaining) <= 4
-                and (len(remaining) > 1 or len(block_text(remaining[0])) >= 8 or remaining[0].width >= layout.body_width * 0.16)
-                and all(
-                    _is_flush_right_terminal_line(x, layout)
-                    for x in remaining
+                and (
+                    len(remaining) > 1
+                    or len(block_text(remaining[0])) >= 8
+                    or remaining[0].width >= layout.body_width * 0.16
                 )
+                and all(_is_flush_right_terminal_line(x, layout) for x in remaining)
             ):
                 out.append(make_flush_right_terminal_block(ids, remaining))
                 prev_major_type = "flush_right_terminal_block"
@@ -154,18 +207,35 @@ def process_normal_flow(
                 continue
 
             if CN_LIST_ITEM_RE.match(block_text(b)):
-                out.append(make_paragraph(ids, b, block_type=LIST_ITEM, extra_attrs={"list_marker_style": "cjk_decimal"}))
+                out.append(
+                    make_paragraph(
+                        ids,
+                        b,
+                        block_type=LIST_ITEM,
+                        extra_attrs={"list_marker_style": "cjk_decimal"},
+                    )
+                )
                 last_text_context = block_text(b)
                 prev_major_type = LIST_ITEM
                 i += 1
                 continue
 
-            prev_text = last_text_context or (out[-1]["text"] if out and out[-1]["type"] in {PARAGRAPH, HEADING} else "")
-            if should_start_display_block(content_blocks, i, prev_text, layout, text_style=text_style):
-                group, j, boundary_reason = collect_display_block(content_blocks, i, prev_text, layout, text_style=text_style)
+            prev_text = last_text_context or (
+                out[-1]["text"] if out and out[-1]["type"] in {PARAGRAPH, HEADING} else ""
+            )
+            if should_start_display_block(
+                content_blocks, i, prev_text, layout, text_style=text_style
+            ):
+                group, j, boundary_reason = collect_display_block(
+                    content_blocks, i, prev_text, layout, text_style=text_style
+                )
                 if boundary_reason and j < len(content_blocks):
                     display_boundary_attrs[id(content_blocks[j])] = boundary_reason
-                out.append(make_display_block(ids, group, layout_role="inline_display_block", prev_text=prev_text))
+                out.append(
+                    make_display_block(
+                        ids, group, layout_role="inline_display_block", prev_text=prev_text
+                    )
+                )
                 prev_major_type = DISPLAY_BLOCK
                 last_text_context = ""
                 i = j
@@ -188,7 +258,9 @@ def process_normal_flow(
     return out, prev_major_type, in_toc
 
 
-def _is_centered_table_heading_continuation(blocks: Sequence[RawBlock], i: int, layout: LayoutStats) -> bool:
+def _is_centered_table_heading_continuation(
+    blocks: Sequence[RawBlock], i: int, layout: LayoutStats
+) -> bool:
     block = blocks[i]
     if block.raw_type != "paragraph" or not block.bbox:
         return False
@@ -222,10 +294,16 @@ def _is_flush_right_terminal_line(block: RawBlock, layout: LayoutStats) -> bool:
         return False
     near_body_right = abs(block.x1 - layout.body_right) <= max(24.0, layout.body_width * 0.04)
     right_lane = block.x0 >= layout.body_left + layout.body_width * 0.33
-    return is_right_aligned_short(block, layout) or block.x0 > layout.body_left + layout.body_width * 0.45 or (near_body_right and right_lane)
+    return (
+        is_right_aligned_short(block, layout)
+        or block.x0 > layout.body_left + layout.body_width * 0.45
+        or (near_body_right and right_lane)
+    )
 
 
-def _following_flush_right_terminal_lines(blocks: Sequence[RawBlock], start: int, layout: LayoutStats) -> List[RawBlock]:
+def _following_flush_right_terminal_lines(
+    blocks: Sequence[RawBlock], start: int, layout: LayoutStats
+) -> List[RawBlock]:
     tail_blocks = [
         x
         for x in blocks[start + 1 :]
@@ -251,7 +329,9 @@ def _following_flush_right_terminal_lines(blocks: Sequence[RawBlock], start: int
     return []
 
 
-def _is_left_body_line_before_terminal_block(blocks: Sequence[RawBlock], i: int, layout: LayoutStats) -> bool:
+def _is_left_body_line_before_terminal_block(
+    blocks: Sequence[RawBlock], i: int, layout: LayoutStats
+) -> bool:
     block = blocks[i]
     if block.raw_type != "paragraph" or not block.bbox:
         return False
@@ -265,7 +345,9 @@ def _is_left_body_line_before_terminal_block(blocks: Sequence[RawBlock], i: int,
     return bool(_following_flush_right_terminal_lines(blocks, i, layout))
 
 
-def _is_flush_right_terminal_line_before_section_boundary(blocks: Sequence[RawBlock], i: int, layout: LayoutStats) -> bool:
+def _is_flush_right_terminal_line_before_section_boundary(
+    blocks: Sequence[RawBlock], i: int, layout: LayoutStats
+) -> bool:
     block = blocks[i]
     if not _is_flush_right_terminal_line(block, layout):
         return False
@@ -275,9 +357,7 @@ def _is_flush_right_terminal_line_before_section_boundary(blocks: Sequence[RawBl
         return False
     if nxt is None or nxt.page != block.page or nxt.raw_type not in {"title", "list"}:
         return False
-    if block.y0 - prev.y1 > max(50.0, layout.page_height * 0.07):
-        return False
-    return True
+    return block.y0 - prev.y1 <= max(50.0, layout.page_height * 0.07)
 
 
 def _looks_like_note_definition_footer(block: RawBlock) -> bool:

@@ -7,10 +7,13 @@ from typing import Any, Dict, List, Optional
 
 from ...analysis.layout import LayoutStats
 from ...schema.block_types import DISPLAY_BLOCK, HEADING, LIST_ITEM, PARAGRAPH
-from ..block_access import block_bbox as _bbox, block_page as _block_page, block_pages as _block_pages
+from ..block_access import block_bbox as _bbox
+from ..block_access import block_page as _block_page
+from ..block_access import block_pages as _block_pages
 from ..block_merge import _merge_block_pair, _refresh_display_block_attrs
-from ..block_nav import _prev_text_non_float, _prev_text_non_float_idx, _next_text_non_float_idx
+from ..block_nav import _next_text_non_float_idx, _prev_text_non_float, _prev_text_non_float_idx
 from ..notes.keys import chinese_to_int as _chinese_to_int
+
 
 def _cjk_list_marker_rank(text: str) -> Optional[int]:
     m = re.match(r"^\s*([一二三四五六七八九十百]+)、", text or "")
@@ -23,7 +26,9 @@ def _is_cjk_numbered_item_block(block: Dict[str, Any]) -> bool:
     return _cjk_list_marker_rank(str(block.get("text", ""))) is not None
 
 
-def reconcile_cjk_numbered_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
+def reconcile_cjk_numbered_display_blocks(
+    blocks: List[Dict[str, Any]], layout: LayoutStats
+) -> None:
     """Treat visually displayed CJK-numbered clauses as display blocks, not lists.
 
     MinerU sometimes emits lines beginning with “一、二、三、...” as list blocks,
@@ -64,8 +69,16 @@ def reconcile_cjk_numbered_display_blocks(blocks: List[Dict[str, Any]], layout: 
         if typ in {PARAGRAPH, HEADING}:
             pi = _prev_text_non_float_idx(blocks, idx)
             ni = _next_text_non_float_idx(blocks, idx)
-            prev_is_item = pi is not None and _is_cjk_numbered_item_block(blocks[pi]) and blocks[pi].get("type") == DISPLAY_BLOCK
-            next_is_item = ni is not None and _is_cjk_numbered_item_block(blocks[ni]) and blocks[ni].get("type") in {LIST_ITEM, DISPLAY_BLOCK, PARAGRAPH}
+            prev_is_item = (
+                pi is not None
+                and _is_cjk_numbered_item_block(blocks[pi])
+                and blocks[pi].get("type") == DISPLAY_BLOCK
+            )
+            next_is_item = (
+                ni is not None
+                and _is_cjk_numbered_item_block(blocks[ni])
+                and blocks[ni].get("type") in {LIST_ITEM, DISPLAY_BLOCK, PARAGRAPH}
+            )
             introduced = _prev_text_non_float(blocks, idx).rstrip().endswith(("：", ":"))
             if prev_is_item or next_is_item or introduced:
                 promote(idx, "promoted_from_cjk_numbered_paragraph_or_heading_by_layout")
@@ -94,7 +107,9 @@ def reconcile_cjk_numbered_display_blocks(blocks: List[Dict[str, Any]], layout: 
             same_or_next_page = np is not None and cp is not None and np <= cp + 1
             aligned_or_numbered = True
             if cbb and nbb and np == cp:
-                aligned_or_numbered = float(nbb[0]) >= float(cbb[0]) - 40 and float(nbb[2]) <= float(cbb[2]) + 220
+                aligned_or_numbered = (
+                    float(nbb[0]) >= float(cbb[0]) - 40 and float(nbb[2]) <= float(cbb[2]) + 220
+                )
             if not same_or_next_page or not aligned_or_numbered:
                 break
             _merge_block_pair(

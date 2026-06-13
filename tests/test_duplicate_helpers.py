@@ -5,16 +5,17 @@ These tests validate inline note run construction and raw marker fallback.
 
 from __future__ import annotations
 
-import pytest
+from inkline.parsers.mineru.reconcile.notes.marker_inline import (
+    _fallback_raw_marker as fallback_from_marker_inline,
+)
 
 # Import both implementations
 from inkline.parsers.mineru.reconcile.notes.marker_inline import (
     _inline_note_run_from_ref as inline_run_from_marker_inline,
-    _fallback_raw_marker as fallback_from_marker_inline,
 )
 
-
 # ── _inline_note_run_from_ref ──
+
 
 class TestInlineNoteRunFromRefOutput:
     """Test the merged _inline_note_run_from_ref output dicts."""
@@ -63,9 +64,15 @@ class TestInlineNoteRunFromRefOutput:
         }
         result = inline_run_from_marker_inline(ref)
         for key in (
-            "marker", "raw_marker", "source", "confidence",
-            "target_block_id", "target_note_id", "note_strategy",
-            "resolution_confidence", "source_page",
+            "marker",
+            "raw_marker",
+            "source",
+            "confidence",
+            "target_block_id",
+            "target_note_id",
+            "note_strategy",
+            "resolution_confidence",
+            "source_page",
             "recovery_reason",
         ):
             assert result.get(key) == ref.get(key), f"Key {key} differs"

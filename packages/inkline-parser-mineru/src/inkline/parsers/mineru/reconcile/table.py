@@ -7,11 +7,12 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from ..extraction.text import normalize_ws
 from ..normalize.builders import union_bbox
 from ..schema.block_types import FOOTNOTE, PARAGRAPH, TABLE
-from ..extraction.text import normalize_ws
+from .block_access import block_bbox as _bbox
+from .block_access import block_page as _block_page
 from .constants import _DEFAULT_PAGE_HEIGHT, _NEAR_PAGE_TOP_RATIO
-from .block_access import block_bbox as _bbox, block_page as _block_page
 from .layout_helpers import _page_coord_heights
 
 _TABLE_NEAR_PAGE_BOTTOM_RATIO = 0.72
@@ -95,7 +96,9 @@ class _TableContinuationDetector:
 
     page_heights: Dict[int, float]
 
-    def match(self, blocks: List[Dict[str, Any]], left_idx: int) -> Optional[_TableContinuationMatch]:
+    def match(
+        self, blocks: List[Dict[str, Any]], left_idx: int
+    ) -> Optional[_TableContinuationMatch]:
         left = blocks[left_idx]
         left_page = _block_page(left)
         left_bbox = _bbox(left)
@@ -114,18 +117,27 @@ class _TableContinuationDetector:
         if not self._is_table_near_page_top(right_page, right_bbox):
             return None
         right_caption = _table_caption(right)
-        has_continuation_marker = bool(candidate.marker_idxs) or _is_table_continuation_marker(right_caption)
+        has_continuation_marker = bool(candidate.marker_idxs) or _is_table_continuation_marker(
+            right_caption
+        )
         return candidate if has_continuation_marker else None
 
-    def _is_table_near_page_bottom(self, left: Dict[str, Any], page: int, bbox: List[float]) -> bool:
+    def _is_table_near_page_bottom(
+        self, left: Dict[str, Any], page: int, bbox: List[float]
+    ) -> bool:
         page_height = self.page_heights.get(page, _DEFAULT_PAGE_HEIGHT)
         return float(bbox[3]) >= page_height * _TABLE_NEAR_PAGE_BOTTOM_RATIO
 
     def _is_table_near_page_top(self, page: int, bbox: List[float]) -> bool:
-        return float(bbox[1]) <= self.page_heights.get(page, _DEFAULT_PAGE_HEIGHT) * _NEAR_PAGE_TOP_RATIO
+        return (
+            float(bbox[1])
+            <= self.page_heights.get(page, _DEFAULT_PAGE_HEIGHT) * _NEAR_PAGE_TOP_RATIO
+        )
 
     def _is_page_bottom_marker(self, block: Dict[str, Any]) -> bool:
-        if block.get("type") != PARAGRAPH or not _is_table_continuation_marker(str(block.get("text", ""))):
+        if block.get("type") != PARAGRAPH or not _is_table_continuation_marker(
+            str(block.get("text", ""))
+        ):
             return False
         page = _block_page(block)
         bbox = _bbox(block)
@@ -134,7 +146,9 @@ class _TableContinuationDetector:
         page_height = self.page_heights.get(page, _DEFAULT_PAGE_HEIGHT)
         return float(bbox[1]) >= page_height * _TABLE_PAGE_BOTTOM_MARKER_RATIO
 
-    def _next_table_candidate(self, blocks: List[Dict[str, Any]], start_idx: int, left_page: int) -> Optional[_TableContinuationMatch]:
+    def _next_table_candidate(
+        self, blocks: List[Dict[str, Any]], start_idx: int, left_page: int
+    ) -> Optional[_TableContinuationMatch]:
         marker_idxs: List[int] = []
         skipped_footnote_idxs: List[int] = []
         j = start_idx
@@ -188,9 +202,13 @@ def reconcile_table_continuations(blocks: List[Dict[str, Any]]) -> None:
         right_attrs = right.get("attrs") or {}
         if left.get("text") and not _is_table_continuation_marker(str(left.get("text", ""))):
             left_attrs["table_header"] = left.get("text")
-            left_attrs["html"] = _prepend_table_header_row(str(left_attrs.get("html") or ""), str(left.get("text")))
+            left_attrs["html"] = _prepend_table_header_row(
+                str(left_attrs.get("html") or ""), str(left.get("text"))
+            )
             left["text"] = ""
-        left_attrs["html"] = _merge_table_html(str(left_attrs.get("html") or ""), str(right_attrs.get("html") or ""))
+        left_attrs["html"] = _merge_table_html(
+            str(left_attrs.get("html") or ""), str(right_attrs.get("html") or "")
+        )
         footnotes = list(left_attrs.get("footnotes") or [])
         for footnote in right_attrs.get("footnotes") or []:
             if footnote and footnote not in footnotes:

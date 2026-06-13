@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import re
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
+from ...extraction.text import normalize_ws
 from ...schema.block_types import CAPTION, DISPLAY_BLOCK, FOOTNOTE, LIST_ITEM, PARAGRAPH
 from ...schema.models import BBox
-from ...extraction.text import normalize_ws
+from ..block_access import block_bbox as _bbox
+from ..block_access import block_page as _block_page
 from ..constants import _DEFAULT_PAGE_HEIGHT, _NEAR_PAGE_BOTTOM_RATIO
-from ..block_access import block_bbox as _bbox, block_page as _block_page
 from ..notes.keys import leading_note_marker as _leading_note_marker
 from ..notes.marker_inline import _note_refs
 
@@ -43,7 +44,7 @@ def split_page_footnote_blocks(blocks: List[Dict[str, Any]]) -> None:
                 explicit_parts,
                 reason="page_footnote_explicit_line_marker",
             )
-            blocks[i:i + 1] = split_blocks
+            blocks[i : i + 1] = split_blocks
             if page is not None:
                 deficits[page] = max(0, deficit - (len(explicit_parts) - 1))
             i += len(split_blocks)
@@ -60,7 +61,7 @@ def split_page_footnote_blocks(blocks: List[Dict[str, Any]]) -> None:
             i += 1
             continue
         split_blocks = _make_split_footnotes(blk, parts)
-        blocks[i:i + 1] = split_blocks
+        blocks[i : i + 1] = split_blocks
         if page is not None:
             deficits[page] = max(0, deficit - (len(parts) - 1))
         i += len(split_blocks)
@@ -73,12 +74,18 @@ def recover_unmarked_page_footnote_markers(blocks: List[Dict[str, Any]]) -> None
     for block in blocks:
         attrs = block.get("attrs") or {}
         page = _block_page(block)
-        if block.get("type") == FOOTNOTE and attrs.get("role") == "page_footnote" and page is not None:
+        if (
+            block.get("type") == FOOTNOTE
+            and attrs.get("role") == "page_footnote"
+            and page is not None
+        ):
             footnotes_by_page.setdefault(page, []).append(block)
 
     for page, page_footnotes in footnotes_by_page.items():
         page_footnotes.sort(key=_footnote_sort_key)
-        markers = _middle_page_inline_markers(page_footnotes) or _page_note_ref_markers(blocks, page)
+        markers = _middle_page_inline_markers(page_footnotes) or _page_note_ref_markers(
+            blocks, page
+        )
         if len(markers) != len(page_footnotes):
             continue
         explicit = [
@@ -86,9 +93,12 @@ def recover_unmarked_page_footnote_markers(blocks: List[Dict[str, Any]]) -> None
             or _leading_note_marker(block.get("text", ""))
             for block in page_footnotes
         ]
-        if any(expected and expected != actual for expected, actual in zip(explicit, markers)):
+        if any(
+            expected and expected != actual
+            for expected, actual in zip(explicit, markers, strict=True)
+        ):
             continue
-        for block, expected, marker in zip(page_footnotes, explicit, markers):
+        for block, expected, marker in zip(page_footnotes, explicit, markers, strict=True):
             if expected:
                 continue
             attrs = block.setdefault("attrs", {})
@@ -105,12 +115,18 @@ def promote_page_reference_list_footnotes(blocks: List[Dict[str, Any]]) -> None:
             continue
         page = _block_page(blocks[run[0]])
         markers = _reference_list_markers(blocks, run, page)
-        if page is not None and _is_page_bottom_reference_run(blocks, run) and _has_matching_page_refs(blocks, page, markers):
+        if (
+            page is not None
+            and _is_page_bottom_reference_run(blocks, run)
+            and _has_matching_page_refs(blocks, page, markers)
+        ):
             boxes = _split_bbox_vertically(_bbox(blocks[run[0]]), len(run))
             for offset, k in enumerate(run):
                 attrs = blocks[k].setdefault("attrs", {})
                 blocks[k]["type"] = FOOTNOTE
-                blocks[k].setdefault("source", {})["bbox"] = boxes[offset] if offset < len(boxes) else _bbox(blocks[k])
+                blocks[k].setdefault("source", {})["bbox"] = (
+                    boxes[offset] if offset < len(boxes) else _bbox(blocks[k])
+                )
                 attrs["role"] = "page_footnote"
                 attrs["promoted_from"] = attrs.get("raw_type", LIST_ITEM)
                 attrs["promote_reason"] = "page_bottom_reference_list"
@@ -147,7 +163,11 @@ def promote_cross_page_footnote_continuation_paragraphs(blocks: List[Dict[str, A
             prev_bp = _block_page(prev_blk)
             if prev_bp is not None and prev_bp < prev_page:
                 break
-            if prev_blk.get("type") == FOOTNOTE and prev_bp == prev_page and _has_next_page_continuation(prev_blk):
+            if (
+                prev_blk.get("type") == FOOTNOTE
+                and prev_bp == prev_page
+                and _has_next_page_continuation(prev_blk)
+            ):
                 found_prev = True
                 break
 
@@ -196,17 +216,12 @@ def _footnote_lines(text: str) -> List[str]:
 def _split_at_explicit_line_markers(text: str) -> List[str]:
     lines = _footnote_lines(text)
     boundaries = [
-        index
-        for index, line in enumerate(lines[1:], 1)
-        if _leading_note_marker(line) is not None
+        index for index, line in enumerate(lines[1:], 1) if _leading_note_marker(line) is not None
     ]
     if not boundaries:
         return [text]
     cuts = [0, *boundaries, len(lines)]
-    return [
-        "\n".join(lines[cuts[index] : cuts[index + 1]])
-        for index in range(len(cuts) - 1)
-    ]
+    return ["\n".join(lines[cuts[index] : cuts[index + 1]]) for index in range(len(cuts) - 1)]
 
 
 def _split_footnote_text(
@@ -259,7 +274,9 @@ def _find_embedded_footnote_marker(text: str, marker: str, start: int) -> Option
     marker = str(marker or "").strip()
     if not marker:
         return None
-    pattern = re.compile(rf"(?<=[。！？；])\s*(?P<marker>{re.escape(marker)})(?=\s|[《“‘（(A-Za-z\u4e00-\u9fff])")
+    pattern = re.compile(
+        rf"(?<=[。！？；])\s*(?P<marker>{re.escape(marker)})(?=\s|[《“‘（(A-Za-z\u4e00-\u9fff])"
+    )
     match = pattern.search(text, start)
     return match.start("marker") if match else None
 
@@ -268,9 +285,7 @@ def _split_footnote_parts(lines: List[str], desired_count: int) -> List[str]:
     if desired_count <= 1:
         return ["\n".join(lines)]
     marker_boundaries = [
-        index
-        for index, line in enumerate(lines[1:], 1)
-        if _leading_note_marker(line) is not None
+        index for index, line in enumerate(lines[1:], 1) if _leading_note_marker(line) is not None
     ]
     if len(marker_boundaries) >= desired_count - 1:
         boundaries = [0, *marker_boundaries[: desired_count - 1], len(lines)]
@@ -288,7 +303,11 @@ def _page_footnote_definition_counts(blocks: List[Dict[str, Any]]) -> Dict[int, 
     for block in blocks:
         attrs = block.get("attrs") or {}
         page = _block_page(block)
-        if block.get("type") == FOOTNOTE and attrs.get("role") == "page_footnote" and page is not None:
+        if (
+            block.get("type") == FOOTNOTE
+            and attrs.get("role") == "page_footnote"
+            and page is not None
+        ):
             counts[page] = counts.get(page, 0) + 1
     return counts
 
@@ -356,7 +375,12 @@ def _collect_reference_list_run(blocks: List[Dict[str, Any]], start: int) -> Lis
     bbox = _bbox(blocks[start])
     out: List[int] = []
     i = start
-    while i < len(blocks) and _is_reference_list_item(blocks[i]) and _block_page(blocks[i]) == page and _bbox(blocks[i]) == bbox:
+    while (
+        i < len(blocks)
+        and _is_reference_list_item(blocks[i])
+        and _block_page(blocks[i]) == page
+        and _bbox(blocks[i]) == bbox
+    ):
         out.append(i)
         i += 1
     return out if len(out) >= _REFERENCE_LIST_MIN_RUN else []
@@ -364,7 +388,11 @@ def _collect_reference_list_run(blocks: List[Dict[str, Any]], start: int) -> Lis
 
 def _is_reference_list_item(blk: Dict[str, Any]) -> bool:
     attrs = blk.get("attrs") or {}
-    return blk.get("type") == LIST_ITEM and attrs.get("raw_type") == LIST_ITEM and _leading_note_marker(blk.get("text", "")) is not None
+    return (
+        blk.get("type") == LIST_ITEM
+        and attrs.get("raw_type") == LIST_ITEM
+        and _leading_note_marker(blk.get("text", "")) is not None
+    )
 
 
 def _is_mineru_reference_list_item(blk: Dict[str, Any]) -> bool:
@@ -388,7 +416,7 @@ def _reference_list_markers(
     if len(page_refs) != len(run):
         return explicit
     aligned: List[Optional[str]] = []
-    for expected, actual in zip(explicit, page_refs):
+    for expected, actual in zip(explicit, page_refs, strict=True):
         if expected is not None and expected != actual:
             return explicit
         aligned.append(expected or actual)
@@ -427,10 +455,15 @@ def _is_page_bottom_reference_run(blocks: List[Dict[str, Any]], run: List[int]) 
     if not bbox:
         return False
     h = _page_height_hint(blocks[run[0]])
-    return float(bbox[1]) >= h * _PAGE_BOTTOM_REF_Y0_RATIO and float(bbox[3]) >= h * _NEAR_PAGE_BOTTOM_RATIO
+    return (
+        float(bbox[1]) >= h * _PAGE_BOTTOM_REF_Y0_RATIO
+        and float(bbox[3]) >= h * _NEAR_PAGE_BOTTOM_RATIO
+    )
 
 
-def _has_matching_page_refs(blocks: List[Dict[str, Any]], page: int, markers: List[Optional[str]]) -> bool:
+def _has_matching_page_refs(
+    blocks: List[Dict[str, Any]], page: int, markers: List[Optional[str]]
+) -> bool:
     note_markers = {m for m in markers if m}
     if not note_markers:
         return False
@@ -451,7 +484,11 @@ def _page_height_hint(blk: Dict[str, Any]) -> float:
     bbox = _bbox(blk)
     if not bbox:
         return _DEFAULT_PAGE_HEIGHT
-    return _DEFAULT_PAGE_HEIGHT if float(bbox[2]) > _PAGE_HEIGHT_HINT_BBOX_W or float(bbox[3]) > _PAGE_HEIGHT_HINT_BBOX_H else _PAGE_HEIGHT_HINT_SMALL
+    return (
+        _DEFAULT_PAGE_HEIGHT
+        if float(bbox[2]) > _PAGE_HEIGHT_HINT_BBOX_W or float(bbox[3]) > _PAGE_HEIGHT_HINT_BBOX_H
+        else _PAGE_HEIGHT_HINT_SMALL
+    )
 
 
 def _split_bbox_vertically(bbox: Optional[BBox], count: int) -> List[Optional[BBox]]:
