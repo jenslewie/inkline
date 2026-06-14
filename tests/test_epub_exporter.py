@@ -626,3 +626,31 @@ def test_export_epub_sanitizes_attrs_html_with_nbsp_entity(tmp_path):
         html = "\n".join(zf.read(name).decode("utf-8") for name in chapter_names)
     assert "<table>" in html
     assert "\u00a0" in html or "&#160;" in html
+
+
+def test_export_epub_sanitizes_attrs_html_with_para_entity(tmp_path):
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b000001",
+            "type": "table",
+            "text": "",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {"html": "<table><tr><td>A&para;B</td></tr></table>"},
+        }
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = [n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n]
+        from xml.etree import ElementTree as ET
+
+        for name in chapter_names:
+            content = zf.read(name).decode("utf-8")
+            ET.fromstring(content)
+        html = "\n".join(zf.read(name).decode("utf-8") for name in chapter_names)
+    assert "<table>" in html
+    assert "\u00b6" in html or "&#182;" in html
+    assert "\u00a6" not in html
