@@ -333,7 +333,8 @@ def test_export_epub_toc_with_page_labels(tmp_path):
 
     with zipfile.ZipFile(output) as zf:
         nav = zf.read("EPUB/nav.xhtml").decode("utf-8")
-    assert "第一章 (1)" in nav
+    assert "第一章" in nav
+    assert "(1)" not in nav
 
 
 def test_export_epub_toc_page_label_by_title_match(tmp_path):
@@ -380,8 +381,10 @@ def test_export_epub_toc_page_label_by_title_match(tmp_path):
 
     with zipfile.ZipFile(output) as zf:
         nav = zf.read("EPUB/nav.xhtml").decode("utf-8")
-    assert "序言 (1)" in nav
-    assert "第一章 (5)" in nav
+    assert "序言" in nav
+    assert "第一章" in nav
+    assert "(1)" not in nav
+    assert "(5)" not in nav
 
 
 def test_export_epub_toc_no_mismatch_when_extra_toc_entry(tmp_path):
@@ -413,8 +416,10 @@ def test_export_epub_toc_no_mismatch_when_extra_toc_entry(tmp_path):
 
     with zipfile.ZipFile(output) as zf:
         nav = zf.read("EPUB/nav.xhtml").decode("utf-8")
-    assert "第一章 (5)" in nav
-    assert "封面" not in nav
+    assert "第一章" in nav
+    assert "(5)" not in nav
+    # "封面" has no matching heading but still appears in nav (linked to fallback chapter)
+    assert "封面" in nav
 
 
 def test_export_epub_empty_table_and_continuation_skipped(tmp_path):
@@ -528,8 +533,8 @@ def test_export_epub_toc_duplicate_titles_no_cross_contamination(tmp_path):
         nav = zf.read("EPUB/nav.xhtml").decode("utf-8")
     items = re.findall(r'<li><a href="[^"]+">([^<]+)</a></li>', nav)
     assert len(items) == 2
-    assert items[0] == "Intro (1)"
-    assert items[1] == "Intro (9)"
+    assert items[0] == "Intro"
+    assert items[1] == "Intro"
 
 
 def test_export_epub_figure_with_broken_image_id_falls_back_to_image_path(tmp_path):

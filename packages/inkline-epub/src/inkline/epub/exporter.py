@@ -107,7 +107,10 @@ def export_epub(
         archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         archive.writestr("META-INF/container.xml", _container_xml())
         archive.writestr("EPUB/styles/book.css", CSS)
-        archive.writestr("EPUB/nav.xhtml", _nav_xhtml(metadata, chapters, toc=toc, toc_heading_ids=toc_heading_ids))
+        archive.writestr(
+            "EPUB/nav.xhtml",
+            _nav_xhtml(metadata, chapters, toc=toc, toc_heading_ids=toc_heading_ids),
+        )
         archive.writestr(
             "EPUB/content.opf", _opf(metadata, identifier, chapters, image_assets, inline_images)
         )
@@ -243,7 +246,12 @@ def _toc_heading_block_ids(document: dict[str, Any]) -> set[str]:
                 or h_first_norm == toc_norm
                 or toc_norm.startswith(h_first_norm)
                 or h_first_norm.startswith(toc_norm[:6])  # prefix match on first few chars
-                or (len(h_first_norm) >= 3 and len(toc_norm) >= 3 and h_first_norm[:3] == toc_norm[:3] and h_first_norm in toc_norm)
+                or (
+                    len(h_first_norm) >= 3
+                    and len(toc_norm) >= 3
+                    and h_first_norm[:3] == toc_norm[:3]
+                    and h_first_norm in toc_norm
+                )
             ):
                 result.add(hb["block_id"])
                 h_idx += 1
@@ -269,7 +277,9 @@ def _chapter_documents(
     i = 0
     blocks = document["blocks"]
     toc_split_ids = _toc_heading_block_ids(document)
-    max_chapter_level = max((b.get("level", 1) for b in blocks if b.get("type") == "heading"), default=1)
+    max_chapter_level = max(
+        (b.get("level", 1) for b in blocks if b.get("type") == "heading"), default=1
+    )
     # Use level 2 as the chapter-split threshold when the document has level-2
     # headings (which typically represent the main chapters), so that each
     # chapter becomes its own EPUB chapter.  When there are only level-1
@@ -660,19 +670,14 @@ def _nav_xhtml(
     items_parts: list[str] = []
     for entry in toc:
         toc_title = entry.get("title", "")
-        page_label = entry.get("target_page_label") or entry.get("page_hint") or ""
         # Find the chapter this toc entry points to
-        chapter_index = heading_to_chapter.get(entry.get("source_block_id") or entry.get("block_id") or "")
+        chapter_index = heading_to_chapter.get(
+            entry.get("source_block_id") or entry.get("block_id") or ""
+        )
         if not chapter_index:
             chapter_index = toc_title_to_chapter.get(toc_title.strip())
-        if chapter_index:
-            href = f"chapter_{chapter_index:04d}.xhtml"
-        else:
-            # Fallback: link to first chapter if no match found
-            href = "chapter_0001.xhtml"
+        href = f"chapter_{chapter_index:04d}.xhtml" if chapter_index else "chapter_0001.xhtml"
         label = escape(toc_title)
-        if page_label:
-            label = f"{label} ({escape(page_label)})"
         items_parts.append(f'<li><a href="{href}">{label}</a></li>')
     items = "\n".join(items_parts)
     lang = escape(metadata.get("language") or "zh-CN", quote=True)
