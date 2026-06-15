@@ -21,6 +21,8 @@ def test_export_epub_writes_standard_container(tmp_path):
 
 
 def test_export_epub_renders_figure_placeholder(tmp_path):
+    """Figure blocks without image assets produce a clean placeholder
+    without debug metadata (page, bbox, parser_raw_id)."""
     document = sample_document()
     document["blocks"] = [
         {
@@ -39,9 +41,12 @@ def test_export_epub_renders_figure_placeholder(tmp_path):
         html = "\n".join(
             zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
         )
-    assert "Image placeholder" in html
-    assert "page 3" in html
-    assert "#/pictures/0" in html
+    # Placeholder should be present but WITHOUT debug metadata
+    assert "[Image]" in html
+    assert "Image placeholder" not in html
+    assert "page 3" not in html
+    assert "bbox" not in html
+    assert "#/pictures/0" not in html
 
 
 def test_export_epub_renders_inline_note_refs(tmp_path):
@@ -654,3 +659,885 @@ def test_export_epub_sanitizes_attrs_html_with_para_entity(tmp_path):
     assert "<table>" in html
     assert "\u00b6" in html or "&#182;" in html
     assert "\u00a6" not in html
+
+
+def test_visual_page_snapshot_only(tmp_path):
+    """A page with snapshot.required=true but no full_page_image figure
+    should output the snapshot image at the first block's position and
+    skip all other text blocks on that page."""
+    document = sample_document()
+    document["pages"] = [
+        {
+            "physical_page": 5,
+            "snapshot": {"required": True, "asset_id": "page-0005-snapshot"},
+        }
+    ]
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "Intro text",
+            "source": {"page": 5},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_p2",
+            "type": "paragraph",
+            "text": "More text on page 5",
+            "source": {"page": 5},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_p3",
+            "type": "paragraph",
+            "text": "Normal page text",
+            "source": {"page": 6},
+            "attrs": {},
+        },
+    ]
+    # Create a snapshot image asset
+    img_dir = tmp_path / "images" / "pages"
+    img_dir.mkdir(parents=True)
+    img_file = img_dir / "page_0005.png"
+    img_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    document["assets"]["images"] = [
+        {
+            "image_id": "page-0005-snapshot",
+            "path": str(img_file),
+            "media_type": "image/png",
+            "role": "page_snapshot",
+        }
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    # Snapshot should appear as a visual-page figure
+    assert "visual-page" in html
+    assert "page-0005-snapshot" in html
+    # Text blocks on the visual page should be suppressed
+    assert "Intro text" not in html
+    assert "More text on page 5" not in html
+    # Normal text on other pages should still appear
+    assert "Normal page text" in html
+
+
+def test_visual_page_with_full_page_image_figure(tmp_path):
+    """A page with snapshot.required=true AND a full_page_image figure:
+    the figure at its position emits the image, no other blocks on that
+    page appear, and no duplicate snapshot image is emitted."""
+    document = sample_document()
+    document["pages"] = [
+        {
+            "physical_page": 12,
+            "snapshot": {"required": True, "asset_id": "page-0012-snapshot"},
+        }
+    ]
+    img_dir = tmp_path / "images" / "pages"
+    img_dir.mkdir(parents=True)
+    snap_file = img_dir / "page_0012.png"
+    snap_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter",
+            "source": {"page": 11},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 12},
+            "attrs": {"layout_role": "full_page_image", "image_id": "page-0012-full"},
+        },
+        {
+            "block_id": "b_p_skip",
+            "type": "paragraph",
+            "text": "Should be skipped",
+            "source": {"page": 12},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_p_after",
+            "type": "paragraph",
+            "text": "After visual page",
+            "source": {"page": 13},
+            "attrs": {},
+        },
+    ]
+    document["assets"]["images"] = [
+        {
+            "image_id": "page-0012-snapshot",
+            "path": str(snap_file),
+            "media_type": "image/png",
+            "role": "page_snapshot",
+        },
+        {
+            "image_id": "page-0012-full",
+            "path": str(snap_file),
+            "media_type": "image/png",
+            "role": "figure",
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    # The figure should appear as a <figure> with the image
+    assert "page-0012-full" in html
+    # Text block on the visual page should be suppressed
+    assert "Should be skipped" not in html
+    # After-visual-page text should appear
+    assert "After visual page" in html
+    # Snapshot should NOT appear separately (dedup)
+    # Count figure elements \u2014 should have exactly one for the visual page
+    figure_count = html.count("<figure")
+    assert figure_count == 1
+
+
+def test_no_debug_metadata_in_epub(tmp_path):
+    """EPUB XHTML should never contain 'Image placeholder (...)',
+    bbox coordinates, or parser_raw_id values."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b1",
+            "type": "paragraph",
+            "text": "Normal text",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+        {
+            "block_id": "b2",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 3, "bbox": [10, 20, 300, 400]},
+            "attrs": {"parser_raw_id": "#/pictures/5"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    assert "Image placeholder" not in html
+    assert "bbox" not in html
+    assert "#/pictures/" not in html
+
+
+def test_toc_item_suppressed_in_chapter_body(tmp_path):
+    """toc_item blocks should not appear in EPUB chapter body;
+    nav.xhtml still provides navigation."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_toc1",
+            "type": "toc_item",
+            "text": "Table of contents entry",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "Body text",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_html = "\n".join(
+            zf.read(name).decode("utf-8")
+            for name in zf.namelist()
+            if name.endswith(".xhtml") and "chapter" in name
+        )
+    # toc_item text should NOT appear in chapter body
+    assert "Table of contents entry" not in chapter_html
+    # Body text should appear
+    assert "Body text" in chapter_html
+    # nav.xhtml should still exist
+    assert "EPUB/nav.xhtml" in zf.namelist()
+
+
+def test_figure_caption_rendered_as_figcaption(tmp_path):
+    """Figure blocks with caption text (in attrs.captions or trailing
+    caption blocks) should render as <figcaption> in EPUB."""
+    document = sample_document()
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "fig.jpg"
+    img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "Figure caption text",
+            "source": {"page": 5},
+            "attrs": {"image_path": "images/fig.jpg"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    assert "<figcaption>" in html
+    assert "Figure caption text" in html
+
+
+def test_chapter_local_footnote_numbering(tmp_path):
+    """Footnote references should be renumbered as sequential natural
+    numbers within each chapter, resetting in the next chapter.
+    The canonical note_id links remain unchanged."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "Text1"},
+                    {"type": "note_ref", "marker": "*", "target_note_id": "note_1"},
+                    {"type": "text", "text": "Text2"},
+                    {"type": "note_ref", "marker": "**", "target_note_id": "note_2"},
+                    {"type": "text", "text": "Text3"},
+                ]
+            },
+        },
+        {
+            "block_id": "b_fn1",
+            "type": "footnote",
+            "text": "Note 1",
+            "source": {"page": 1},
+            "attrs": {"note_id": "note_1"},
+        },
+        {
+            "block_id": "b_fn2",
+            "type": "footnote",
+            "text": "Note 2",
+            "source": {"page": 1},
+            "attrs": {"note_id": "note_2"},
+        },
+        {
+            "block_id": "b_h2",
+            "type": "heading",
+            "text": "Chapter 2",
+            "source": {"page": 5},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p2",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 5},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "TextA"},
+                    {"type": "note_ref", "marker": "\u2020", "target_note_id": "note_3"},
+                    {"type": "text", "text": "TextB"},
+                ]
+            },
+        },
+        {
+            "block_id": "b_fn3",
+            "type": "footnote",
+            "text": "Note 3",
+            "source": {"page": 5},
+            "attrs": {"note_id": "note_3"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_files = sorted(
+            name for name in zf.namelist() if name.endswith(".xhtml") and "chapter" in name
+        )
+        ch1_html = zf.read(chapter_files[0]).decode("utf-8")
+        ch2_html = zf.read(chapter_files[1]).decode("utf-8")
+
+    # Chapter 1: markers should be renumbered 1, 2
+    assert "<sup>1</sup>" in ch1_html
+    assert "<sup>2</sup>" in ch1_html
+    # Original markers (* and **) should not appear
+    assert "<sup>*</sup>" not in ch1_html
+    # Links should still point to canonical note_id
+    assert "note_1" in ch1_html
+    assert "note_2" in ch1_html
+
+    # Chapter 2: footnote numbering resets \u2014 first reference is 1 again
+    assert "<sup>1</sup>" in ch2_html
+    # Original marker (\u2020) should not appear
+    assert "\u2020" not in ch2_html
+
+
+def test_visual_page_figure_anchor_not_first_block(tmp_path):
+    """When a visual page has a full_page_image figure preceded by other
+    blocks (heading, paragraph), the image should be emitted at the figure
+    anchor position, NOT at the first block.  Blocks before the figure
+    on that page are skipped."""
+    document = sample_document()
+    document["pages"] = [
+        {
+            "physical_page": 5,
+            "snapshot": {"required": True, "asset_id": "page-0005-snapshot"},
+        }
+    ]
+    img_dir = tmp_path / "images" / "pages"
+    img_dir.mkdir(parents=True)
+    snap_file = img_dir / "page_0005.png"
+    snap_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_heading_on_vp",
+            "type": "heading",
+            "text": "Heading on visual page",
+            "source": {"page": 5},
+            "attrs": {},
+            "level": 2,
+        },
+        {
+            "block_id": "b_para_on_vp",
+            "type": "paragraph",
+            "text": "Paragraph on visual page",
+            "source": {"page": 5},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5},
+            "attrs": {"layout_role": "full_page_image", "image_id": "page-0005-fig"},
+        },
+        {
+            "block_id": "b_p_after",
+            "type": "paragraph",
+            "text": "After visual page",
+            "source": {"page": 6},
+            "attrs": {},
+        },
+    ]
+    document["assets"]["images"] = [
+        {
+            "image_id": "page-0005-snapshot",
+            "path": str(snap_file),
+            "media_type": "image/png",
+            "role": "page_snapshot",
+        },
+        {
+            "image_id": "page-0005-fig",
+            "path": str(snap_file),
+            "media_type": "image/png",
+            "role": "figure",
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    # The figure image should appear (emitted at the figure anchor)
+    assert "page-0005-fig" in html
+    # Blocks before the figure on the visual page should be suppressed
+    assert "Heading on visual page" not in html
+    assert "Paragraph on visual page" not in html
+    # After-visual-page text should appear
+    assert "After visual page" in html
+    # Only one figure for the visual page (no duplicate snapshot)
+    assert html.count("<figure") == 1
+
+
+def test_footnote_numbering_across_paragraphs_in_same_chapter(tmp_path):
+    """Footnote references in two separate paragraphs within the same
+    chapter should get sequential chapter-local numbers (1, 2), not
+    reset to (1, 1) in each paragraph."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "Text1"},
+                    {"type": "note_ref", "marker": "*", "target_note_id": "note_a"},
+                    {"type": "text", "text": " end1"},
+                ]
+            },
+        },
+        {
+            "block_id": "b_p2",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 2},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "Text2"},
+                    {"type": "note_ref", "marker": "\u2020", "target_note_id": "note_b"},
+                    {"type": "text", "text": " end2"},
+                ]
+            },
+        },
+        {
+            "block_id": "b_fn_a",
+            "type": "footnote",
+            "text": "Note A",
+            "source": {"page": 1},
+            "attrs": {"note_id": "note_a"},
+        },
+        {
+            "block_id": "b_fn_b",
+            "type": "footnote",
+            "text": "Note B",
+            "source": {"page": 2},
+            "attrs": {"note_id": "note_b"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_files = sorted(
+            name for name in zf.namelist() if name.endswith(".xhtml") and "chapter" in name
+        )
+        ch1_html = zf.read(chapter_files[0]).decode("utf-8")
+
+    # First paragraph note_ref should be <sup>1</sup>
+    assert "<sup>1</sup>" in ch1_html
+    # Second paragraph note_ref should be <sup>2</sup> (sequential, not reset)
+    assert "<sup>2</sup>" in ch1_html
+    # Original markers should not appear
+    assert "<sup>*</sup>" not in ch1_html
+
+
+def test_figure_attrs_captions_rendered_as_figcaption(tmp_path):
+    """Figure blocks with attrs.captions (a list of caption strings)
+    should render those captions in <figcaption> in EPUB output."""
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "fig.jpg"
+    img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5},
+            "attrs": {
+                "image_path": "images/fig.jpg",
+                "captions": ["ATTR CAPTION TEXT"],
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    assert "ATTR CAPTION TEXT" in html
+    assert "<figcaption>" in html
+
+
+def test_snapshot_asset_id_from_canonical_metadata(tmp_path):
+    """The snapshot image should be looked up using the asset_id from
+    canonical page metadata (pages[*].snapshot.asset_id), not a
+    hardcoded page-XXXX-snapshot naming convention."""
+    document = sample_document()
+    # Use a custom asset_id that differs from the convention
+    document["pages"] = [
+        {
+            "physical_page": 5,
+            "snapshot": {"required": True, "asset_id": "custom-snap-id"},
+        }
+    ]
+    img_dir = tmp_path / "images" / "pages"
+    img_dir.mkdir(parents=True)
+    img_file = img_dir / "custom_snap.png"
+    img_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "Text on visual page",
+            "source": {"page": 5},
+            "attrs": {},
+        },
+    ]
+    # The image asset uses the custom asset_id from page metadata
+    document["assets"]["images"] = [
+        {
+            "image_id": "custom-snap-id",
+            "path": str(img_file),
+            "media_type": "image/png",
+            "role": "page_snapshot",
+        }
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    # The custom-snap-id asset should be found and rendered
+    assert "custom-snap-id" in html
+    assert "visual-page" in html
+    # Text on the visual page should be suppressed
+    assert "Text on visual page" not in html
+
+
+def test_visual_page_heading_creates_chapter_boundary(tmp_path):
+    """A TOC-referenced heading that sits on a visual page should still
+    create a chapter boundary, but the heading text itself should not
+    appear in the chapter body (replaced by the snapshot)."""
+    document = sample_document()
+    # Page 5 is a visual page
+    document["pages"] = [
+        {
+            "physical_page": 5,
+            "snapshot": {"required": True, "asset_id": "page-0005-snapshot"},
+        }
+    ]
+    img_dir = tmp_path / "images" / "pages"
+    img_dir.mkdir(parents=True)
+    img_file = img_dir / "page_0005.png"
+    img_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "First chapter content",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_h2_on_vp",
+            "type": "heading",
+            "text": "年表",
+            "source": {"page": 5},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_vp_text",
+            "type": "paragraph",
+            "text": "Should be suppressed",
+            "source": {"page": 5},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_h3",
+            "type": "heading",
+            "text": "Chapter 3",
+            "source": {"page": 10},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p3",
+            "type": "paragraph",
+            "text": "Third chapter content",
+            "source": {"page": 10},
+            "attrs": {},
+        },
+    ]
+    document["assets"]["images"] = [
+        {
+            "image_id": "page-0005-snapshot",
+            "path": str(img_file),
+            "media_type": "image/png",
+            "role": "page_snapshot",
+        }
+    ]
+    # Clear sample_document TOC so it doesn't interfere
+    document["toc"] = [
+        {"title": "Chapter 1", "level": 1, "source_block_id": "b_h1"},
+        {"title": "年表", "level": 1, "source_block_id": "b_h2_on_vp"},
+        {"title": "Chapter 3", "level": 1, "source_block_id": "b_h3"},
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_files = sorted(
+            name for name in zf.namelist() if name.endswith(".xhtml") and "chapter" in name
+        )
+        nav = zf.read("EPUB/nav.xhtml").decode("utf-8")
+        chapters_html = []
+        for cf in chapter_files:
+            html = zf.read(cf).decode("utf-8")
+            chapters_html.append(html)
+
+    # The heading on the visual page should create a chapter boundary in nav
+    assert "年表" in nav
+    # But the heading text should NOT appear in any chapter body
+    all_body = "".join(chapters_html)
+    assert "年表" not in all_body
+    # The snapshot should appear somewhere
+    assert "page-0005-snapshot" in all_body
+    # There should be exactly 3 chapters
+    assert len(chapter_files) == 3
+    # First chapter should have content
+    assert "First chapter content" in chapters_html[0]
+    # Third chapter should have content
+    assert "Third chapter content" in chapters_html[2]
+
+
+def test_toc_heading_role_suppressed_in_chapter_body(tmp_path):
+    """Blocks with attrs.role='toc_heading' or 'toc_entry' should not
+    appear in EPUB chapter body, alongside toc_item blocks."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_preamble",
+            "type": "paragraph",
+            "text": "Some intro",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_toc_h",
+            "type": "heading",
+            "text": "目录",
+            "source": {"page": 2},
+            "attrs": {"role": "toc_heading"},
+            "level": 2,
+        },
+        {
+            "block_id": "b_toc_e1",
+            "type": "toc_item",
+            "text": "第一章",
+            "source": {"page": 2},
+            "attrs": {"role": "toc_entry"},
+        },
+        {
+            "block_id": "b_toc_e2",
+            "type": "paragraph",
+            "text": "第二章",
+            "source": {"page": 2},
+            "attrs": {"role": "toc_entry"},
+        },
+        {
+            "block_id": "b_body",
+            "type": "paragraph",
+            "text": "Real body text",
+            "source": {"page": 3},
+            "attrs": {},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_html = "\n".join(
+            zf.read(name).decode("utf-8")
+            for name in zf.namelist()
+            if name.endswith(".xhtml") and "chapter" in name
+        )
+        nav_html = zf.read("EPUB/nav.xhtml").decode("utf-8")
+
+    # TOC role blocks should not appear in chapter body
+    assert "目录" not in chapter_html
+    assert "第一章" not in chapter_html
+    assert "第二章" not in chapter_html
+    # Non-TOC body text should appear
+    assert "Some intro" in chapter_html
+    assert "Real body text" in chapter_html
+
+
+def test_snapshot_asset_missing_shows_placeholder(tmp_path):
+    """When a visual page has no snapshot image asset available, the
+    page should show a placeholder image instead of being silently
+    blank and dropping all text content."""
+    document = sample_document()
+    document["pages"] = [
+        {
+            "physical_page": 5,
+            "snapshot": {"required": True, "asset_id": "page-0005-snapshot"},
+        }
+    ]
+    # No image asset for the snapshot — asset is missing
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "Text on visual page without image",
+            "source": {"page": 5},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_p2",
+            "type": "paragraph",
+            "text": "After visual page text",
+            "source": {"page": 6},
+            "attrs": {},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    # A placeholder should appear instead of being silently blank
+    assert "image-placeholder" in html
+    # Text on the visual page should still be suppressed (snapshot/placeholder replaces it)
+    assert "Text on visual page without image" not in html
+    # Text after the visual page should appear
+    assert "After visual page text" in html
+
+
+def test_all_blocks_suppressed_produces_fallback_chapter(tmp_path):
+    """When every block is suppressed (e.g., all are toc_item/toc_heading/
+    toc_entry), the exporter should still produce at least one chapter
+    so the EPUB is structurally valid (not zero spine items)."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_toc1",
+            "type": "toc_item",
+            "text": "第一章",
+            "source": {"page": 1},
+            "attrs": {"role": "toc_entry"},
+        },
+        {
+            "block_id": "b_toc2",
+            "type": "heading",
+            "text": "目录",
+            "source": {"page": 1},
+            "attrs": {"role": "toc_heading"},
+            "level": 2,
+        },
+        {
+            "block_id": "b_toc3",
+            "type": "toc_item",
+            "text": "第二章",
+            "source": {"page": 1},
+            "attrs": {"role": "toc_entry"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        names = set(zf.namelist())
+        chapter_files = [n for n in names if n.startswith("EPUB/chapter_") and n.endswith(".xhtml")]
+        opf = zf.read("EPUB/content.opf").decode("utf-8")
+
+    # There should be at least one chapter XHTML file
+    assert len(chapter_files) >= 1
+    # The OPF spine should have at least one itemref
+    assert "<itemref" in opf

@@ -98,6 +98,25 @@ def materialize_full_page_image_assets(
     ]
     if not full_page_figures:
         return
+
+    # Build a lookup of existing snapshot assets so that full_page_image
+    # figures can reuse the same physical image file when the page already
+    # has a snapshot rendered.
+    existing_assets = canonical.get("assets", {}).get("images", [])
+    snapshot_asset_by_page: Dict[int, Dict[str, Any]] = {}
+    for asset in existing_assets:
+        if not isinstance(asset, dict):
+            continue
+        aid = asset.get("image_id", "")
+        if not aid.endswith("-snapshot"):
+            continue
+        # image_id format: page-XXXX-snapshot
+        try:
+            page_num = int(aid.split("-")[1])
+        except (ValueError, IndexError):
+            continue
+        snapshot_asset_by_page[page_num] = asset
+
     try:
         import fitz  # type: ignore
     except Exception as exc:
@@ -108,8 +127,6 @@ def materialize_full_page_image_assets(
         return
 
     pdf_path = Path(source_pdf)
-    asset_dir = output_dir / "images" / "full_page"
-    asset_dir.mkdir(parents=True, exist_ok=True)
     doc = fitz.open(pdf_path)
     try:
         matrix = fitz.Matrix(dpi / 72.0, dpi / 72.0)
@@ -117,6 +134,44 @@ def materialize_full_page_image_assets(
             page = (b.get("source") or {}).get("page")
             if not isinstance(page, int) or page < 1 or page > len(doc):
                 continue
+
+            snapshot = snapshot_asset_by_page.get(page)
+            if snapshot and Path(snapshot["path"]).exists():
+                # Reuse the snapshot's physical path — same image, no need
+                # to render again.
+                reused_path = snapshot["path"]
+                # Point the block's image_path to the reused location
+                # (images/pages/ instead of images/full_page/) so that the
+                # path reflects the actual physical file.
+                attrs = b.setdefault("attrs", {})
+                image_id = f"page-{page:04d}-full"
+                original = attrs.get("image_path")
+                if original:
+                    attrs["cropped_image_path"] = original
+                attrs["image_path"] = str(
+                    Path("images") / "pages" / Path(reused_path).name
+                )
+                attrs["image_id"] = image_id
+                attrs["image_render_source"] = snapshot.get(
+                    "image_render_source", "source_pdf"
+                )
+                attrs["image_render_dpi"] = snapshot.get("image_render_dpi", dpi)
+                _upsert_image_asset(
+                    canonical,
+                    {
+                        "image_id": image_id,
+                        "path": reused_path,
+                        "media_type": snapshot.get("media_type", "image/png"),
+                        "role": "figure",
+                        "source": {"page": page},
+                        "related_block_ids": [b.get("block_id")] if b.get("block_id") else [],
+                    },
+                )
+                continue
+
+            # No snapshot asset to reuse — render a new full-page image.
+            asset_dir = output_dir / "images" / "full_page"
+            asset_dir.mkdir(parents=True, exist_ok=True)
             image_name = f"page_{page:04d}.png"
             image_path = asset_dir / image_name
             if not image_path.exists():

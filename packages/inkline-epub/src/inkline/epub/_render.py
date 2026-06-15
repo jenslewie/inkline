@@ -10,6 +10,61 @@ from inkline.epub._assets import asset_image_name
 from inkline.epub._chapter import Chapter
 
 
+def _build_visual_page_set(document: dict[str, Any]) -> set[int]:
+    """Return the set of physical_page numbers where snapshot.required is true.
+
+    These are the pages that need a full-page visual image in the EPUB
+    instead of reflow text.
+    """
+    pages = document.get("pages", [])
+    result: set[int] = set()
+    for p in pages:
+        if not isinstance(p, dict):
+            continue
+        snapshot = p.get("snapshot")
+        if isinstance(snapshot, dict) and snapshot.get("required"):
+            pp = p.get("physical_page")
+            if isinstance(pp, int):
+                result.add(pp)
+    return result
+
+
+def _build_full_page_figure_map(document: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    """Map physical_page -> full_page_image figure block for pages that have one."""
+    result: dict[int, dict[str, Any]] = {}
+    for block in document.get("blocks", []):
+        if block.get("type") != "figure":
+            continue
+        attrs = block.get("attrs") or {}
+        if attrs.get("layout_role") != "full_page_image":
+            continue
+        source = block.get("source") or {}
+        page = source.get("page")
+        if isinstance(page, int):
+            result[page] = block
+    return result
+
+
+def _build_snapshot_asset_id_map(document: dict[str, Any]) -> dict[int, str]:
+    """Map physical_page -> snapshot asset_id from canonical page metadata.
+
+    Uses the explicit asset_id from pages[*].snapshot.asset_id rather
+    than a hardcoded naming convention.
+    """
+    pages = document.get("pages", [])
+    result: dict[int, str] = {}
+    for p in pages:
+        if not isinstance(p, dict):
+            continue
+        snapshot = p.get("snapshot")
+        if isinstance(snapshot, dict) and snapshot.get("required"):
+            pp = p.get("physical_page")
+            asset_id = snapshot.get("asset_id")
+            if isinstance(pp, int) and isinstance(asset_id, str):
+                result[pp] = asset_id
+    return result
+
+
 def chapter_documents(
     document: dict[str, Any],
     *,
@@ -18,10 +73,21 @@ def chapter_documents(
 ) -> list[Chapter]:
     image_assets = image_assets or {}
     inline_images = inline_images or {}
+    visual_pages = _build_visual_page_set(document)
+    full_page_figures = _build_full_page_figure_map(document)
+    snapshot_asset_ids = _build_snapshot_asset_id_map(document)
+
     chapters: list[tuple[str, list[str], str | None]] = []
     current_title = document["metadata"].get("title") or document["metadata"]["doc_id"]
     current_block_id: str | None = None
     current_html: list[str] = []
+
+    # Track which visual pages have already emitted their full-page image
+    # so that we never output the same page image twice.
+    emitted_visual_pages: set[int] = set()
+
+    # Per-chapter footnote counter (resets on each new chapter split)
+    footnote_counter: dict[int, int] = {}  # target_note_id -> chapter-local number
 
     i = 0
     blocks = document["blocks"]
@@ -42,6 +108,34 @@ def chapter_documents(
         text = block.get("text", "")
         block_id = block.get("block_id")
         block_level = int(block.get("level", 1))
+        block_attrs = block.get("attrs") or {}
+        block_role = block_attrs.get("role")
+
+        # === Printed TOC suppression ===
+        # Suppress toc_item blocks AND any block explicitly tagged as
+        # part of the printed TOC (toc_heading, toc_entry).  Nav.xhtml
+        # already provides EPUB navigation.
+        if block_type == "toc_item" or block_role in {"toc_heading", "toc_entry"}:
+            i += 1
+            continue
+
+        # Determine the physical page of this block
+        source = block.get("source") or {}
+        block_page_raw: Any = source.get("page")
+        # For blocks with multi-page source, take the first page
+        if isinstance(source.get("pages"), list):
+            block_page_raw = source["pages"][0] if source["pages"] else None
+        # Type-narrow: only proceed with visual-page logic for int page numbers
+        block_page: int | None = block_page_raw if isinstance(block_page_raw, int) else None
+
+        # Pre-compute visual-page status so both chapter-split and
+        # visual-page handling can use it.
+        is_on_visual_page = block_page is not None and block_page in visual_pages
+
+        # === Chapter-split check (BEFORE visual page early-exit) ===
+        # Headings that represent chapter boundaries must be processed
+        # regardless of whether they sit on a visual page, otherwise
+        # the nav.xhtml chapter structure becomes misaligned.
         should_split = (
             block_type == "heading"
             and block_level <= chapter_level
@@ -55,20 +149,103 @@ def chapter_documents(
             if current_html:
                 chapters.append((current_title, current_html, current_block_id))
                 current_html = []
+            # Reset chapter-local footnote counter
+            footnote_counter = {}
             current_title = text.split("\n", 1)[0] or current_title
             current_block_id = block_id
-            current_html.append(f"<h{block_level}>{escape(text)}</h{block_level}>")
-        elif block_type == "heading":
+            # Only append heading text when this block is NOT on a visual
+            # page.  Visual pages replace all body content (including the
+            # heading) with a snapshot or full-page figure, but the chapter
+            # boundary must still be recorded so nav.xhtml links are correct.
+            if not is_on_visual_page:
+                current_html.append(f"<h{block_level}>{escape(text)}</h{block_level}>")
+
+        # === Visual page early-exit ===
+        # If this block belongs to a visual page whose image has already
+        # been emitted, skip the block entirely (regardless of type).
+        if block_page is not None and block_page in emitted_visual_pages:
+            i += 1
+            continue
+
+        # === Visual page handling ===
+        is_on_visual_page = block_page is not None and block_page in visual_pages
+
+        if is_on_visual_page:
+            assert block_page is not None
+            page_num: int = block_page
+
+            # If this page has a full_page_image figure anchor, we must
+            # emit the image at the figure's position in the reading flow.
+            # Blocks before the figure anchor on this page are skipped
+            # (including already-split headings, which serve as chapter
+            # boundaries but whose body content is replaced by the figure).
+            has_full_page_figure = page_num in full_page_figures
+
+            if has_full_page_figure and block_type != "figure":
+                i += 1
+                continue
+
+            if has_full_page_figure and block_type == "figure":
+                fig_attrs = block.get("attrs") or {}
+                if fig_attrs.get("layout_role") == "full_page_image":
+                    emitted_visual_pages.add(page_num)
+                    captions = _collect_trailing_captions(blocks, i + 1)
+                    current_html.append(
+                        _figure_html(
+                            block,
+                            image_assets=image_assets,
+                            inline_images=inline_images,
+                            captions=captions,
+                        )
+                    )
+                    i += len(captions)
+                    i += 1
+                    continue
+                else:
+                    i += 1
+                    continue
+
+            # No full_page_image figure on this page — emit the snapshot
+            # image and skip the block.
+            emitted_visual_pages.add(page_num)
+            snapshot_html = _snapshot_figure_html(
+                page_num, document, snapshot_asset_ids=snapshot_asset_ids, image_assets=image_assets
+            )
+            if snapshot_html:
+                current_html.append(snapshot_html)
+            else:
+                # Snapshot asset not found — produce a clean placeholder so
+                # the page position is not silently blank.
+                current_html.append(
+                    '<figure class="visual-page image-placeholder">'
+                    '<div role="img" aria-label="Image">[Image]</div>'
+                    "</figure>"
+                )
+            # Skip this block — the snapshot (or placeholder) replaces it.
+            # Also skip any trailing captions if the block is a figure.
+            if block_type == "figure":
+                captions = _collect_trailing_captions(blocks, i + 1)
+                i += len(captions)
+            i += 1
+            continue
+
+        # === Normal block rendering (not on a visual page) ===
+        # If this block was already processed via should_split, skip
+        # the normal rendering branch.
+        if should_split:
+            i += 1
+            continue
+        if block_type == "heading":
             level = min(max(block_level, 2), 6)
             current_html.append(f"<h{level}>{escape(text)}</h{level}>")
         elif block_type == "paragraph":
-            current_html.append(f"<p>{_text_html(block)}</p>")
+            current_html.append(f"<p>{_text_html(block, footnote_counter)}</p>")
         elif block_type == "display_block":
-            current_html.append(_display_block_html(block))
+            current_html.append(_display_block_html(block, footnote_counter))
         elif block_type == "list_item":
             items = []
             while i < len(blocks) and blocks[i]["type"] == "list_item":
-                items.append(f"<li>{_text_html(blocks[i])}</li>")
+                items.append(f"<li>{_text_html(blocks[i], footnote_counter)}</li>")
                 i += 1
             current_html.append("<ul>" + "".join(items) + "</ul>")
             continue
@@ -93,30 +270,88 @@ def chapter_documents(
             current_html.append(
                 f'<aside epub:type="footnote"{id_attr}><p>{escape(text)}</p></aside>'
             )
-        elif block_type == "toc_item":
-            pass
+
         i += 1
 
     if current_html:
         chapters.append((current_title, current_html, current_block_id))
-    if not chapters:
-        chapters.append((current_title, ["<p></p>"], None))
-
-    return [
+    result = [
         Chapter(title=title, body="\n".join(html_parts), source_block_id=block_id)
         for title, html_parts, block_id in chapters
+        if html_parts
     ]
+    # Ensure at least one chapter exists — an EPUB with zero spine items
+    # is structurally invalid.  This can happen when all blocks belong to
+    # the printed TOC (toc_item, toc_heading, toc_entry) and are suppressed.
+    if not result:
+        fallback_title = document["metadata"].get("title") or document["metadata"]["doc_id"]
+        result = [Chapter(title=fallback_title, body="", source_block_id=None)]
+    return result
 
 
-def _text_html(block: dict[str, Any]) -> str:
-    attrs = block.get("attrs") or {}
-    runs = attrs.get("inline_runs")
-    if not isinstance(runs, list) or not any(
-        isinstance(run, dict) and run.get("type") == "note_ref" for run in runs
-    ):
-        return escape(str(block.get("text", "")))
+def _snapshot_figure_html(
+    page_num: int,
+    document: dict[str, Any],
+    *,
+    snapshot_asset_ids: dict[int, str] | None = None,
+    image_assets: dict[str, dict[str, Any]] | None = None,
+) -> str | None:
+    """Return a <figure> with the page snapshot image for a visual page.
+
+    Uses the canonical snapshot.asset_id from page metadata rather than
+    a hardcoded naming convention.
+
+    Returns None if no snapshot asset is found.
+    """
+    image_assets = image_assets or {}
+    snapshot_asset_ids = snapshot_asset_ids or {}
+    # Resolve the snapshot asset_id from canonical page metadata
+    asset_id = snapshot_asset_ids.get(page_num)
+    if not asset_id:
+        # Fallback to convention-based name if no metadata available
+        asset_id = f"page-{page_num:04d}-snapshot"
+    asset = image_assets.get(asset_id)
+    if not asset:
+        return None
+    if not Path(asset["path"]).exists():
+        return None
+    image_name = asset_image_name(asset)
+    alt = f"Page {page_num}"
+    return (
+        '<figure class="visual-page">'
+        f'<img src="images/{escape(image_name, quote=True)}" alt="{escape(alt, quote=True)}"/>'
+        "</figure>"
+    )
+
+
+def _text_html(
+    block: dict[str, Any],
+    footnote_counter: dict[int, int] | None = None,
+) -> str:
+    """Render block text with inline_runs support, including chapter-local
+    footnote renumbering."""
+    # Only create a new dict when None is passed, NOT when an empty dict
+    # is passed — the caller owns the dict and mutations must flow back.
+    if footnote_counter is None:
+        footnote_counter = {}
+    raw_runs = (block.get("attrs") or {}).get("inline_runs")
+    if raw_runs and isinstance(raw_runs, list):
+        return _inline_runs_html(block, raw_runs, footnote_counter=footnote_counter)
+
+    text = block.get("text", "")
+    if not text:
+        return ""
+    return escape(text)
+
+
+def _inline_runs_html(
+    block: dict[str, Any],
+    runs: list[dict[str, Any]],
+    *,
+    footnote_counter: dict[int, int],
+) -> str:
     parts: list[str] = []
-    for index, run in enumerate(runs, 1):
+    for index, run in enumerate(runs):
         if not isinstance(run, dict):
             continue
         if run.get("type") == "text":
@@ -128,14 +363,24 @@ def _text_html(block: dict[str, Any]) -> str:
         if not marker:
             continue
         target = run.get("target_note_id")
+        # Chapter-local renumbering: assign a sequential number per chapter
+        if target is not None:
+            local_num = footnote_counter.get(target)
+            if local_num is None:
+                local_num = len(footnote_counter) + 1
+                footnote_counter[target] = local_num
+            display_marker = str(local_num)
+        else:
+            display_marker = marker
+
         ref_id = f"{block.get('block_id') or 'ref'}_note_ref_{index}"
         if target:
             parts.append(
                 f'<a epub:type="noteref" href="#{escape(str(target), quote=True)}" '
-                f'id="{escape(ref_id, quote=True)}"><sup>{escape(marker)}</sup></a>'
+                f'id="{escape(ref_id, quote=True)}"><sup>{escape(display_marker)}</sup></a>'
             )
         else:
-            parts.append(f"<sup>{escape(marker)}</sup>")
+            parts.append(f"<sup>{escape(display_marker)}</sup>")
     return "".join(parts)
 
 
@@ -154,26 +399,18 @@ def _figure_html(
     captions = captions or []
     image_id = attrs.get("image_id")
     image_asset = image_assets.get(image_id) if image_id else None
-    page = source.get("page")
-    bbox = source.get("bbox")
-    raw_id = attrs.get("parser_raw_id")
 
-    details = []
-    if page is not None:
-        details.append(f"page {page}")
-    if bbox:
-        details.append("bbox " + ", ".join(_format_number(value) for value in bbox))
-    if raw_id:
-        details.append(str(raw_id))
-    fallback = "Image placeholder"
-    if details:
-        fallback += " (" + "; ".join(details) + ")"
-
-    caption = text or fallback
-
+    # Build caption from block text + attrs.captions + trailing caption blocks.
+    # No debug metadata (page, bbox, parser_raw_id) in EPUB output.
     caption_parts: list[str] = []
-    if caption and caption != fallback:
-        caption_parts.append(escape(caption))
+    if text:
+        caption_parts.append(escape(text))
+    # attrs.captions: list of caption strings stored in the figure's attributes
+    attrs_captions = attrs.get("captions")
+    if isinstance(attrs_captions, list):
+        for cap in attrs_captions:
+            if isinstance(cap, str) and cap:
+                caption_parts.append(escape(cap))
     for cap_block in captions:
         cap_text = cap_block.get("text", "")
         if cap_text:
@@ -181,12 +418,10 @@ def _figure_html(
     caption_html = (
         "<figcaption>" + "<br/>".join(caption_parts) + "</figcaption>" if caption_parts else ""
     )
-    if not caption_html:
-        caption_html = f"<figcaption>{escape(fallback)}</figcaption>"
 
     if image_asset and Path(image_asset["path"]).exists():
         image_name = asset_image_name(image_asset)
-        alt = text or fallback
+        alt = text or ""
         return (
             "<figure>"
             f'<img src="images/{escape(image_name, quote=True)}" alt="{escape(alt, quote=True)}"/>'
@@ -198,7 +433,7 @@ def _figure_html(
     inline_img = inline_images.get(block_id)
     if inline_img:
         epub_name = inline_img["epub_name"]
-        alt = text or fallback
+        alt = text or ""
         return (
             "<figure>"
             f'<img src="images/{escape(epub_name, quote=True)}" alt="{escape(alt, quote=True)}"/>'
@@ -206,9 +441,10 @@ def _figure_html(
             "</figure>"
         )
 
+    # No image available — produce a minimal placeholder without debug text
     return (
         '<figure class="image-placeholder">'
-        '<div role="img" aria-label="Image placeholder">[Image]</div>'
+        '<div role="img" aria-label="Image">[Image]</div>'
         f"{caption_html}"
         "</figure>"
     )
@@ -322,7 +558,10 @@ def _caption_html(block: dict[str, Any], blocks: list[dict[str, Any]], index: in
     return f'<p class="caption">{escape(text)}</p>'
 
 
-def _display_block_html(block: dict[str, Any]) -> str:
+def _display_block_html(
+    block: dict[str, Any],
+    footnote_counter: dict[int, int] | None = None,
+) -> str:
     attrs = block.get("attrs") or {}
     classes = ["display-block"]
     layout_role = attrs.get("layout_role")
@@ -337,12 +576,4 @@ def _display_block_html(block: dict[str, Any]) -> str:
     ):
         classes.append("display-block-right")
     class_attr = " ".join(classes)
-    return f'<blockquote class="{escape(class_attr, quote=True)}">{_text_html(block)}</blockquote>'
-
-
-def _format_number(value: Any) -> str:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-    return f"{number:.1f}"
+    return f'<blockquote class="{escape(class_attr, quote=True)}">{_text_html(block, footnote_counter)}</blockquote>'
