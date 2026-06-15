@@ -134,7 +134,7 @@ def test_export_epub_renders_display_blocks_and_list_items(tmp_path):
         )
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
     assert 'class="display-block display-block-standalone"' in html
-    assert 'class="display-block display-block-right"' in html
+    assert 'class="display-block display-block-signature"' in html
     assert 'epub:type="noteref"' in html
     assert html.count("<ul>") == 1
     assert "<li>列表一</li><li>列表二</li>" in html
@@ -1587,10 +1587,10 @@ def test_chapter_xhtml_readable_block_formatting_and_xml_parseable(tmp_path):
             assert "  <h1>" in content or "  <h2>" in content
 
 
-def test_figure_caption_newlines_render_as_br(tmp_path):
+def test_figure_caption_newlines_render_as_structured_paragraphs(tmp_path):
     """Figure captions with embedded newlines should render as
-    <figcaption>...<br/>...</figcaption> inside <figure>, not as
-    separate paragraphs."""
+    <figcaption><p class="caption-title">...</p><p class="caption-body">...</p>
+    inside <figure>."""
     img_dir = tmp_path / "images"
     img_dir.mkdir()
     img_file = img_dir / "fig.jpg"
@@ -1616,10 +1616,11 @@ def test_figure_caption_newlines_render_as_br(tmp_path):
         html = "\n".join(
             zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
         )
-    # Newline in caption should become <br/>
-    assert "<br/>" in html
-    assert "Line one" in html
-    assert "Line two" in html
+    # Newline in caption becomes structured paragraphs
+    assert '<p class="caption-title">Line one</p>' in html
+    assert '<p class="caption-body">Line two</p>' in html
+    # No <br/> should appear inside figcaption
+    assert "<br/>" not in html
     # figcaption must be inside <figure>
     figcaption_positions = [m.start() for m in re.finditer(r"<figcaption>", html)]
     figure_starts = [m.start() for m in re.finditer(r"<figure", html)]
@@ -2031,10 +2032,10 @@ def test_footnote_marker_not_stripped_from_normal_paragraph(tmp_path):
     assert "3rd edition notice" in html
 
 
-def test_display_block_css_has_sans_serif(tmp_path):
-    """The CSS stylesheet should set font-family: sans-serif on
-    .display-block, and existing display-block classes (display-block-standalone,
-    display-block-right) should still be present."""
+def test_display_block_css_has_distinct_cjk_font_stack(tmp_path):
+    """The CSS stylesheet should set a concrete CJK font stack on
+    .display-block and on .display-block-paragraph, ensuring internal
+    text doesn't resolve to the body paragraph font in EPUB readers."""
     document = sample_document()
     output = tmp_path / "book.epub"
 
@@ -2044,9 +2045,14 @@ def test_display_block_css_has_sans_serif(tmp_path):
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
 
     assert ".display-block" in css
-    assert "font-family: sans-serif" in css
+    assert "Kaiti SC" in css
+    assert "STKaiti" in css
+    # The child text wrapper should also explicitly set the distinct CJK stack.
+    dp_block = css.split(".display-block-paragraph")[1].split("}")[0]
+    assert "font-family:" in dp_block
+    assert "Kaiti SC" in dp_block
     assert ".display-block-standalone" in css
-    assert ".display-block-right" in css
+    assert ".display-block-signature" in css
 
 
 def test_chapter_heading_newlines_render_as_br(tmp_path):
@@ -2329,10 +2335,156 @@ def test_footnote_parenthesized_delimiter_fullwidth(tmp_path):
     assert "1）" not in aside_match.group()
 
 
-def test_caption_newline_single_br_not_double(tmp_path):
-    """Caption text with a newline should produce exactly one <br/> —
-    not the double-conversion that previously produced
-    Line one<br/><br/>\\nLine two from "Line one\\nLine two"."""
+def test_display_block_multi_line_splits_into_paragraphs(tmp_path):
+    """A display_block with multi-line text should split each non-empty
+    line into its own dedicated wrapper inside the <blockquote>."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_db",
+            "type": "display_block",
+            "text": "第一行\n第二行\n第三行",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    assert '<blockquote class="display-block">' in html
+    assert '<div class="display-block-paragraph">第一行</div>' in html
+    assert '<div class="display-block-paragraph">第二行</div>' in html
+    assert '<div class="display-block-paragraph">第三行</div>' in html
+    assert "<blockquote class=\"display-block\"><p>" not in html
+    # Should NOT contain bare text outside wrappers inside the blockquote.
+    assert "第一行<br" not in html
+
+
+def test_display_block_signature_uses_body_size_and_no_indent(tmp_path):
+    """A display-block-signature should use body font-size (1em) and have
+    non-indented, right-aligned paragraphs."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_db",
+            "type": "display_block",
+            "text": "落款行一\n落款行二",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {"layout_role": "flush_right_terminal_block"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    # HTML should have signature class + paragraph wrappers
+    assert '<blockquote class="display-block display-block-signature">' in html
+    assert '<div class="display-block-paragraph">落款行一</div>' in html
+    assert '<div class="display-block-paragraph">落款行二</div>' in html
+    # CSS: .display-block-signature uses body font-size
+    sig_block = re.search(r'\.display-block-signature\s*\{[^}]+\}', css)
+    assert sig_block is not None
+    assert "font-size: 1em" in sig_block.group()
+    # CSS: nested paragraphs are not indented and right-aligned
+    nested = css.split(".display-block-signature .display-block-paragraph")[1].split("}")[0]
+    assert "text-indent: 0" in nested
+    assert "text-align: right" in nested
+
+
+def test_display_block_css_has_wrapper_indent(tmp_path):
+    """CSS should contain .display-block-paragraph rule with text-indent: 2em."""
+    document = sample_document()
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    assert ".display-block-paragraph" in css
+    p_block = css.split(".display-block-paragraph")[1].split("}")[0]
+    assert "text-indent: 2em" in p_block
+    assert "text-align: justify" in p_block
+
+
+def test_display_block_css_no_global_text_indent(tmp_path):
+    """CSS .display-block should NOT set text-indent: 0 globally
+    (was moved to the p-sub-selector)."""
+    document = sample_document()
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    display_block_section = css.split(".display-block")[1]
+    # .display-block section should NOT contain text-indent (only the p variant does)
+    # Bail out early if the section is empty (regex anchor issue)
+    assert "text-indent" not in display_block_section.split(".display-block-standalone")[0]
+
+
+def test_caption_css_left_align_distinct_cjk_font_stack(tmp_path):
+    """figcaption and .caption CSS should have text-align: left and
+    a distinct CJK font stack."""
+    document = sample_document()
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    # figcaption
+    assert "figcaption" in css
+    fig_section = css.split("figcaption")[1].split("}")[0]
+    assert "text-align: left" in fig_section
+    assert "Kaiti SC" in fig_section
+
+    # .caption (standalone class, not .caption-title or .caption-body)
+    cap_block = re.search(r'\.caption\s*\{[^}]+\}', css)
+    assert cap_block is not None
+    cap_section = cap_block.group()
+    assert "text-align: left" in cap_section
+    assert "Kaiti SC" in cap_section
+    assert "text-indent: 0" in cap_section
+
+
+def test_caption_css_no_center(tmp_path):
+    """figcaption and .caption should NOT have text-align: center."""
+    document = sample_document()
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    # Extract the figcaption rule block only (up to closing brace)
+    fig_block = re.search(r'figcaption\s*\{[^}]+\}', css)
+    assert fig_block is not None
+    assert "text-align: center" not in fig_block.group()
+
+    cap_block = re.search(r'\.caption\s*\{[^}]+\}', css)
+    assert cap_block is not None
+    assert "text-align: center" not in cap_block.group()
+
+
+def test_caption_newline_structured_not_br(tmp_path):
+    """Caption text with a newline should produce structured
+    <p class="caption-title"> / <p class="caption-body"> paragraphs
+    instead of <br/>."""
     document = sample_document()
     document["blocks"] = [
         {
@@ -2369,8 +2521,136 @@ def test_caption_newline_single_br_not_double(tmp_path):
         html = "\n".join(
             zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
         )
-    # The caption should have exactly one <br/> between "Line one" and "Line two"
-    assert "Line one<br/>" in html
-    assert "Line two" in html
-    # NOT double: should NOT contain <br/><br/>
-    assert "<br/><br/>" not in html
+    # The caption should be structured paragraphs, not <br/>
+    assert '<p class="caption-title">Line one</p>' in html
+    assert '<p class="caption-body">Line two</p>' in html
+    # No <br/> inside figcaption
+    assert "<br/>" not in html
+
+
+def test_caption_title_and_body_css(tmp_path):
+    """CSS should contain .caption-title with text-indent: 0 and
+    .caption-body with text-indent: 2em."""
+    document = sample_document()
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    ct_block = re.search(r'\.caption-title\s*\{[^}]+\}', css)
+    assert ct_block is not None
+    assert "text-indent: 0" in ct_block.group()
+
+    cb_block = re.search(r'\.caption-body\s*\{[^}]+\}', css)
+    assert cb_block is not None
+    assert "text-indent: 2em" in cb_block.group()
+
+
+def test_figcaption_p_margin_css(tmp_path):
+    """CSS should contain figcaption p with margin."""
+    document = sample_document()
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    fp_block = re.search(r'figcaption\s+p\s*\{[^}]+\}', css)
+    assert fp_block is not None
+    assert "margin" in fp_block.group()
+
+
+def test_figure_caption_single_line_no_body_paragraph(tmp_path):
+    """A single-line figure caption should only produce caption-title,
+    no caption-body."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "image_id": "img_single",
+                "captions": ["Just a title"],
+            },
+        },
+    ]
+    document["assets"] = {
+        "images": [
+            {
+                "image_id": "img_single",
+                "path": str(tmp_path / "test.png"),
+            },
+        ],
+    }
+    (tmp_path / "test.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\x00\x01"
+        b"\x00\x00\x05\x00\x01\r\n\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    assert '<p class="caption-title">Just a title</p>' in html
+    assert "caption-body" not in html
+
+
+def test_standalone_caption_multi_line_structured(tmp_path):
+    """A standalone caption block (not trailing a figure) with multi-line
+    text should produce a <div class="caption"> with caption-title and
+    caption-body paragraphs."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_cap",
+            "type": "caption",
+            "text": "图片标题\n说明文字第一段",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    assert '<div class="caption">' in html
+    assert '<p class="caption-title">图片标题</p>' in html
+    assert '<p class="caption-body">说明文字第一段</p>' in html
+
+
+def test_standalone_caption_single_line_is_simple_p(tmp_path):
+    """A standalone caption block with single-line text should produce
+    <p class="caption">...</p>, not a <div> wrapper."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_cap",
+            "type": "caption",
+            "text": "Just a caption",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    assert '<p class="caption">Just a caption</p>' in html
+    assert '<div class="caption">' not in html

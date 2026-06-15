@@ -419,37 +419,42 @@ def _figure_html(
     image_id = attrs.get("image_id")
     image_asset = image_assets.get(image_id) if image_id else None
 
-    # Build caption from block text + attrs.captions + trailing caption blocks.
-    # No debug metadata (page, bbox, parser_raw_id) in EPUB output.
-    caption_parts: list[str] = []
+    # Collect caption segments from all sources (figure text, attrs.captions,
+    # trailing caption blocks).  Each source part is itself split on newline
+    # so that every visual line becomes a paragraph.
+    segments: list[str] = []
+    all_parts: list[str] = []
     if text:
-        caption_parts.append(escape(text))
-    # attrs.captions: list of caption strings stored in the figure's attributes
+        all_parts.append(escape(text))
     attrs_captions = attrs.get("captions")
     if isinstance(attrs_captions, list):
         for cap in attrs_captions:
             if isinstance(cap, str) and cap:
-                caption_parts.append(escape(cap))
+                all_parts.append(escape(cap))
     for cap_block in captions:
         cap_text = cap_block.get("text", "")
         if cap_text:
-            caption_parts.append(escape(cap_text))
-    # Convert newlines in each caption part to <br/> for line-break preservation
-    # Applied exactly once to all parts — no double-conversion.
-    caption_parts_br: list[str] = []
-    for part in caption_parts:
-        # escape() turns raw newlines into literal \n in HTML entities,
-        # but we want <br/> for visual line breaks.  Handle both the
-        # backslash-n escape sequence and the actual newline character.
-        caption_parts_br.append(part.replace("\\n", "<br/>\n").replace("\n", "<br/>\n"))
-    has_caption = len(caption_parts_br) > 0
+            all_parts.append(escape(cap_text))
+    for part in all_parts:
+        for line in part.replace("\\n", "\n").split("\n"):
+            stripped = line.strip()
+            if stripped:
+                segments.append(stripped)
+
+    has_caption = len(segments) > 0
     figure_classes = ["figure-block"]
     if has_caption:
         figure_classes.append("has-caption")
     figure_class_attr = ' class="' + " ".join(figure_classes) + '"'
-    caption_html = (
-        "<figcaption>" + "<br/>".join(caption_parts_br) + "</figcaption>" if has_caption else ""
-    )
+
+    if has_caption:
+        cap_parts: list[str] = []
+        cap_parts.append(f'<p class="caption-title">{segments[0]}</p>')
+        for seg in segments[1:]:
+            cap_parts.append(f'<p class="caption-body">{seg}</p>')
+        caption_html = "<figcaption>" + "".join(cap_parts) + "</figcaption>"
+    else:
+        caption_html = ""
 
     if image_asset and Path(image_asset["path"]).exists():
         image_name = asset_image_name(image_asset)
@@ -655,8 +660,30 @@ def _caption_html(block: dict[str, Any], blocks: list[dict[str, Any]], index: in
     text = block.get("text", "")
     prev_block = blocks[index - 1] if index > 0 else None
     if prev_block and prev_block["type"] == "figure":
+        # Legacy path for figure-trailing captions not consumed by
+        # _collect_trailing_captions — structure multi-line text.
+        return _figcaption_structured(text)
+    lines = [l for l in text.split("\n") if l.strip()]
+    if len(lines) <= 1:
+        return f'<p class="caption">{escape(text)}</p>'
+    parts: list[str] = []
+    parts.append(f'<p class="caption-title">{escape(lines[0])}</p>')
+    for line in lines[1:]:
+        parts.append(f'<p class="caption-body">{escape(line)}</p>')
+    return f'<div class="caption">{"".join(parts)}</div>'
+
+
+def _figcaption_structured(text: str) -> str:
+    """Render raw text as structured <figcaption> with caption-title/caption-body.
+    Handles escaping internally — callers should pass unescaped text."""
+    lines = [l for l in text.split("\n") if l.strip()]
+    if len(lines) <= 1:
         return f"<figcaption>{escape(text)}</figcaption>"
-    return f'<p class="caption">{escape(text)}</p>'
+    parts: list[str] = []
+    parts.append(f'<p class="caption-title">{escape(lines[0])}</p>')
+    for line in lines[1:]:
+        parts.append(f'<p class="caption-body">{escape(line)}</p>')
+    return f"<figcaption>{''.join(parts)}</figcaption>"
 
 
 def _display_block_html(
@@ -675,6 +702,15 @@ def _display_block_html(
         or attrs.get("alignment") == "right"
         or style_hints.get("text_align") == "right"
     ):
-        classes.append("display-block-right")
+        classes.append("display-block-signature")
     class_attr = " ".join(classes)
-    return f'<blockquote class="{escape(class_attr, quote=True)}">{_text_html(block, footnote_counter)}</blockquote>'
+
+    rendered = _text_html(block, footnote_counter)
+    if not rendered:
+        return f'<blockquote class="{escape(class_attr, quote=True)}"></blockquote>'
+    paragraphs = []
+    for segment in rendered.split("\n"):
+        stripped = segment.strip()
+        if stripped:
+            paragraphs.append(f'<div class="display-block-paragraph">{stripped}</div>')
+    return f'<blockquote class="{escape(class_attr, quote=True)}">{"".join(paragraphs)}</blockquote>'
