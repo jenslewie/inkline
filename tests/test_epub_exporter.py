@@ -1541,3 +1541,836 @@ def test_all_blocks_suppressed_produces_fallback_chapter(tmp_path):
     assert len(chapter_files) >= 1
     # The OPF spine should have at least one itemref
     assert "<itemref" in opf
+
+
+# ─── Readability & Layout Polish: new tests ───────────────────────────
+
+
+def test_chapter_xhtml_readable_block_formatting_and_xml_parseable(tmp_path):
+    """Chapter XHTML output should have readable block-level formatting
+    (wrapper/body/main on separate lines, body indented) and remain
+    XML-parseable."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "First paragraph text.",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = [n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n]
+        from xml.etree import ElementTree as ET
+
+        for name in chapter_names:
+            content = zf.read(name).decode("utf-8")
+            # Must be valid XML
+            ET.fromstring(content)
+            # Wrapper elements should be on separate lines
+            assert "<body>\n" in content
+            assert "<main>\n" in content
+            # Body content should be indented by 2 spaces
+            assert "  <h1>" in content or "  <h2>" in content
+
+
+def test_figure_caption_newlines_render_as_br(tmp_path):
+    """Figure captions with embedded newlines should render as
+    <figcaption>...<br/>...</figcaption> inside <figure>, not as
+    separate paragraphs."""
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "fig.jpg"
+    img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5},
+            "attrs": {
+                "image_path": "images/fig.jpg",
+                "captions": ["Line one\nLine two"],
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    # Newline in caption should become <br/>
+    assert "<br/>" in html
+    assert "Line one" in html
+    assert "Line two" in html
+    # figcaption must be inside <figure>
+    figcaption_positions = [m.start() for m in re.finditer(r"<figcaption>", html)]
+    figure_starts = [m.start() for m in re.finditer(r"<figure", html)]
+    figure_ends = [m.start() for m in re.finditer(r"</figure>", html)]
+    for cap_pos in figcaption_positions:
+        inside = any(fs < cap_pos < fe for fs, fe in zip(figure_starts, figure_ends, strict=True))
+        assert inside, f"<figcaption> at {cap_pos} is outside <figure>"
+
+
+def test_captioned_figure_has_new_css_classes(tmp_path):
+    """Captioned figures should include figure-block and has-caption CSS
+    classes, and remain inside <figure>. The CSS stylesheet should contain
+    .figure-block break-inside rules and constrained image max-height."""
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "fig.jpg"
+    img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5},
+            "attrs": {
+                "image_path": "images/fig.jpg",
+                "captions": ["A caption"],
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    # XHTML: figure should have figure-block and has-caption classes
+    assert "figure-block" in html
+    assert "has-caption" in html
+    # CSS: figure-block should have break-inside rules
+    assert "break-inside: avoid" in css
+    assert "page-break-inside: avoid" in css
+    # CSS: figure-block img should have constrained max-height
+    assert ".figure-block img" in css
+    assert "max-height: 85vh" in css
+
+
+def test_footnote_marker_stripped_with_note_marker_attr(tmp_path):
+    """Footnote text like '³ Lothar...' should render without the leading
+    marker when attrs.note_marker is provided, while noteref links still
+    show chapter-local numbers."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "Main text"},
+                    {"type": "note_ref", "marker": "3", "target_note_id": "note_fn1"},
+                    {"type": "text", "text": " more"},
+                ],
+            },
+        },
+        {
+            "block_id": "b_fn1",
+            "type": "footnote",
+            "text": "3 Lothar explains this.",
+            "source": {"page": 1},
+            "attrs": {"note_id": "note_fn1", "note_marker": "3"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = sorted(
+            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
+        )
+        html = zf.read(chapter_names[0]).decode("utf-8")
+
+    # Footnote body should NOT contain leading "3" marker
+    assert "Lothar explains this." in html
+    # The stripped footnote should not start with "3 Lothar"
+    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    assert aside_match is not None
+    aside_content = aside_match.group()
+    # "3" should NOT appear as the leading text in the footnote body
+    assert "<p>3 Lothar" not in aside_content
+    # Noteref link should still show chapter-local number (1)
+    assert "<sup>1</sup>" in html
+
+
+def test_footnote_marker_stripped_without_note_marker_attr(tmp_path):
+    """Footnote text like '3 Lothar...' should strip the leading numeric
+    marker via the fallback heuristic when attrs.note_marker is absent."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "Text"},
+                    {"type": "note_ref", "marker": "3", "target_note_id": "note_fn2"},
+                ],
+            },
+        },
+        {
+            "block_id": "b_fn2",
+            "type": "footnote",
+            "text": "3 Lothar explains this.",
+            "source": {"page": 1},
+            "attrs": {"note_id": "note_fn2"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = sorted(
+            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
+        )
+        html = zf.read(chapter_names[0]).decode("utf-8")
+
+    # Fallback heuristic should strip the leading "3"
+    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    assert aside_match is not None
+    assert "<p>3 Lothar" not in aside_match.group()
+    assert "Lothar explains this." in html
+
+
+def test_footnote_marker_stripped_with_dot_delimiter(tmp_path):
+    """When note_marker="3" and footnote text is "3. Note text", the marker
+    plus the dot delimiter should both be consumed, yielding "Note text"
+    (not ". Note text")."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "Text"},
+                    {"type": "note_ref", "marker": "3", "target_note_id": "note_dot"},
+                ],
+            },
+        },
+        {
+            "block_id": "b_fn_dot",
+            "type": "footnote",
+            "text": "3. Note text",
+            "source": {"page": 1},
+            "attrs": {"note_id": "note_dot", "note_marker": "3"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = sorted(
+            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
+        )
+        html = zf.read(chapter_names[0]).decode("utf-8")
+
+    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    assert aside_match is not None
+    # Should strip "3." completely, not leave ". Note text"
+    assert ". Note text" not in aside_match.group()
+    assert "Note text" in aside_match.group()
+    # Should NOT leave the bare marker as leading text
+    assert "<p>3. Note text" not in aside_match.group()
+
+
+def test_footnote_superscript_marker_stripped(tmp_path):
+    """When note_marker="3" and footnote text starts with superscript "³",
+    the superscript form should be recognised and stripped."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "Text"},
+                    {"type": "note_ref", "marker": "3", "target_note_id": "note_sup"},
+                ],
+            },
+        },
+        {
+            "block_id": "b_fn_sup",
+            "type": "footnote",
+            "text": "³ Lothar explains this.",
+            "source": {"page": 1},
+            "attrs": {"note_id": "note_sup", "note_marker": "3"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = sorted(
+            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
+        )
+        html = zf.read(chapter_names[0]).decode("utf-8")
+
+    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    assert aside_match is not None
+    # Superscript ³ should be stripped, not left in output
+    assert "³ Lothar" not in aside_match.group()
+    assert "Lothar explains this." in aside_match.group()
+
+
+def test_footnote_symbol_marker_fallback(tmp_path):
+    """When footnote text starts with a reference symbol like * and there
+    is no note_marker attr, the fallback heuristic should strip it."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "Text"},
+                    {"type": "note_ref", "marker": "*", "target_note_id": "note_sym"},
+                ],
+            },
+        },
+        {
+            "block_id": "b_fn_sym",
+            "type": "footnote",
+            "text": "* See appendix.",
+            "source": {"page": 1},
+            "attrs": {"note_id": "note_sym"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = sorted(
+            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
+        )
+        html = zf.read(chapter_names[0]).decode("utf-8")
+
+    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    assert aside_match is not None
+    # Symbol * should be stripped via fallback
+    assert "<p>* See appendix" not in aside_match.group()
+    assert "See appendix." in aside_match.group()
+
+
+def test_footnote_marker_not_stripped_without_delimiter(tmp_path):
+    """Footnote text like "3rd edition note" with note_marker="3" should NOT
+    be stripped because there is no delimiter between "3" and "rd" — the
+    regex requires at least one delimiter character after the marker."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "Text"},
+                    {"type": "note_ref", "marker": "3", "target_note_id": "note_no_delim"},
+                ],
+            },
+        },
+        {
+            "block_id": "b_fn_nd",
+            "type": "footnote",
+            "text": "3rd edition note",
+            "source": {"page": 1},
+            "attrs": {"note_id": "note_no_delim", "note_marker": "3"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = sorted(
+            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
+        )
+        html = zf.read(chapter_names[0]).decode("utf-8")
+
+    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    assert aside_match is not None
+    # "3rd edition note" should NOT be stripped — "3" is part of "3rd", not a marker
+    # Check that the <p> starts with "3rd", not "rd"
+    assert re.search(r'<p>3rd edition note</p>', aside_match.group()) is not None
+
+
+def test_chapter_title_page_box_sizing(tmp_path):
+    """The chapter-title-page CSS should include box-sizing: border-box
+    so that padding + min-height do not exceed the declared min-height."""
+    document = sample_document()
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    assert ".chapter-title-page" in css
+    assert "box-sizing: border-box" in css
+
+
+def test_footnote_marker_not_stripped_from_normal_paragraph(tmp_path):
+    """The footnote marker stripper should NOT strip leading numbers from
+    normal paragraphs or display blocks — only footnote blocks."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "3 is the magic number.",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_db1",
+            "type": "display_block",
+            "text": "3rd edition notice",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    # Paragraph text should retain "3"
+    assert "3 is the magic number." in html
+    # Display block text should retain "3rd"
+    assert "3rd edition notice" in html
+
+
+def test_display_block_css_has_sans_serif(tmp_path):
+    """The CSS stylesheet should set font-family: sans-serif on
+    .display-block, and existing display-block classes (display-block-standalone,
+    display-block-right) should still be present."""
+    document = sample_document()
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    assert ".display-block" in css
+    assert "font-family: sans-serif" in css
+    assert ".display-block-standalone" in css
+    assert ".display-block-right" in css
+
+
+def test_chapter_heading_newlines_render_as_br(tmp_path):
+    """Chapter-splitting heading text with embedded \\n should render
+    line breaks as <br/> in the XHTML output."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "第一章\n楼兰",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "Body text.",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = sorted(
+            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
+        )
+        html = zf.read(chapter_names[0]).decode("utf-8")
+
+    # Heading newline should become <br/>
+    assert "第一章<br/>" in html
+    assert "楼兰" in html
+
+
+def test_chapter_title_page_has_page_break_css(tmp_path):
+    """Chapter-splitting headings should be wrapped in a
+    chapter-title-page div with break-after/page-break-after CSS.
+    The CSS stylesheet must contain the corresponding rules."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "Content.",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = sorted(
+            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
+        )
+        html = zf.read(chapter_names[0]).decode("utf-8")
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    # Chapter heading should be inside chapter-title-page div
+    assert 'class="chapter-title-page"' in html
+    # CSS: chapter-title-page should have page-break rules
+    assert ".chapter-title-page" in css
+    assert "break-after: always" in css
+    assert "page-break-after: always" in css
+
+
+def test_footnote_superscript_marker_fallback_without_note_marker(tmp_path):
+    """Footnote text like "³ Lothar..." without note_marker attr should
+    still be stripped by the fallback regex, which must cover ² (U+00B2)
+    and ³ (U+00B3) outside the Latin-1 Supplement range."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "Text"},
+                    {"type": "note_ref", "marker": "3", "target_note_id": "note_3"},
+                ],
+            },
+        },
+        {
+            "block_id": "b_fn3",
+            "type": "footnote",
+            "text": "³ Lothar explains this.",
+            "source": {"page": 1},
+            # No note_marker attr — fallback must handle superscript ³
+            "attrs": {"note_id": "note_3"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = sorted(
+            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
+        )
+        html = zf.read(chapter_names[0]).decode("utf-8")
+
+    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    assert aside_match is not None
+    # The superscript marker ³ should be stripped, leaving just "Lothar explains this."
+    assert "Lothar explains this." in aside_match.group()
+    assert "³" not in aside_match.group()
+
+
+def test_footnote_multi_digit_superscript_marker_with_note_marker(tmp_path):
+    """Footnote text like "¹² Combined" with note_marker="12" should
+    be stripped.  The superscript-to-digit normalization (¹² → "12")
+    must handle multi-digit sequences."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "Text"},
+                    {"type": "note_ref", "marker": "12", "target_note_id": "note_12"},
+                ],
+            },
+        },
+        {
+            "block_id": "b_fn12",
+            "type": "footnote",
+            "text": "¹² Combined references.",
+            "source": {"page": 1},
+            "attrs": {"note_id": "note_12", "note_marker": "12"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = sorted(
+            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
+        )
+        html = zf.read(chapter_names[0]).decode("utf-8")
+
+    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    assert aside_match is not None
+    # ¹² should be stripped, leaving "Combined references."
+    assert "Combined references." in aside_match.group()
+    assert "¹²" not in aside_match.group()
+
+
+def test_footnote_parenthesized_delimiter_ascii(tmp_path):
+    """Footnote text like "1) Note text" should strip the marker "1"
+    plus the closing-paren delimiter."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "Text"},
+                    {"type": "note_ref", "marker": "1", "target_note_id": "note_paren"},
+                ],
+            },
+        },
+        {
+            "block_id": "b_fn_paren",
+            "type": "footnote",
+            "text": "1) Note text",
+            "source": {"page": 1},
+            "attrs": {"note_id": "note_paren", "note_marker": "1"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = sorted(
+            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
+        )
+        html = zf.read(chapter_names[0]).decode("utf-8")
+
+    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    assert aside_match is not None
+    # "1)" should be stripped, leaving "Note text"
+    assert re.search(r'<p>Note text</p>', aside_match.group()) is not None
+    assert "1)" not in aside_match.group()
+
+
+def test_footnote_parenthesized_delimiter_fullwidth(tmp_path):
+    """Footnote text like "1）Note text" (fullwidth closing paren) should
+    strip the marker "1" plus the fullwidth paren delimiter."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_h1",
+            "type": "heading",
+            "text": "Chapter 1",
+            "source": {"page": 1},
+            "attrs": {},
+            "level": 1,
+        },
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "inline_runs": [
+                    {"type": "text", "text": "Text"},
+                    {"type": "note_ref", "marker": "1", "target_note_id": "note_fparen"},
+                ],
+            },
+        },
+        {
+            "block_id": "b_fn_fparen",
+            "type": "footnote",
+            "text": "1）Note text",
+            "source": {"page": 1},
+            "attrs": {"note_id": "note_fparen", "note_marker": "1"},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        chapter_names = sorted(
+            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
+        )
+        html = zf.read(chapter_names[0]).decode("utf-8")
+
+    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    assert aside_match is not None
+    # "1）" should be stripped, leaving "Note text"
+    assert re.search(r'<p>Note text</p>', aside_match.group()) is not None
+    assert "1）" not in aside_match.group()
+
+
+def test_caption_newline_single_br_not_double(tmp_path):
+    """Caption text with a newline should produce exactly one <br/> —
+    not the double-conversion that previously produced
+    Line one<br/><br/>\\nLine two from "Line one\\nLine two"."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "image_id": "img_cap_nl",
+                "captions": ["Line one\nLine two"],
+            },
+        },
+    ]
+    # Add a matching image asset so the figure renders with <figcaption>
+    document["assets"] = {
+        "images": [
+            {
+                "image_id": "img_cap_nl",
+                "path": str(tmp_path / "test.png"),
+            },
+        ],
+    }
+    # Create the dummy image file
+    (tmp_path / "test.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\x00\x01"
+        b"\x00\x00\x05\x00\x01\r\n\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    # The caption should have exactly one <br/> between "Line one" and "Line two"
+    assert "Line one<br/>" in html
+    assert "Line two" in html
+    # NOT double: should NOT contain <br/><br/>
+    assert "<br/><br/>" not in html

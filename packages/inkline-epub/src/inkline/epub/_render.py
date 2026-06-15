@@ -9,6 +9,17 @@ from xml.etree import ElementTree as ET
 from inkline.epub._assets import asset_image_name
 from inkline.epub._chapter import Chapter
 
+# Superscript-to-digit translation table, matching the normalization
+# used in the parser's normalize_note_marker().
+_SUPERSCRIPT_MAP = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
+
+# Required-delimiter pattern for footnote marker stripping.
+# After a marker, at least one delimiter must follow to avoid false
+# positives (e.g. "3rd" is NOT stripped when marker is "3").
+# Covers: whitespace, period/dot, comma, Chinese punctuation (、．),
+# closing paren (ASCII and fullwidth ), and end-of-string.
+_DELIMITER_PATTERN = r"(?:[\s.、．,)）]\s*|$)"
+
 
 def _build_visual_page_set(document: dict[str, Any]) -> set[int]:
     """Return the set of physical_page numbers where snapshot.required is true.
@@ -158,7 +169,13 @@ def chapter_documents(
             # heading) with a snapshot or full-page figure, but the chapter
             # boundary must still be recorded so nav.xhtml links are correct.
             if not is_on_visual_page:
-                current_html.append(f"<h{block_level}>{escape(text)}</h{block_level}>")
+                heading_text = escape(text).replace("\n", "<br/>\n")
+                heading_tag = f"<h{block_level}>{heading_text}</h{block_level}>"
+                # For chapter-splitting headings, wrap in a title-page div
+                # with a page break after the heading.
+                current_html.append(
+                    f'<div class="chapter-title-page">\n  {heading_tag}\n</div>'
+                )
 
         # === Visual page early-exit ===
         # If this block belongs to a visual page whose image has already
@@ -237,7 +254,8 @@ def chapter_documents(
             continue
         if block_type == "heading":
             level = min(max(block_level, 2), 6)
-            current_html.append(f"<h{level}>{escape(text)}</h{level}>")
+            heading_text = escape(text).replace("\n", "<br/>\n")
+            current_html.append(f"<h{level}>{heading_text}</h{level}>")
         elif block_type == "paragraph":
             current_html.append(f"<p>{_text_html(block, footnote_counter)}</p>")
         elif block_type == "display_block":
@@ -267,8 +285,9 @@ def chapter_documents(
             attrs = block.get("attrs") or {}
             note_id = attrs.get("note_id") or block.get("block_id")
             id_attr = f' id="{escape(str(note_id), quote=True)}"' if note_id else ""
+            stripped_text = _strip_footnote_marker(text, attrs)
             current_html.append(
-                f'<aside epub:type="footnote"{id_attr}><p>{escape(text)}</p></aside>'
+                f'<aside epub:type="footnote"{id_attr}><p>{escape(stripped_text)}</p></aside>'
             )
 
         i += 1
@@ -415,17 +434,30 @@ def _figure_html(
         cap_text = cap_block.get("text", "")
         if cap_text:
             caption_parts.append(escape(cap_text))
+    # Convert newlines in each caption part to <br/> for line-break preservation
+    # Applied exactly once to all parts — no double-conversion.
+    caption_parts_br: list[str] = []
+    for part in caption_parts:
+        # escape() turns raw newlines into literal \n in HTML entities,
+        # but we want <br/> for visual line breaks.  Handle both the
+        # backslash-n escape sequence and the actual newline character.
+        caption_parts_br.append(part.replace("\\n", "<br/>\n").replace("\n", "<br/>\n"))
+    has_caption = len(caption_parts_br) > 0
+    figure_classes = ["figure-block"]
+    if has_caption:
+        figure_classes.append("has-caption")
+    figure_class_attr = ' class="' + " ".join(figure_classes) + '"'
     caption_html = (
-        "<figcaption>" + "<br/>".join(caption_parts) + "</figcaption>" if caption_parts else ""
+        "<figcaption>" + "<br/>".join(caption_parts_br) + "</figcaption>" if has_caption else ""
     )
 
     if image_asset and Path(image_asset["path"]).exists():
         image_name = asset_image_name(image_asset)
         alt = text or ""
         return (
-            "<figure>"
+            f"<figure{figure_class_attr}>"
             f'<img src="images/{escape(image_name, quote=True)}" alt="{escape(alt, quote=True)}"/>'
-            f"{caption_html}"
+            f"\n  {caption_html}\n"
             "</figure>"
         )
 
@@ -435,17 +467,23 @@ def _figure_html(
         epub_name = inline_img["epub_name"]
         alt = text or ""
         return (
-            "<figure>"
+            f"<figure{figure_class_attr}>"
             f'<img src="images/{escape(epub_name, quote=True)}" alt="{escape(alt, quote=True)}"/>'
-            f"{caption_html}"
+            f"\n  {caption_html}\n"
             "</figure>"
         )
 
     # No image available — produce a minimal placeholder without debug text
+    if has_caption:
+        return (
+            f'<figure class="image-placeholder figure-block has-caption">'
+            '<div role="img" aria-label="Image">[Image]</div>'
+            f"\n  {caption_html}\n"
+            "</figure>"
+        )
     return (
-        '<figure class="image-placeholder">'
+        '<figure class="image-placeholder figure-block">'
         '<div role="img" aria-label="Image">[Image]</div>'
-        f"{caption_html}"
         "</figure>"
     )
 
@@ -548,6 +586,69 @@ def _sanitize_html_fragment(html: str) -> str | None:
         return fixed
     except ET.ParseError:
         return None
+
+
+def _strip_footnote_marker(text: str, attrs: dict[str, Any]) -> str:
+    """Strip the leading original note marker from footnote block text.
+
+    Footnotes from the canonical pipeline often include the original
+    marker (e.g. "³ Lothar..." or "3. Note text") as the first word
+    or two.  The EPUB noteref links provide chapter-local numbering,
+    so the duplicate leading marker should be removed.
+
+    When attrs.note_marker is available (the most reliable source), it
+    is used.  Otherwise a local heuristic strips a leading sequence
+    matching common marker patterns.
+    """
+    marker = attrs.get("note_marker")
+    if isinstance(marker, str) and marker:
+        marker_stripped = marker.strip()
+        if not marker_stripped:
+            pass  # empty marker — skip to fallback
+        else:
+            # Normalize the leading superscript run in the text to its
+            # digit equivalent, then match the marker against the
+            # normalised form.  This handles multi-digit superscript
+            # sequences (e.g. ¹² → "12") and single superscripts
+            # (³ → "3") equally.
+            m = re.match(
+                r"^([¹²³⁴⁵⁶⁷⁸⁹⁰]+)",
+                text,
+            )
+            if m:
+                normalized_head = m.group(1).translate(_SUPERSCRIPT_MAP)
+                if normalized_head == marker_stripped:
+                    # Consume the superscript run plus delimiter
+                    delim_m = re.match(
+                        rf"^[¹²³⁴⁵⁶⁷⁸⁹⁰]+{_DELIMITER_PATTERN}",
+                        text,
+                    )
+                    if delim_m:
+                        rest = text[delim_m.end():]
+                        if rest:
+                            return rest
+            # Literal marker form — must be followed by a required delimiter
+            # so "3rd" is NOT stripped when marker is "3".
+            pattern = rf"^({re.escape(marker_stripped)}){_DELIMITER_PATTERN}"
+            m2 = re.match(pattern, text)
+            if m2:
+                rest = text[m2.end():]
+                if rest:
+                    return rest
+    # Fallback: strip a leading numeric/symbol/superscript marker
+    # Covers: plain digits, circled/boxed digits (①-⓿❶-➓),
+    # superscript digits (¹²³⁴⁵⁶⁷⁸⁹⁰), and common reference
+    # symbols (*, †, ‡, §).  A required delimiter prevents false
+    # positives like stripping "3" from "3rd edition".
+    m = re.match(
+        rf"^[\d①-⓿❶-➓¹²³⁴⁵⁶⁷⁸⁹⁰\*†‡§]+{_DELIMITER_PATTERN}",
+        text,
+    )
+    if m and m.end() > 0:
+        rest = text[m.end():]
+        if rest:
+            return rest
+    return text
 
 
 def _caption_html(block: dict[str, Any], blocks: list[dict[str, Any]], index: int) -> str:

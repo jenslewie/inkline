@@ -62,17 +62,21 @@ def nav_xhtml(
             chapter_index = toc_title_to_chapter.get(toc_title.strip())
         href = f"chapter_{chapter_index:04d}.xhtml" if chapter_index else "chapter_0001.xhtml"
         label = escape(toc_title)
-        items_parts.append(f'<li><a href="{href}">{label}</a></li>')
+        items_parts.append(f'    <li><a href="{href}">{label}</a></li>')
     items = "\n".join(items_parts)
     lang = escape(metadata.get("language") or "zh-CN", quote=True)
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{lang}" xml:lang="{lang}">
-<head><title>Contents</title></head>
+<head>
+  <title>Contents</title>
+</head>
 <body>
   <nav epub:type="toc" id="toc">
     <h1>Contents</h1>
-    <ol>{items}</ol>
+    <ol>
+{items}
+    </ol>
   </nav>
 </body>
 </html>

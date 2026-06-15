@@ -22,6 +22,8 @@ def container_xml() -> str:
 
 def wrap_chapter(body: str, metadata: dict[str, Any]) -> str:
     lang = escape(metadata.get("language") or "zh-CN", quote=True)
+    # Indent each line of body by 2 spaces for readable XHTML output
+    indented_body = "\n".join("  " + line if line.strip() else line for line in body.split("\n"))
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{lang}" xml:lang="{lang}">
@@ -29,9 +31,11 @@ def wrap_chapter(body: str, metadata: dict[str, Any]) -> str:
   <title>{escape(metadata.get("title") or metadata.get("doc_id") or "Book")}</title>
   <link href="styles/book.css" rel="stylesheet" type="text/css"/>
 </head>
-<body><main>
-{body}
-</main></body>
+<body>
+<main>
+{indented_body}
+</main>
+</body>
 </html>
 """
 
@@ -83,21 +87,23 @@ def opf(
         if cover_image_id_val
         else ""
     )
+    manifest_lines = "\n    ".join(manifest_items)
+    spine_lines = "\n    ".join(spine_items)
+    cover_meta_line = f"\n    {cover_meta}" if cover_meta else ""
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="book-id">{escape(identifier)}</dc:identifier>
     <dc:title>{title}</dc:title>
     <dc:language>{language}</dc:language>
-    <dc:creator>{author}</dc:creator>
-    {cover_meta}
+    <dc:creator>{author}</dc:creator>{cover_meta_line}
     <meta property="dcterms:modified">{escape(now)}</meta>
   </metadata>
   <manifest>
-    {"".join(manifest_items)}
+    {manifest_lines}
   </manifest>
   <spine>
-    {"".join(spine_items)}
+    {spine_lines}
   </spine>
 </package>
 """

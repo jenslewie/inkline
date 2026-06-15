@@ -46,6 +46,17 @@ img {
 }
 figcaption {
   font-size: 0.9em;
+  line-height: 1.4;
+  margin-top: 0.5em;
+  text-align: center;
+  text-indent: 0;
+}
+.figure-block {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.figure-block img {
+  max-height: 85vh;
 }
 .caption {
   font-size: 0.9em;
@@ -57,6 +68,7 @@ figcaption {
   margin: 1.2em 2em;
   text-indent: 0;
   white-space: pre-line;
+  font-family: sans-serif;
 }
 .display-block-standalone {
   margin-top: 1.6em;
@@ -66,5 +78,13 @@ figcaption {
   margin: 1.2em 0;
   text-align: right;
   text-indent: 0;
+}
+.chapter-title-page {
+  text-align: center;
+  box-sizing: border-box;
+  padding: 25vh 0 0;
+  min-height: 90vh;
+  break-after: always;
+  page-break-after: always;
 }
 """.strip()
