@@ -46,6 +46,7 @@ def reconcile_figure_captions(
     """
 
     _absorb_preceding_embedded_figure_text(blocks)
+    _absorb_image_overlapping_text(blocks)
     _merge_adjacent_figure_fragments(blocks)
 
     i = 0
@@ -86,6 +87,9 @@ class _FigureCaptionDetector:
         page = _block_page(figure)
         if page is None:
             return []
+        page_width = _page_coord_widths(self.blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+        page_height = _page_coord_heights(self.blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+        fbb = _bbox(figure)
         out: List[int] = []
         j = figure_idx + 1
         saw_text = False
@@ -93,6 +97,15 @@ class _FigureCaptionDetector:
             candidate = self.blocks[j]
             if _block_page(candidate) != page:
                 break
+            cbb = _bbox(candidate)
+            # Body text guard: if block looks like body content and is past the figure,
+            # don't even try to match as caption
+            if fbb and cbb:
+                cw = float(cbb[2]) - float(cbb[0])
+                gap = float(cbb[1]) - float(fbb[3])
+                body_layout = float(cbb[0]) < page_width * 0.12 and cw > page_width * 0.50
+                if body_layout and gap > 0:
+                    break
             if self._is_flow_boundary(candidate):
                 break
             if self._accept_heading(candidate, figure, out, saw_text):
@@ -106,6 +119,17 @@ class _FigureCaptionDetector:
                 j += 1
                 continue
             break
+        # Post-check: reject any accepted candidate that has returned to body text
+        if out and fbb:
+            last = self.blocks[out[-1]]
+            last_cbb = _bbox(last)
+            if last_cbb:
+                last_cw = float(last_cbb[2]) - float(last_cbb[0])
+                last_gap = float(last_cbb[1]) - float(fbb[3])
+                if (
+                    float(last_cbb[0]) < page_width * 0.12 and last_cw > page_width * 0.50
+                ) or (last_gap > page_height * 0.10 and last_cw > page_width * 0.50):
+                    return out[:-1] if len(out) > 1 else []
         return out if any(self.blocks[k].get("type") in CAPTION_TEXT_TYPES for k in out) else []
 
     @staticmethod
@@ -167,6 +191,122 @@ def _attach_captions(figure: Dict[str, Any], caption_blocks: List[Dict[str, Any]
     if original_bbox:
         attrs.setdefault("image_bbox", original_bbox)
     source["bbox"] = union_bbox([original_bbox, caption_bbox])
+
+
+def _absorb_image_overlapping_text(blocks: List[Dict[str, Any]]) -> None:
+    """Absorb non-figure text blocks that overlap or are contained within a figure's image bbox.
+
+    Uses three geometric criteria (OR): center containment, area overlap >= 0.50,
+    OCR mechanical match at image edge. Body-text guard prevents false absorption
+    of full-width body paragraphs. Only absorbs safe text types (paragraph, caption,
+    heading) — flow boundaries (footnote, table, etc.) are never absorbed.
+    Uses the original image bbox for all geometric decisions so absorption cannot
+    snowball beyond the initial visual region.
+    """
+    if not blocks:
+        return
+
+    page_widths = _page_coord_widths(blocks)
+
+    # Safe text types that can be absorbed; flow boundaries are excluded
+    _SAFE_ABSORB_TYPES = {PARAGRAPH, CAPTION, HEADING}
+
+    i = 0
+    while i < len(blocks):
+        figure = blocks[i]
+        if figure.get("type") != FIGURE:
+            i += 1
+            continue
+
+        page = _block_page(figure)
+        if page is None:
+            i += 1
+            continue
+
+        page_width = page_widths.get(page, _DEFAULT_PAGE_HEIGHT)
+
+        # Capture the original image bbox before any absorption — used as
+        # the stable geometric reference so the region never snowballs.
+        # Only persisted to attrs when absorption actually occurs.
+        attrs = figure.setdefault("attrs", {})
+        stable_bbox = list(attrs.get("image_bbox") or _bbox(figure) or [])
+        if not stable_bbox:
+            i += 1
+            continue
+
+        ocr_text = str(attrs.get("ocr_text_in_image", "")).strip()
+
+        j = i + 1
+        while j < len(blocks):
+            candidate = blocks[j]
+            # Only absorb safe text types; stop on flow boundaries and any
+            # other content-bearing type not explicitly whitelisted.
+            cand_type = candidate.get("type")
+            if cand_type in FIGURE_FLOW_BOUNDARY_TYPES or cand_type not in _SAFE_ABSORB_TYPES:
+                break
+            if _block_page(candidate) != page:
+                break
+
+            cbb = _bbox(candidate)
+            if not cbb:
+                j += 1
+                continue
+
+            # Body text guard: full-width block near body left margin means
+            # body flow has resumed — stop scanning, not just skip this block.
+            cw = float(cbb[2]) - float(cbb[0])
+            if float(cbb[0]) < page_width * 0.12 and cw > page_width * 0.50:
+                break
+
+            # Criterion 1: center containment (using stable original bbox)
+            center_x = (float(cbb[0]) + float(cbb[2])) / 2.0
+            center_y = (float(cbb[1]) + float(cbb[3])) / 2.0
+            center_contained = (
+                float(stable_bbox[0]) - 5.0 <= center_x <= float(stable_bbox[2]) + 5.0
+                and float(stable_bbox[1]) - 5.0 <= center_y <= float(stable_bbox[3]) + 5.0
+            )
+
+            # Criterion 2: area overlap (using stable original bbox)
+            ix0 = max(float(cbb[0]), float(stable_bbox[0]))
+            iy0 = max(float(cbb[1]), float(stable_bbox[1]))
+            ix1 = min(float(cbb[2]), float(stable_bbox[2]))
+            iy1 = min(float(cbb[3]), float(stable_bbox[3]))
+            area_overlap = 0.0
+            text_area = max(1.0, (float(cbb[2]) - float(cbb[0])) * (float(cbb[3]) - float(cbb[1])))
+            if ix0 < ix1 and iy0 < iy1:
+                intersection_area = (ix1 - ix0) * (iy1 - iy0)
+                area_overlap = intersection_area / text_area
+
+            # Criterion 3: OCR mechanical match (using stable original bbox)
+            ocr_match = False
+            candidate_text = str(candidate.get("text", "")).strip()
+            if ocr_text and candidate_text:
+                near_edge = (
+                    abs(center_x - float(stable_bbox[0])) <= 10.0
+                    or abs(center_x - float(stable_bbox[2])) <= 10.0
+                    or abs(center_y - float(stable_bbox[1])) <= 10.0
+                    or abs(center_y - float(stable_bbox[3])) <= 10.0
+                )
+                if near_edge and candidate_text in ocr_text:
+                    ocr_match = True
+
+            if not (center_contained or area_overlap >= 0.50 or ocr_match):
+                j += 1
+                continue
+
+            # Persist the original bbox now that we're actually absorbing
+            if not attrs.get("image_bbox"):
+                attrs["image_bbox"] = list(stable_bbox)
+
+            _absorb_text_blocks_into_figure(
+                figure, [candidate], reason="image_overlapping_text"
+            )
+            del blocks[j]
+            # Do NOT re-check the same figure — stable_bbox is immutable
+            # so no snowballing. Just continue scanning remaining candidates.
+            continue
+
+        i += 1
 
 
 def _absorb_preceding_embedded_figure_text(blocks: List[Dict[str, Any]]) -> None:
@@ -276,7 +416,7 @@ def _is_same_visual_figure_fragment(blocks: List[Dict[str, Any]], left_idx: int)
     horizontal_gap = float(rbb[0]) - float(lbb[2])
     union = union_bbox([lbb, rbb])
     side_by_side_layout = (
-        vertical_overlap >= min(lh, rh) * 0.55
+        vertical_overlap >= min(lh, rh) * 0.40
         and -25.0 <= horizontal_gap <= page_width * 0.08
         and abs(float(lbb[1]) - float(rbb[1])) <= page_height * 0.10
         and abs(float(lbb[3]) - float(rbb[3])) <= page_height * 0.12
@@ -289,10 +429,16 @@ def _is_same_visual_figure_fragment(blocks: List[Dict[str, Any]], left_idx: int)
     horizontal_overlap = min(float(lbb[2]), float(rbb[2])) - max(float(lbb[0]), float(rbb[0]))
     vertical_gap = float(rbb[1]) - float(lbb[3])
     left_attrs = left.get("attrs") or {}
+    # Below-fragment: the lower block must be small relative to the left
+    # figure (≤35% of left height) so only legend/sub-map fragments merge,
+    # not independent full-size stacked figures. The page-height cap is kept
+    # for uncaptioned left figures as an additional small-fragment signal.
+    left_has_caption = bool(left_attrs.get("captions"))
+    small_relative_to_left = rh <= lh * 0.35
     below_fragment = (
-        horizontal_overlap >= min(lw, rw) * 0.55
-        and -15.0 <= vertical_gap <= page_height * 0.07
-        and (rh <= page_height * 0.08 or bool(left_attrs.get("captions")))
+        horizontal_overlap >= min(lw, rw) * 0.40
+        and -15.0 <= vertical_gap <= page_height * 0.12
+        and (rh <= page_height * 0.08 or (left_has_caption and small_relative_to_left))
     )
     return side_by_side or below_fragment
 
