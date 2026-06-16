@@ -1,10 +1,11 @@
-"""Display block cleanup orchestrator. Runs a sequence of display block cleanup passes in dependency order: date fragment demotion → intro merging → footnote interruptions → page-top set-off → record-style runs → page-bottom tail splitting."""
+"""Display block cleanup orchestrator. Runs a sequence of display block cleanup passes in dependency order: date fragment demotion → intro merging → footnote interruptions → page-top set-off → record-style runs → page-bottom tail splitting → body-paragraph splitting → right-aligned terminal detection."""
 
 from __future__ import annotations
 
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
+from .body_paragraph_split import reconcile_display_block_body_paragraph_split
 from .date_fragments import (
     reconcile_date_start_cross_page_paragraph_attrs,
     reconcile_demoted_date_start_cross_page_paragraphs,
@@ -19,6 +20,7 @@ from .intro_runs import (
 from .overflow_tail_split import reconcile_page_bottom_overflow_tail_from_display_block
 from .page_top import reconcile_page_top_set_off_display_blocks
 from .record_runs import reconcile_record_style_display_block_runs
+from .right_align import reconcile_right_aligned_terminal_blocks
 
 
 def reconcile_display_block_cleanup_structures(
@@ -34,3 +36,5 @@ def reconcile_display_block_cleanup_structures(
     reconcile_page_top_set_off_display_blocks(blocks, layout)
     reconcile_record_style_display_block_runs(blocks, layout)
     reconcile_page_bottom_overflow_tail_from_display_block(blocks, layout)
+    reconcile_display_block_body_paragraph_split(blocks, layout)
+    reconcile_right_aligned_terminal_blocks(blocks, layout)

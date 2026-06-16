@@ -26,6 +26,32 @@ def _is_cjk_numbered_item_block(block: Dict[str, Any]) -> bool:
     return _cjk_list_marker_rank(str(block.get("text", ""))) is not None
 
 
+def _has_display_layout(block: Dict[str, Any], layout: LayoutStats) -> bool:
+    """Check if block has visually set-off display layout (indent/width/center).
+
+    A block is display-layout when it's indented past the body margin,
+    centered within the body column, or compact AND not sitting at the
+    body-left lane.  Simply being narrow because the text is short while
+    still at the body-left margin does not count as display evidence.
+    """
+    bb = _bbox(block)
+    if not bb:
+        return False
+    x0, _y0, x1, _y1 = [float(v) for v in bb]
+    width = max(0.0, x1 - x0)
+    body_indent_threshold = layout.body_left + max(48.0, layout.body_width * 0.06)
+    indent = x0 >= body_indent_threshold
+    # Centered: block midpoint within ~5% of body midpoint
+    body_mid = layout.body_left + layout.body_width / 2
+    block_mid = x0 + width / 2
+    centered = width <= layout.body_width * 0.88 and abs(block_mid - body_mid) <= max(24.0, layout.body_width * 0.05)
+    # Compact but NOT at body-left lane — still in the body indent but
+    # narrower than body width (e.g. right-aligned or offset display).
+    at_body_left = x0 <= body_indent_threshold
+    compact_not_body_left = width <= layout.body_width * 0.88 and not at_body_left
+    return indent or centered or compact_not_body_left
+
+
 def reconcile_cjk_numbered_display_blocks(
     blocks: List[Dict[str, Any]], layout: LayoutStats
 ) -> None:
@@ -79,9 +105,15 @@ def reconcile_cjk_numbered_display_blocks(
                 and _is_cjk_numbered_item_block(blocks[ni])
                 and blocks[ni].get("type") in {LIST_ITEM, DISPLAY_BLOCK, PARAGRAPH}
             )
-            introduced = _prev_text_non_float(blocks, idx).rstrip().endswith(("：", ":"))
-            if prev_is_item or next_is_item or introduced:
-                promote(idx, "promoted_from_cjk_numbered_paragraph_or_heading_by_layout")
+            # Layout guard: require at least one strong visual signal that this
+            # numbered block is set off from body prose, not just text starting
+            # with a CJK numeral.
+            has_display = _has_display_layout(b, layout)
+            prev_display = prev_is_item and _has_display_layout(blocks[pi], layout)
+            next_display = next_is_item and _has_display_layout(blocks[ni], layout)
+            if not (has_display or prev_display or next_display):
+                continue
+            promote(idx, "promoted_from_cjk_numbered_paragraph_or_heading_by_layout")
 
     # Then merge consecutive CJK-numbered display blocks.  Allow adjacent-page
     # continuation even after terminal punctuation, because each numbered clause

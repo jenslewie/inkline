@@ -13,6 +13,7 @@ from ..block_merge import _merge_block_pair, _refresh_display_block_attrs
 from ..block_nav import _prev_text_non_float
 from ..layout_helpers import (
     _display_block_layout,
+    _is_body_paragraph_layout,
     _is_near_page_bottom,
     _is_near_page_top,
     _page_coord_heights,
@@ -107,6 +108,10 @@ def reconcile_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) 
             if nxt.get("type") == PARAGRAPH and nxt_text.endswith(("：", ":")):
                 break
             if (nxt.get("attrs") or {}).get("display_boundary_before"):
+                break
+            # Stop when the next block has body-paragraph layout — normal
+            # prose has resumed.
+            if nxt.get("type") == PARAGRAPH and _is_body_paragraph_layout(nxt, layout):
                 break
             _merge_block_pair(
                 cur,

@@ -30,6 +30,23 @@ def _display_block_layout(b: Dict[str, Any], layout: LayoutStats) -> bool:
     )
 
 
+def _is_body_paragraph_layout(b: Dict[str, Any], layout: LayoutStats) -> bool:
+    """Check if block has layout consistent with body prose (not display).
+
+    A body paragraph typically sits at or near the body left margin and
+    spans most of the body width.  Returns True when the block looks like
+    normal narrative prose that should NOT be absorbed into a display run.
+    """
+    bb = _bbox(b)
+    if not bb:
+        return False
+    x0 = float(bb[0])
+    width = max(0.0, float(bb[2]) - x0)
+    near_body_left = x0 <= layout.body_left + max(48.0, layout.body_width * 0.06)
+    near_body_width = width >= layout.body_width * 0.88
+    return near_body_left and near_body_width
+
+
 def _page_coord_heights(blocks: List[Dict[str, Any]]) -> Dict[int, float]:
     return PageGeometry.from_canonical_blocks(blocks).coord_heights
 

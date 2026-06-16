@@ -11,7 +11,7 @@ from ..block_access import block_page as _block_page
 from ..block_access import block_pages as _block_pages
 from ..block_nav import _prev_text_non_float
 from ..constants import FLOAT_LIKE_TYPES
-from ..layout_helpers import _display_block_layout
+from ..layout_helpers import _display_block_layout, _is_body_paragraph_layout
 from .helpers import (
     display_block_multiline_seed,
     display_block_run_is_intro_continuation_candidate,
@@ -53,6 +53,9 @@ def reconcile_parenthetical_header_display_block_runs(
                 break
             nbb = _bbox(nxt)
             if not nbb:
+                break
+            # Stop when the next block has body-paragraph layout.
+            if nxt.get("type") == PARAGRAPH and _is_body_paragraph_layout(nxt, layout):
                 break
             display_indented = float(nbb[0]) >= layout.body_left + 45
             if not display_indented and not _display_block_layout(nxt, layout):
@@ -102,23 +105,14 @@ def reconcile_short_display_intro_display_block_runs(
             i += 1
             continue
         nbb_check = _bbox(nxt)
-        if nbb_check and nxt.get("type") == PARAGRAPH:
-            near_body = float(nbb_check[0]) <= layout.body_left + max(
-                48.0, layout.body_width * 0.055
-            )
-            full_width = (float(nbb_check[2]) - float(nbb_check[0])) >= layout.body_width * 0.88
-            if near_body and full_width:
-                cbb_check = _bbox(cur)
-                cur_near_body = cbb_check and float(cbb_check[0]) <= layout.body_left + max(
-                    48.0, layout.body_width * 0.055
-                )
-                cur_full_width = (
-                    cbb_check
-                    and (float(cbb_check[2]) - float(cbb_check[0])) >= layout.body_width * 0.88
-                )
-                if not (cur_near_body and cur_full_width):
-                    i += 1
-                    continue
+        # Stop when the next block has body-paragraph layout — normal prose
+        # has resumed.  Only override when the current block also sits in the
+        # body lane (formal edict pattern: label + body, both full-width).
+        if nbb_check and nxt.get("type") == PARAGRAPH and _is_body_paragraph_layout(nxt, layout):
+            cbb_check = _bbox(cur)
+            if not cbb_check or not _is_body_paragraph_layout(cur, layout):
+                i += 1
+                continue
         merge_display_block_run(
             blocks,
             i,
