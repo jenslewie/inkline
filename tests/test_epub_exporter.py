@@ -2654,3 +2654,206 @@ def test_standalone_caption_single_line_is_simple_p(tmp_path):
         )
     assert '<p class="caption">Just a caption</p>' in html
     assert '<div class="caption">' not in html
+
+
+def test_export_epub_table_notes_rendered(tmp_path):
+    """Table notes in attrs.table_notes should appear as <p class="table-note">
+    inside <div class="table-notes"> after the table."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b000001",
+            "type": "table",
+            "text": "",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {
+                "html": "<table><tr><td>Data</td></tr></table>",
+                "table_notes": ["Source: 某某出版社, 2019", "Data from pp. 23–24"],
+            },
+        }
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    assert '<div class="table-notes">' in html
+    assert '<p class="table-note">Source: 某某出版社, 2019</p>' in html
+    assert '<p class="table-note">Data from pp. 23–24</p>' in html
+    assert "<td>Data</td>" in html
+
+
+def test_export_epub_continuation_markers_excluded_from_table_notes(tmp_path):
+    """Continuation markers in footnotes should NOT appear as table notes
+    in EPUB output."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b000001",
+            "type": "table",
+            "text": "",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {
+                "html": "<table><tr><td>Data</td></tr></table>",
+                "footnotes": ["(接上页)", "资料来源：表格资料。"],
+            },
+        }
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    # Continuation marker must be stripped
+    assert "接上页" not in html
+    # Real footnote should still appear
+    assert "资料来源：表格资料。" in html
+    assert '<p class="table-note">资料来源：表格资料。</p>' in html
+
+
+def test_export_epub_table_notes_preferred_over_footnotes(tmp_path):
+    """When both table_notes and footnotes exist, table_notes is used.
+    Footnotes (and any continuation markers in them) are ignored."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b000001",
+            "type": "table",
+            "text": "",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {
+                "html": "<table><tr><td>Data</td></tr></table>",
+                "table_notes": ["Clean source note"],
+                "footnotes": ["(接上页)", "Dirty footnote"],
+            },
+        }
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    assert "Clean source note" in html
+    assert "Dirty footnote" not in html
+    assert "接上页" not in html
+
+
+def test_export_epub_table_notes_fallback_to_footnotes(tmp_path):
+    """When table_notes is absent, footnotes are used as table notes."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b000001",
+            "type": "table",
+            "text": "",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {
+                "html": "<table><tr><td>Data</td></tr></table>",
+                "footnotes": ["Source: Legacy footnote, 2020"],
+            },
+        }
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    assert '<p class="table-note">Source: Legacy footnote, 2020</p>' in html
+
+
+def test_export_epub_table_all_continuation_markers_excluded(tmp_path):
+    """All continuation marker variants are excluded from table notes."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b000001",
+            "type": "table",
+            "text": "",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {
+                "html": "<table><tr><td>Data</td></tr></table>",
+                "footnotes": ["(接上页)", "(接下页)", "续表", "续上表", "Real source note"],
+            },
+        }
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    for marker in ("接上页", "接下页", "续表", "续上表"):
+        assert marker not in html
+    assert "Real source note" in html
+    # Exactly one table-note paragraph should remain
+    assert html.count('<p class="table-note">') == 1
+
+
+def test_export_epub_table_cell_alignment_classes(tmp_path):
+    """Cell alignment config produces td-align-* classes on td/th elements."""
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b000001",
+            "type": "table",
+            "text": "",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {
+                "html": (
+                    "<table>"
+                    "<tr><td>A</td><td>B</td></tr>"
+                    "<tr><td>C</td><td>D</td></tr>"
+                    "</table>"
+                ),
+                "cell_alignments": {
+                    "default": "center",
+                    "cells": [[1, 0, "right"]],
+                },
+            },
+        }
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    assert 'class="td-align-center"' in html
+    assert 'class="td-align-right"' in html
+    # Two cells should be center (A, B, D), one right (C at row 1 col 0)
+    assert html.count("td-align-center") == 3
+    assert html.count("td-align-right") == 1
+
+
+def test_export_epub_css_contains_table_notes_styles(tmp_path):
+    """The EPUB CSS includes table-notes, table-note, and td-align-* classes."""
+    document = sample_document()
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        css = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".css")
+        )
+    assert ".table-notes" in css
+    assert ".table-note" in css
+    assert ".td-align-center" in css
+    assert ".td-align-right" in css
+    assert ".td-align-left" in css

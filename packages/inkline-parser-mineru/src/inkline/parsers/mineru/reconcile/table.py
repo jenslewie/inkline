@@ -214,6 +214,17 @@ def reconcile_table_continuations(blocks: List[Dict[str, Any]]) -> None:
             if footnote and footnote not in footnotes:
                 footnotes.append(footnote)
         left_attrs["footnotes"] = footnotes
+        # Build table_notes from both sides, excluding continuation markers.
+        # This is the structural field the EPUB renderer should prefer for
+        # source/note display — it never contains "(接上页)" etc.
+        all_notes = list(left_attrs.get("table_notes") or left_attrs.get("footnotes") or [])
+        right_notes = right_attrs.get("table_notes") or right_attrs.get("footnotes") or []
+        for note in right_notes:
+            if note and note not in all_notes and not _is_table_continuation_marker(note):
+                all_notes.append(note)
+        left_attrs["table_notes"] = [
+            n for n in all_notes if not _is_table_continuation_marker(n)
+        ]
         left_attrs["continued"] = True
         left_attrs["continuation_block_ids"] = [right.get("block_id")]
         left_attrs["continuation_marker_block_ids"] = [

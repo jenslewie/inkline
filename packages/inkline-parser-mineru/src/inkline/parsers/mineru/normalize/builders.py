@@ -319,6 +319,7 @@ def make_table(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
         "html": html,
         "caption": caption_text or None,
         "footnotes": footnotes,
+        "table_notes": list(footnotes),
         "table_type": content.get("table_type") if isinstance(content, dict) else None,
         "table_nest_level": content.get("table_nest_level") if isinstance(content, dict) else None,
         "image_path": (content.get("image_source") or {}).get("path")

@@ -28,6 +28,11 @@ td, th {
   border: 1px solid #999;
   padding: 0.25em 0.4em;
 }
+.td-align-center { text-align: center; }
+.td-align-right { text-align: right; }
+.td-align-left { text-align: left; }
+.table-notes { margin-top: 0.5em; font-size: 0.85em; }
+.table-note { text-indent: 0; margin: 0.2em 0; }
 figure {
   margin: 1em 0;
   text-align: center;

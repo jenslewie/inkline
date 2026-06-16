@@ -492,27 +492,127 @@ def _collect_trailing_captions(blocks: list[dict[str, Any]], start: int) -> list
     return captions
 
 
+def _is_continuation_marker_text(text: str) -> bool:
+    """Check whether a note string is a table continuation marker.
+
+    Handles parenthesized/bracketed forms like "(接上页)", "（续表）", "【接下页】"
+    by stripping surrounding delimiters before matching the core keyword.
+    """
+    t = text.strip()
+    t = t.strip("()（）[]【】")
+    return t in {"接上页", "接下页", "续表", "续上表"}
+
+
 def _table_html(block: dict[str, Any]) -> str | None:
     attrs = block.get("attrs") or {}
     html = attrs.get("html", "")
+    table_part: str | None = None
     if html and isinstance(html, str) and html.strip():
         sanitized = _sanitize_html_fragment(html)
         if sanitized is not None:
-            return sanitized
-    text = block.get("text", "")
-    if text.strip():
-        rows: list[str] = []
-        for line in text.split("\n"):
-            line = line.strip()
-            if not line or set(line) <= {"|", "-", ":", " "}:
-                continue
-            cells = [escape(c.strip()) for c in line.split("|")]
-            cells = [c for c in cells if c]
-            if cells:
-                rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
-        if rows:
-            return "<table>" + "".join(rows) + "</table>"
-    return None
+            table_part = _apply_cell_alignments(sanitized, attrs.get("cell_alignments"))
+    if table_part is None:
+        text = block.get("text", "")
+        if text.strip():
+            rows: list[str] = []
+            for line in text.split("\n"):
+                line = line.strip()
+                if not line or set(line) <= {"|", "-", ":", " "}:
+                    continue
+                cells = [escape(c.strip()) for c in line.split("|")]
+                cells = [c for c in cells if c]
+                if cells:
+                    rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
+            if rows:
+                table_part = "<table>" + "".join(rows) + "</table>"
+                table_part = _apply_cell_alignments(table_part, attrs.get("cell_alignments"))
+
+    if table_part is None:
+        return None
+
+    # Append table notes (structural source/attribution notes) after the table.
+    # Prefer table_notes (excludes continuation markers); fall back to footnotes.
+    table_notes = attrs.get("table_notes") or attrs.get("footnotes") or []
+    # Filter out continuation-marker text that may have slipped through.
+    notes = [n for n in table_notes if n and not _is_continuation_marker_text(n)]
+    if notes:
+        notes_html = "".join(
+            f'<p class="table-note">{escape(n)}</p>' for n in notes
+        )
+        return f'{table_part}\n<div class="table-notes">{notes_html}</div>'
+    return table_part
+
+
+def _apply_cell_alignments(html: str, cell_alignments: Any) -> str:
+    """Apply cell alignment classes to <td>/<th> elements.
+
+    cell_alignments dict keys (all optional):
+      "default": str — fallback alignment for all cells
+      "rows": [[row_index, alignment], ...] — alignment for entire rows
+      "cells": [[row, col, alignment], ...] — alignment for specific cells
+
+    Returns the HTML unchanged when cell_alignments is None/empty.
+    Alignment values: "center", "right", "left".
+    """
+    if not cell_alignments:
+        return html
+
+    default = cell_alignments.get("default", "")
+    rows_map: dict[int, str] = {}
+    for row_alignment in cell_alignments.get("rows") or []:
+        if isinstance(row_alignment, (list, tuple)) and len(row_alignment) >= 2:
+            rows_map[row_alignment[0]] = row_alignment[1]
+
+    cells_map: dict[tuple[int, int], str] = {}
+    for cell_alignment in cell_alignments.get("cells") or []:
+        if isinstance(cell_alignment, (list, tuple)) and len(cell_alignment) >= 3:
+            cells_map[(cell_alignment[0], cell_alignment[1])] = cell_alignment[2]
+
+    row = 0
+    col = 0
+    result: list[str] = []
+    tag_pattern = re.compile(
+        r"(<tr[^>]*>)|(<(t[dh])((?:\s[^>]*?)?)>)", re.I
+    )
+    pos = 0
+    for m in tag_pattern.finditer(html):
+        result.append(html[pos : m.start()])
+        if m.group(1):
+            # <tr> tag: advance row, reset column
+            if row > 0 or col > 0:
+                row += 1
+                col = 0
+            # First row starts at row 0 — only advance after processing row cells.
+            # row is already 0 at the start, so the first <tr> leaves it at 0.
+            result.append(m.group(1))
+        elif m.group(2):
+            # <td> or <th> tag: determine alignment
+            tag = m.group(3)
+            attrs_str = m.group(4) or ""
+
+            alignment = cells_map.get(
+                (row, col)
+            ) or rows_map.get(row) or default
+            col += 1
+
+            if alignment in {"left", "center", "right"}:
+                class_match = re.search(
+                    r'\bclass\s*=\s*(["\'])(.*?)\1', attrs_str
+                )
+                if class_match:
+                    quote = class_match.group(1)
+                    existing = class_match.group(2)
+                    merged = f"{existing} td-align-{alignment}"
+                    full_class = f'class={quote}{merged}{quote}'
+                    new_attrs = attrs_str[:class_match.start()] + full_class + attrs_str[class_match.end():]
+                    result.append(f"<{tag}{new_attrs}>")
+                else:
+                    result.append(f'<{tag}{attrs_str} class="td-align-{alignment}">')
+            else:
+                result.append(f"<{tag}{attrs_str}>")
+        pos = m.end()
+    result.append(html[pos:])
+    return "".join(result)
 
 
 _XML_ENTITIES = {"amp", "lt", "gt", "apos", "quot"}
