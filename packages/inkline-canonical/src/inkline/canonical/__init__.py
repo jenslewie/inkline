@@ -1,3 +1,4 @@
+from inkline.canonical.footnote_text import strip_footnote_marker
 from inkline.canonical.schema import (
     BLOCK_TYPES,
     SCHEMA_VERSION,
@@ -25,5 +26,6 @@ __all__ = [
     "make_toc_entry",
     "migrate_document",
     "sample_document",
+    "strip_footnote_marker",
     "validate_document",
 ]

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterator
 
+from inkline.canonical import strip_footnote_marker
 from inkline.canonical.io import write_jsonl
 from inkline.canonical.source_map import bbox_ref
 
@@ -65,7 +66,15 @@ def _make_text_chunk(
         if block.get("source", {}).get("page")
     ]
     bbox_refs = [ref for block in blocks if (ref := bbox_ref(block))]
-    text = "\n\n".join(block["text"] for block in blocks if block.get("text"))
+    def _block_chunk_text(block: dict[str, Any]) -> str:
+        text = block.get("text", "")
+        if block.get("type") == "footnote":
+            return strip_footnote_marker(text, block.get("attrs"))
+        return text
+
+    text = "\n\n".join(
+        _block_chunk_text(block) for block in blocks if block.get("text")
+    )
     return {
         "chunk_id": _chunk_id(metadata, chunk_no),
         "doc_id": metadata["doc_id"],

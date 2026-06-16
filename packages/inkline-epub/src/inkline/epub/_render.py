@@ -6,19 +6,9 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from inkline.canonical import strip_footnote_marker
 from inkline.epub._assets import asset_image_name
 from inkline.epub._chapter import Chapter
-
-# Superscript-to-digit translation table, matching the normalization
-# used in the parser's normalize_note_marker().
-_SUPERSCRIPT_MAP = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
-
-# Required-delimiter pattern for footnote marker stripping.
-# After a marker, at least one delimiter must follow to avoid false
-# positives (e.g. "3rd" is NOT stripped when marker is "3").
-# Covers: whitespace, period/dot, comma, Chinese punctuation (、．),
-# closing paren (ASCII and fullwidth ), and end-of-string.
-_DELIMITER_PATTERN = r"(?:[\s.、．,)）]\s*|$)"
 
 
 def _build_visual_page_set(document: dict[str, Any]) -> set[int]:
@@ -285,7 +275,7 @@ def chapter_documents(
             attrs = block.get("attrs") or {}
             note_id = attrs.get("note_id") or block.get("block_id")
             id_attr = f' id="{escape(str(note_id), quote=True)}"' if note_id else ""
-            stripped_text = _strip_footnote_marker(text, attrs)
+            stripped_text = strip_footnote_marker(text, attrs)
             current_html.append(
                 f'<aside epub:type="footnote"{id_attr}><p>{escape(stripped_text)}</p></aside>'
             )
@@ -591,69 +581,6 @@ def _sanitize_html_fragment(html: str) -> str | None:
         return fixed
     except ET.ParseError:
         return None
-
-
-def _strip_footnote_marker(text: str, attrs: dict[str, Any]) -> str:
-    """Strip the leading original note marker from footnote block text.
-
-    Footnotes from the canonical pipeline often include the original
-    marker (e.g. "³ Lothar..." or "3. Note text") as the first word
-    or two.  The EPUB noteref links provide chapter-local numbering,
-    so the duplicate leading marker should be removed.
-
-    When attrs.note_marker is available (the most reliable source), it
-    is used.  Otherwise a local heuristic strips a leading sequence
-    matching common marker patterns.
-    """
-    marker = attrs.get("note_marker")
-    if isinstance(marker, str) and marker:
-        marker_stripped = marker.strip()
-        if not marker_stripped:
-            pass  # empty marker — skip to fallback
-        else:
-            # Normalize the leading superscript run in the text to its
-            # digit equivalent, then match the marker against the
-            # normalised form.  This handles multi-digit superscript
-            # sequences (e.g. ¹² → "12") and single superscripts
-            # (³ → "3") equally.
-            m = re.match(
-                r"^([¹²³⁴⁵⁶⁷⁸⁹⁰]+)",
-                text,
-            )
-            if m:
-                normalized_head = m.group(1).translate(_SUPERSCRIPT_MAP)
-                if normalized_head == marker_stripped:
-                    # Consume the superscript run plus delimiter
-                    delim_m = re.match(
-                        rf"^[¹²³⁴⁵⁶⁷⁸⁹⁰]+{_DELIMITER_PATTERN}",
-                        text,
-                    )
-                    if delim_m:
-                        rest = text[delim_m.end():]
-                        if rest:
-                            return rest
-            # Literal marker form — must be followed by a required delimiter
-            # so "3rd" is NOT stripped when marker is "3".
-            pattern = rf"^({re.escape(marker_stripped)}){_DELIMITER_PATTERN}"
-            m2 = re.match(pattern, text)
-            if m2:
-                rest = text[m2.end():]
-                if rest:
-                    return rest
-    # Fallback: strip a leading numeric/symbol/superscript marker
-    # Covers: plain digits, circled/boxed digits (①-⓿❶-➓),
-    # superscript digits (¹²³⁴⁵⁶⁷⁸⁹⁰), and common reference
-    # symbols (*, †, ‡, §).  A required delimiter prevents false
-    # positives like stripping "3" from "3rd edition".
-    m = re.match(
-        rf"^[\d①-⓿❶-➓¹²³⁴⁵⁶⁷⁸⁹⁰\*†‡§]+{_DELIMITER_PATTERN}",
-        text,
-    )
-    if m and m.end() > 0:
-        rest = text[m.end():]
-        if rest:
-            return rest
-    return text
 
 
 def _caption_html(block: dict[str, Any], blocks: list[dict[str, Any]], index: int) -> str:
