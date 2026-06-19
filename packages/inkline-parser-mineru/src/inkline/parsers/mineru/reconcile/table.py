@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from ..extraction.text import normalize_ws
-from ..normalize.builders import union_bbox
+from ..normalize.builders import _table_title_cell_alignments, union_bbox
 from ..schema.block_types import FOOTNOTE, PARAGRAPH, TABLE
 from .block_access import block_bbox as _bbox
 from .block_access import block_page as _block_page
@@ -209,6 +209,9 @@ def reconcile_table_continuations(blocks: List[Dict[str, Any]]) -> None:
         left_attrs["html"] = _merge_table_html(
             str(left_attrs.get("html") or ""), str(right_attrs.get("html") or "")
         )
+        cell_alignments = _table_title_cell_alignments(str(left_attrs.get("html") or ""))
+        if cell_alignments:
+            left_attrs["cell_alignments"] = cell_alignments
         footnotes = list(left_attrs.get("footnotes") or [])
         for footnote in right_attrs.get("footnotes") or []:
             if footnote and footnote not in footnotes:

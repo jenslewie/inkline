@@ -32,6 +32,14 @@ def _chart_item(text: str, bbox: list[int]) -> dict:
     }
 
 
+def _table_item(html: str, bbox: list[int]) -> dict:
+    return {
+        "type": "table",
+        "content": {"html": html},
+        "bbox": bbox,
+    }
+
+
 def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     content_list_v2 = tmp_path / "sample_content_list_v2.json"
     middle = tmp_path / "sample_middle.json"
@@ -92,6 +100,82 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["canonical"] == "canonical.json"
     assert report["summary"]["missing_body_ref_notes"] == 0
+
+
+def test_table_first_full_colspan_row_marked_center_aligned(tmp_path) -> None:
+    content_list_v2 = tmp_path / "sample_content_list_v2.json"
+    middle = tmp_path / "sample_middle.json"
+    output = tmp_path / "canonical.json"
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    _table_item(
+                        "<table>"
+                        '<tr><td colspan="3">表题</td></tr>'
+                        "<tr><td>A</td><td>B</td><td>C</td></tr>"
+                        "</table>",
+                        [100, 100, 900, 300],
+                    )
+                ]
+            ]
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(json.dumps({"pdf_info": [{"page_size": [1000, 1400]}]}), encoding="utf-8")
+
+    document = normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        doc_id="sample",
+        title="Sample",
+        language="zh-CN",
+    )
+
+    table = document["blocks"][0]
+    assert table["type"] == "table"
+    assert table["attrs"]["cell_alignments"] == {"rows": [[0, "center"]]}
+
+
+def test_table_first_regular_row_not_marked_center_aligned(tmp_path) -> None:
+    content_list_v2 = tmp_path / "sample_content_list_v2.json"
+    middle = tmp_path / "sample_middle.json"
+    output = tmp_path / "canonical.json"
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    _table_item(
+                        "<table>"
+                        "<tr><td>A</td><td>B</td></tr>"
+                        "<tr><td>C</td><td>D</td></tr>"
+                        "</table>",
+                        [100, 100, 900, 300],
+                    )
+                ]
+            ]
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(json.dumps({"pdf_info": [{"page_size": [1000, 1400]}]}), encoding="utf-8")
+
+    document = normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        doc_id="sample",
+        title="Sample",
+        language="zh-CN",
+    )
+
+    table = document["blocks"][0]
+    assert table["type"] == "table"
+    assert "cell_alignments" not in table["attrs"]
 
 
 def test_snapshot_front_matter_does_not_replace_following_body_text_page(tmp_path) -> None:

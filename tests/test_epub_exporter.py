@@ -2841,6 +2841,37 @@ def test_export_epub_table_cell_alignment_classes(tmp_path):
     assert html.count("td-align-right") == 1
 
 
+def test_export_epub_table_row_alignment_applies_to_colspan_title(tmp_path):
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b000001",
+            "type": "table",
+            "text": "",
+            "source": {"page": 1, "bbox": None},
+            "attrs": {
+                "html": (
+                    "<table>"
+                    '<tr><td colspan="2">Title</td></tr>'
+                    "<tr><td>A</td><td>B</td></tr>"
+                    "</table>"
+                ),
+                "cell_alignments": {"rows": [[0, "center"]]},
+            },
+        }
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+    assert '<td colspan="2" class="td-align-center">Title</td>' in html
+    assert html.count("td-align-center") == 1
+
+
 def test_export_epub_css_contains_table_notes_styles(tmp_path):
     """The EPUB CSS includes table-notes, table-note, and td-align-* classes."""
     document = sample_document()

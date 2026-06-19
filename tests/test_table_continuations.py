@@ -105,6 +105,42 @@ def test_table_continuation_notes_exclude_markers() -> None:
     assert merged["continuation_marker_block_ids"] == ["b_marker"]
 
 
+def test_table_continuation_recomputes_center_alignment_for_prepended_title() -> None:
+    blocks = [
+        {
+            "block_id": "b_table_1",
+            "type": "table",
+            "text": "表3.1 高昌某地全年称价钱账，600年前后",
+            "source": {"page": 101, "bbox": [100, 300, 900, 884]},
+            "attrs": {
+                "html": (
+                    "<table><tr>"
+                    "<td>商品</td><td>重量</td><td>卖家</td><td>买家</td><td>日期</td><td>税额</td>"
+                    "</tr></table>"
+                ),
+                "caption": "表3.1 高昌某地全年称价钱账，600年前后",
+                "footnotes": ["(接下页)"],
+            },
+        },
+        {
+            "block_id": "b_table_2",
+            "type": "table",
+            "text": "(接上页)",
+            "source": {"page": 102, "bbox": [100, 90, 900, 500]},
+            "attrs": {
+                "html": "<table><tr><td>银</td><td>2斤</td><td>曹</td><td>何</td><td>正月一日</td><td>2文</td></tr></table>",
+                "caption": "(接上页)",
+            },
+        },
+    ]
+
+    reconcile_table_continuations(blocks)
+
+    merged = blocks[0]["attrs"]
+    assert '<td colspan="6">表3.1 高昌某地全年称价钱账，600年前后</td>' in merged["html"]
+    assert merged["cell_alignments"] == {"rows": [[0, "center"]]}
+
+
 def test_is_table_continuation_marker() -> None:
     """Verify continuation marker detection covers expected forms."""
     assert _is_table_continuation_marker("接上页")

@@ -326,10 +326,58 @@ def make_table(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
         if isinstance(content, dict)
         else None,
     }
+    cell_alignments = _table_title_cell_alignments(html)
+    if cell_alignments:
+        attrs["cell_alignments"] = cell_alignments
     block = canonical_block(ids.next(), TABLE, caption_text, b.page, b.bbox, attrs=attrs)
     if not caption_text and html:
         block["text"] = _html_table_to_text(html)
     return block
+
+
+class _TableStructureParser(HTMLParser):
+    """Parse table cell spans needed for structural canonical attrs."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[list[int]] = []
+        self._current_row: list[int] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
+        if tag == "tr":
+            self._current_row = []
+            return
+        if tag not in {"td", "th"} or self._current_row is None:
+            return
+        attrs_dict = {key.lower(): value for key, value in attrs}
+        colspan = _positive_int(attrs_dict.get("colspan"), default=1)
+        self._current_row.append(colspan)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "tr" and self._current_row is not None:
+            if self._current_row:
+                self.rows.append(self._current_row)
+            self._current_row = None
+
+
+def _positive_int(value: Optional[str], default: int) -> int:
+    try:
+        parsed = int(str(value))
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _table_title_cell_alignments(html: str) -> Optional[Dict[str, Any]]:
+    parser = _TableStructureParser()
+    parser.feed(html or "")
+    if not parser.rows:
+        return None
+    first_row = parser.rows[0]
+    total_columns = max(sum(row) for row in parser.rows)
+    if len(first_row) == 1 and first_row[0] > 1 and first_row[0] >= total_columns:
+        return {"rows": [[0, "center"]]}
+    return None
 
 
 class _TableTextParser(HTMLParser):
