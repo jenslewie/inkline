@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from inkline.parsers.mineru.reconcile.figure import reconcile_figure_captions
-from inkline.parsers.mineru.schema.block_types import CAPTION, FIGURE, PARAGRAPH
+from inkline.parsers.mineru.schema.block_types import CAPTION, FIGURE, HEADING, PARAGRAPH
 
 
 def _block(type_: str, text: str, page: int = 1, bbox: tuple | None = None) -> dict:
@@ -215,6 +215,90 @@ def test_embedding_text_and_caption_all_absorbed() -> None:
     assert "图3 地铁线路图" in blocks[0].get("attrs", {}).get("captions", [])
 
 
+def test_absorb_following_visual_legend_strip_with_interleaved_small_figure() -> None:
+    """Map legend strips below a figure are visual fragments, not reading-flow captions."""
+    figure = _block(FIGURE, "", page=1, bbox=[349, 110, 998, 832])
+    figure["attrs"] = {"captions": ["法显与义净的求法路线"]}
+    title = _block(CAPTION, "法显与义净的求法路线", page=1, bbox=[369, 846, 650, 862])
+    route_a = _block(CAPTION, "— 法显路线 399—412年", page=1, bbox=[369, 865, 585, 881])
+    scale = _block(FIGURE, "", page=1, bbox=[779, 865, 988, 904])
+    scale["block_id"] = "b_scale"
+    route_b = _block(CAPTION, "--- 义净路线 671—695年", page=1, bbox=[369, 884, 585, 900])
+    blocks = [figure, title, route_a, scale, route_b]
+
+    reconcile_figure_captions(blocks)
+
+    assert len(blocks) == 1
+    attrs = blocks[0]["attrs"]
+    assert attrs["absorbed_block_ids"] == [title["block_id"], route_a["block_id"], route_b["block_id"]]
+    assert attrs["fragment_block_ids"] == [figure["block_id"], scale["block_id"]]
+    assert attrs["embedded_text_absorb_reason"] == "following_visual_legend_strip"
+    assert attrs["captions"] == []
+    assert attrs["visual_legend_captions_absorbed"] == ["法显与义净的求法路线"]
+    assert blocks[0]["source"]["bbox"] == [349, 110, 998, 904]
+
+
+def test_absorb_overlapping_rows_in_following_visual_legend_strip() -> None:
+    figure = _block(FIGURE, "", page=1, bbox=[112, 114, 998, 679])
+    title = _block(HEADING, "欧亚大陆主要交通线", page=1, bbox=[146, 687, 480, 715])
+    label = _block(CAPTION, "印度洋", page=1, bbox=[810, 689, 906, 710])
+    route = _block(CAPTION, "---- 丝绸之路", page=1, bbox=[147, 725, 330, 748])
+    site = _block(CAPTION, "□ 古代遗址", page=1, bbox=[164, 752, 330, 774])
+    blocks = [figure, title, label, route, site]
+
+    reconcile_figure_captions(blocks)
+
+    assert len(blocks) == 1
+    attrs = blocks[0]["attrs"]
+    assert attrs["absorbed_block_ids"] == [
+        title["block_id"],
+        label["block_id"],
+        route["block_id"],
+        site["block_id"],
+    ]
+    assert blocks[0]["source"]["bbox"] == [112, 114, 998, 774]
+
+
+def test_long_caption_and_body_tail_are_not_visual_legend_strip() -> None:
+    figure = _block(FIGURE, "", page=1, bbox=[107, 113, 876, 486])
+    title = _block(HEADING, "喀喇昆仑公路上的佛教石刻", page=1, bbox=[107, 500, 410, 524])
+    caption_body = _block(
+        PARAGRAPH,
+        "图中石刻坐落于巴基斯坦吉尔吉特－巴尔蒂斯坦省霍独尔镇附近的大石堆中，"
+        "位于印度河上游北岸。这是喀喇昆仑公路上的晚期图像之一，年代六到八世纪。",
+        page=1,
+        bbox=[107, 528, 876, 592],
+    )
+    body_tail = _block(PARAGRAPH, "间范围，即一到八世纪之间。", page=1, bbox=[107, 600, 520, 624])
+    blocks = [figure, title, caption_body, body_tail]
+
+    reconcile_figure_captions(blocks)
+
+    attrs = blocks[0].get("attrs") or {}
+    assert attrs.get("embedded_text_absorb_reason") != "following_visual_legend_strip"
+    assert "absorbed_block_ids" not in attrs
+    assert attrs["captions"] == [
+        "喀喇昆仑公路上的佛教石刻\n"
+        "图中石刻坐落于巴基斯坦吉尔吉特－巴尔蒂斯坦省霍独尔镇附近的大石堆中，"
+        "位于印度河上游北岸。这是喀喇昆仑公路上的晚期图像之一，年代六到八世纪。"
+    ]
+    assert blocks[0]["type"] == FIGURE
+    assert blocks[1]["type"] == PARAGRAPH
+    assert blocks[1]["text"] == "间范围，即一到八世纪之间。"
+
+
+def test_single_following_caption_still_renders_as_caption() -> None:
+    figure = _block(FIGURE, "", page=1, bbox=[100, 100, 700, 500])
+    caption = _block(PARAGRAPH, "普通图片说明", page=1, bbox=[120, 510, 680, 540])
+    blocks = [figure, caption]
+
+    reconcile_figure_captions(blocks)
+
+    assert len(blocks) == 1
+    assert blocks[0]["attrs"]["captions"] == ["普通图片说明"]
+    assert "absorbed_block_ids" not in blocks[0]["attrs"]
+
+
 # ── Negative tests ──
 
 
@@ -258,6 +342,52 @@ def test_body_paragraph_after_large_float_still_rejected() -> None:
     # The body paragraph should NOT be absorbed as a caption
     assert len(blocks) == 2
     assert blocks[1]["type"] == PARAGRAPH
+
+
+def test_heading_title_and_body_width_paragraph_merge_as_caption() -> None:
+    """A short caption title followed by a wide aligned paragraph belongs to the figure."""
+    figure = _block(FIGURE, "", page=1, bbox=[81, 227, 848, 457])
+    title = _block(HEADING, "高昌故城遗址", page=1, bbox=[81, 469, 201, 486])
+    body = _block(
+        PARAGRAPH,
+        "吐鲁番附近高昌故城夯土墙是中国境内为数不多的地上古迹之一。"
+        "游客可以看到当地人在地下挖土造屋，并用挖出的土垒起高墙。（作者摄）",
+        page=1,
+        bbox=[81, 490, 850, 550],
+    )
+    blocks = [figure, title, body]
+
+    reconcile_figure_captions(blocks)
+
+    assert len(blocks) == 1
+    attrs = blocks[0]["attrs"]
+    assert attrs["captions"] == [
+        "高昌故城遗址\n"
+        "吐鲁番附近高昌故城夯土墙是中国境内为数不多的地上古迹之一。"
+        "游客可以看到当地人在地下挖土造屋，并用挖出的土垒起高墙。（作者摄）"
+    ]
+    assert attrs["caption_block_ids"] == [title["block_id"], body["block_id"]]
+    assert blocks[0]["source"]["bbox"] == [81, 227, 850, 550]
+
+
+def test_heading_caption_title_does_not_absorb_unaligned_body_paragraph() -> None:
+    """A body paragraph after a caption-like heading still needs continuation geometry."""
+    figure = _block(FIGURE, "", page=1, bbox=[81, 227, 848, 457])
+    title = _block(HEADING, "高昌故城遗址", page=1, bbox=[81, 469, 201, 486])
+    body = _block(
+        PARAGRAPH,
+        "这是正文内容，不应该仅因为前面有一个短标题就被合并进图片说明。",
+        page=1,
+        bbox=[160, 490, 930, 550],
+    )
+    blocks = [figure, title, body]
+
+    reconcile_figure_captions(blocks)
+
+    assert len(blocks) == 3
+    assert blocks[0]["type"] == FIGURE
+    assert blocks[1]["type"] == HEADING
+    assert blocks[2]["type"] == PARAGRAPH
 
 
 def test_stacked_independent_figures_not_merged() -> None:

@@ -245,9 +245,8 @@ def materialize_repaired_figure_image_assets(
             block_id = str(b.get("block_id") or f"page_{page:04d}")
             image_name = f"{block_id}_page_{page:04d}.png"
             image_path = asset_dir / image_name
-            if not image_path.exists():
-                pix = doc[page - 1].get_pixmap(matrix=matrix, clip=rect, alpha=False)
-                pix.save(str(image_path))
+            pix = doc[page - 1].get_pixmap(matrix=matrix, clip=rect, alpha=False)
+            pix.save(str(image_path))
             attrs = b.setdefault("attrs", {})
             image_id = f"{block_id}-image"
             original = attrs.get("image_path")
@@ -392,7 +391,10 @@ def _upsert_image_asset(canonical: Dict[str, Any], asset: Dict[str, Any]) -> Non
 
 def _should_expand_repaired_figure_crop(block: Dict[str, Any]) -> bool:
     attrs = block.get("attrs") or {}
-    return bool(attrs.get("fragment_block_ids") and attrs.get("sub_type") == "text_image")
+    return bool(
+        attrs.get("sub_type") == "text_image"
+        and (attrs.get("fragment_block_ids") or attrs.get("embedded_text_absorb_reason"))
+    )
 
 
 def _repaired_figure_crop_bbox(block: Dict[str, Any]) -> Optional[list[float]]:
@@ -436,28 +438,57 @@ def _expand_rect_to_visible_content(page: Any, rect: Any) -> Any:
         return rect
 
     page_rect = page.rect
+    x_step = max(60.0, rect.width * 0.06)
+    y_step = max(30.0, rect.height * 0.04)
     search = fitz.Rect(
         max(page_rect.x0, rect.x0 - max(80.0, rect.width * 0.10)),
-        max(page_rect.y0, rect.y0 - max(30.0, rect.height * 0.04)),
-        min(page_rect.x1, rect.x1 + max(60.0, rect.width * 0.06)),
-        min(page_rect.y1, rect.y1 + max(30.0, rect.height * 0.04)),
+        max(page_rect.y0, rect.y0 - y_step),
+        min(page_rect.x1, rect.x1 + x_step),
+        min(page_rect.y1, rect.y1 + y_step),
     )
-    try:
-        pix = page.get_pixmap(matrix=fitz.Matrix(1, 1), clip=search, alpha=False)
-        image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
-    except Exception:
-        return rect
-    ink = image.point(lambda p: 255 if p < 245 else 0)
-    content_bbox = ink.getbbox()
-    if not content_bbox:
-        return rect
-    x0, y0, x1, y1 = content_bbox
-    expanded = fitz.Rect(search.x0 + x0, search.y0 + y0, search.x0 + x1, search.y0 + y1)
     original_area = max(1.0, rect.width * rect.height)
-    expanded_area = max(1.0, expanded.width * expanded.height)
-    if expanded_area > original_area * 1.45:
-        return rect
-    return expanded | rect
+    best = rect
+
+    for _ in range(4):
+        try:
+            pix = page.get_pixmap(matrix=fitz.Matrix(1, 1), clip=search, alpha=False)
+            image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
+        except Exception:
+            return best
+        ink = image.point(lambda p: 255 if p < 245 else 0)
+        content_bbox = ink.getbbox()
+        if not content_bbox:
+            return best
+
+        x0, y0, x1, y1 = content_bbox
+        expanded = fitz.Rect(search.x0 + x0, search.y0 + y0, search.x0 + x1, search.y0 + y1)
+        candidate = expanded | rect
+        candidate_area = max(1.0, candidate.width * candidate.height)
+        if candidate_area > original_area * 1.45:
+            return best
+        best = candidate
+
+        touches_left = x0 <= 1 and search.x0 > page_rect.x0
+        touches_top = y0 <= 1 and search.y0 > page_rect.y0
+        touches_right = x1 >= pix.width - 1 and search.x1 < page_rect.x1
+        touches_bottom = y1 >= pix.height - 1 and search.y1 < page_rect.y1
+        if not (touches_left or touches_top or touches_right or touches_bottom):
+            return best
+
+        next_search = fitz.Rect(search)
+        if touches_left:
+            next_search.x0 = max(page_rect.x0, next_search.x0 - x_step)
+        if touches_top:
+            next_search.y0 = max(page_rect.y0, next_search.y0 - y_step)
+        if touches_right:
+            next_search.x1 = min(page_rect.x1, next_search.x1 + x_step)
+        if touches_bottom:
+            next_search.y1 = min(page_rect.y1, next_search.y1 + y_step)
+        if next_search == search:
+            return best
+        search = next_search
+
+    return best
 
 
 def _pad_and_clip_rect(rect: Any, page_rect: Any, padding: float = 4.0) -> Any:

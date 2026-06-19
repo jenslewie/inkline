@@ -47,6 +47,7 @@ def reconcile_figure_captions(
 
     _absorb_preceding_embedded_figure_text(blocks)
     _absorb_image_overlapping_text(blocks)
+    _absorb_following_visual_legend_strips(blocks)
     _merge_adjacent_figure_fragments(blocks)
 
     i = 0
@@ -99,12 +100,19 @@ class _FigureCaptionDetector:
                 break
             cbb = _bbox(candidate)
             # Body text guard: if block looks like body content and is past the figure,
-            # don't even try to match as caption
+            # don't even try to match as caption. A heading that was already
+            # accepted as a caption title may be followed by a body-width
+            # caption paragraph, so let that geometric continuation be tested.
             if fbb and cbb:
                 cw = float(cbb[2]) - float(cbb[0])
                 gap = float(cbb[1]) - float(fbb[3])
                 body_layout = float(cbb[0]) < page_width * 0.12 and cw > page_width * 0.50
-                if body_layout and gap > 0:
+                heading_continuation = (
+                    bool(out)
+                    and self.blocks[out[-1]].get("type") == HEADING
+                    and _is_caption_continuation(self.blocks[out[-1]], candidate)
+                )
+                if body_layout and gap > 0 and not heading_continuation:
                     break
             if self._is_flow_boundary(candidate):
                 break
@@ -126,9 +134,22 @@ class _FigureCaptionDetector:
             if last_cbb:
                 last_cw = float(last_cbb[2]) - float(last_cbb[0])
                 last_gap = float(last_cbb[1]) - float(fbb[3])
+                heading_continuation = (
+                    len(out) > 1
+                    and self.blocks[out[-2]].get("type") == HEADING
+                    and _is_caption_continuation(self.blocks[out[-2]], last)
+                )
                 if (
-                    float(last_cbb[0]) < page_width * 0.12 and last_cw > page_width * 0.50
-                ) or (last_gap > page_height * 0.10 and last_cw > page_width * 0.50):
+                    not heading_continuation
+                    and (
+                        float(last_cbb[0]) < page_width * 0.12
+                        and last_cw > page_width * 0.50
+                    )
+                ) or (
+                    not heading_continuation
+                    and last_gap > page_height * 0.10
+                    and last_cw > page_width * 0.50
+                ):
                     return out[:-1] if len(out) > 1 else []
         return out if any(self.blocks[k].get("type") in CAPTION_TEXT_TYPES for k in out) else []
 
@@ -307,6 +328,132 @@ def _absorb_image_overlapping_text(blocks: List[Dict[str, Any]]) -> None:
             continue
 
         i += 1
+
+
+def _absorb_following_visual_legend_strips(blocks: List[Dict[str, Any]]) -> None:
+    """Absorb compact legend/title strips that MinerU emitted below a visual figure.
+
+    These are not reading-flow captions. They are pieces of the source image,
+    often emitted as text/image/text immediately below a map or diagram.
+    """
+    i = 0
+    while i < len(blocks):
+        figure = blocks[i]
+        if figure.get("type") != FIGURE:
+            i += 1
+            continue
+        strip_idxs = _following_visual_legend_strip_indices(blocks, i)
+        if not strip_idxs:
+            i += 1
+            continue
+        for idx in strip_idxs:
+            candidate = blocks[idx]
+            if candidate.get("type") == FIGURE:
+                _merge_figure_fragment_pair(figure, candidate)
+            else:
+                _absorb_text_blocks_into_figure(
+                    figure, [candidate], reason="following_visual_legend_strip"
+                )
+        attrs = figure.setdefault("attrs", {})
+        existing_captions = [cap for cap in attrs.get("captions") or [] if cap]
+        if existing_captions:
+            attrs["visual_legend_captions_absorbed"] = existing_captions
+            attrs["captions"] = []
+        for idx in reversed(strip_idxs):
+            del blocks[idx]
+        i += 1
+
+
+def _following_visual_legend_strip_indices(
+    blocks: List[Dict[str, Any]], figure_idx: int
+) -> List[int]:
+    figure = blocks[figure_idx]
+    page = _block_page(figure)
+    fbb = _bbox(figure)
+    if page is None or not fbb:
+        return []
+    page_height = _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+    anchor_left = float(fbb[0])
+    anchor_right = float(fbb[2])
+    anchor_width = max(1.0, anchor_right - anchor_left)
+    current_bottom = float(fbb[3])
+    max_gap = page_height * 0.08
+    max_strip_bottom = float(fbb[3]) + page_height * 0.14
+    out: List[int] = []
+    has_visual_fragment = False
+    has_text_fragment = False
+    total_text_chars = 0
+
+    j = figure_idx + 1
+    while j < len(blocks):
+        candidate = blocks[j]
+        if _block_page(candidate) != page:
+            break
+        candidate_type = candidate.get("type")
+        if candidate_type in FIGURE_FLOW_BOUNDARY_TYPES and candidate_type != FIGURE:
+            break
+        if candidate_type not in FIGURE_FOLLOWING_CAPTION_TYPES | {FIGURE}:
+            break
+        cbb = _bbox(candidate)
+        if not cbb:
+            break
+        gap = float(cbb[1]) - current_bottom
+        if not -40.0 <= gap <= max_gap:
+            break
+        if float(cbb[3]) > max_strip_bottom:
+            break
+        candidate_left = float(cbb[0])
+        candidate_right = float(cbb[2])
+        candidate_width = max(1.0, candidate_right - candidate_left)
+        center_x = (candidate_left + candidate_right) / 2.0
+        overlap = min(anchor_right, candidate_right) - max(anchor_left, candidate_left)
+        horizontally_attached = (
+            anchor_left - anchor_width * 0.08 <= center_x <= anchor_right + anchor_width * 0.08
+            or overlap >= min(anchor_width, candidate_width) * 0.35
+        )
+        if not horizontally_attached:
+            break
+        if candidate_type == FIGURE:
+            figure_height = max(1.0, float(fbb[3]) - float(fbb[1]))
+            candidate_height = max(1.0, float(cbb[3]) - float(cbb[1]))
+            if candidate_height > figure_height * 0.18:
+                break
+            has_visual_fragment = True
+        else:
+            if not _is_compact_visual_legend_text(candidate, cbb, anchor_width, page_height):
+                return []
+            has_text_fragment = True
+            total_text_chars += len(str(candidate.get("text", "")).strip())
+            if total_text_chars > 160:
+                return []
+        out.append(j)
+        current_bottom = max(current_bottom, float(cbb[3]))
+        j += 1
+
+    if len(out) < 2 or not has_text_fragment:
+        return []
+    if not has_visual_fragment and len(out) < 3:
+        return []
+    return out
+
+
+def _is_compact_visual_legend_text(
+    candidate: Dict[str, Any],
+    bbox: BBox,
+    anchor_width: float,
+    page_height: float,
+) -> bool:
+    text = str(candidate.get("text", "")).strip()
+    if not text:
+        return False
+    compact_len = len(text.replace(" ", ""))
+    if compact_len > 80:
+        return False
+    height = max(1.0, float(bbox[3]) - float(bbox[1]))
+    width = max(1.0, float(bbox[2]) - float(bbox[0]))
+    if height > page_height * 0.055:
+        return False
+    return not (compact_len > 45 and width > anchor_width * 0.65)
 
 
 def _absorb_preceding_embedded_figure_text(blocks: List[Dict[str, Any]]) -> None:
@@ -562,6 +709,8 @@ def _is_caption_continuation(previous: Dict[str, Any], candidate: Dict[str, Any]
     x_delta = abs(float(cbb[0]) - float(pbb[0]))
     y_gap = float(cbb[1]) - float(pbb[3])
     previous_text = str(previous.get("text", "")).strip()
+    if previous_text.endswith(("。", "！", "？", ".", "）")) and previous.get("type") != HEADING:
+        return False
     if previous_text.endswith(("。", "！", "？", ".", "）")) and y_gap > 24.0:
         return False
     return x_delta <= 35.0 and -10.0 <= y_gap <= 90.0
