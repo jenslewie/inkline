@@ -95,6 +95,31 @@ def _insert_inline_note_run(block: CanonicalBlock, ref: Dict[str, Any], char_ind
         if reconstructed != text:
             run_char_index = _raw_index_for_normalized_text(reconstructed, text, char_index)
     if not isinstance(runs, list) or run_char_index is None:
+        if (
+            isinstance(runs, list)
+            and run_char_index is None
+            and any(
+                isinstance(run, dict)
+                and run.get("type") == "note_ref"
+                and not _same_inline_note_ref(run, ref)
+                for run in runs
+            )
+        ):
+            note_run = _inline_note_run_from_ref(ref)
+            out = []
+            replaced = False
+            for run in runs:
+                if not isinstance(run, dict):
+                    continue
+                if run.get("type") == "note_ref" and _same_inline_note_ref(run, ref):
+                    out.append(note_run)
+                    replaced = True
+                else:
+                    out.append(dict(run))
+            if not replaced:
+                out.append(note_run)
+            attrs["inline_runs"] = _coalesce_text_runs(out)
+            return
         runs = [{"type": "text", "text": text}]
         run_char_index = char_index
     assert isinstance(runs, list)

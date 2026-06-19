@@ -230,8 +230,61 @@ def test_qwen_insertion_does_not_relocate_unmappable_existing_inline_ref() -> No
     )
 
     runs = block["attrs"]["inline_runs"]
-    assert [run.get("marker") for run in runs if run.get("type") == "note_ref"] == ["2"]
-    assert _inline_runs_text(runs) == block["text"]
+    assert [run.get("marker") for run in runs if run.get("type") == "note_ref"] == ["1", "2"]
+    assert _inline_runs_text(runs) == "abcXdef"
+
+
+def test_qwen_insertion_preserves_resolved_refs_when_text_mapping_fails() -> None:
+    block = {
+        "text": "abcdef",
+        "attrs": {
+            "inline_runs": [
+                {"type": "text", "text": "abX"},
+                {
+                    "type": "note_ref",
+                    "marker": "1",
+                    "source": "equation_inline",
+                    "source_page": 1,
+                    "raw_marker": "^{1}",
+                    "target_block_id": "fn1",
+                    "target_note_id": "note_fn1",
+                },
+                {"type": "text", "text": "cd"},
+                {
+                    "type": "note_ref",
+                    "marker": "2",
+                    "source": "equation_inline",
+                    "source_page": 1,
+                    "raw_marker": "^{2}",
+                    "target_block_id": "fn2",
+                    "target_note_id": "note_fn2",
+                },
+                {"type": "text", "text": "ef"},
+            ]
+        },
+    }
+
+    _insert_inline_note_run(
+        block,
+        {
+            "marker": "3",
+            "source": "qwen_marker_locator",
+            "source_page": 1,
+            "raw_marker": "^{3}",
+        },
+        3,
+    )
+
+    runs = block["attrs"]["inline_runs"]
+    assert [run.get("marker") for run in runs if run.get("type") == "note_ref"] == [
+        "1",
+        "2",
+        "3",
+    ]
+    assert [run.get("target_block_id") for run in runs if run.get("type") == "note_ref"][:2] == [
+        "fn1",
+        "fn2",
+    ]
 
 
 def test_qwen_symbol_marker_before_omitted_comma_with_normalized_spacing() -> None:
