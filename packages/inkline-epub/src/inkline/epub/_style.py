@@ -31,8 +31,15 @@ td, th {
 .td-align-center { text-align: center; }
 .td-align-right { text-align: right; }
 .td-align-left { text-align: left; }
-.table-notes { margin-top: 0.5em; font-size: 0.85em; }
-.table-note { text-indent: 0; margin: 0.2em 0; }
+.table-notes {
+  margin-top: 0.5em;
+  margin-bottom: 1.2em;
+  font-size: 0.85em;
+}
+.table-note {
+  text-indent: 0;
+  margin: 0.2em 0;
+}
 figure {
   margin: 1em 0;
   text-align: center;
@@ -79,6 +86,35 @@ figcaption p {
 }
 .figure-block img {
   max-height: 85vh;
+  width: auto;
+}
+.figure-block.has-caption img {
+  max-height: 70vh;
+  max-height: calc(100vh - 8em);
+}
+.figure-block.has-caption.caption-long img {
+  max-height: 52vh;
+  max-height: min(52vh, calc(100vh - 14em));
+}
+.figure-block.has-caption figcaption {
+  break-before: avoid;
+  page-break-before: avoid;
+}
+.figure-block.caption-side {
+  text-align: left;
+}
+.figure-block.caption-side img {
+  display: inline-block;
+  max-width: 58%;
+  max-height: 78vh;
+  vertical-align: top;
+}
+.figure-block.caption-side figcaption {
+  display: inline-block;
+  width: 36%;
+  margin-top: 0;
+  margin-left: 1em;
+  vertical-align: top;
 }
 .caption {
   font-family: "Kaiti SC", STKaiti, KaiTi, FangSong, STFangsong, serif;
@@ -96,7 +132,7 @@ figcaption p {
   font-family: "Kaiti SC", STKaiti, KaiTi, FangSong, STFangsong, serif;
   font-size: inherit;
   text-indent: 2em;
-  margin: 0 0 0.8em;
+  margin: 0 0 0.5em;
   text-align: justify;
 }
 .display-block-standalone {

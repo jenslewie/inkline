@@ -1436,7 +1436,6 @@ def test_toc_heading_role_suppressed_in_chapter_body(tmp_path):
             for name in zf.namelist()
             if name.endswith(".xhtml") and "chapter" in name
         )
-        nav_html = zf.read("EPUB/nav.xhtml").decode("utf-8")
 
     # TOC role blocks should not appear in chapter body
     assert "目录" not in chapter_html
@@ -1497,6 +1496,59 @@ def test_snapshot_asset_missing_shows_placeholder(tmp_path):
     assert "Text on visual page without image" not in html
     # Text after the visual page should appear
     assert "After visual page text" in html
+
+
+def test_snapshot_asset_path_resolves_from_base_dir_when_stale(tmp_path):
+    """Copied output directories can contain canonical asset paths that point
+    at the original output directory.  The exporter should fall back to the
+    canonical file's base_dir for page snapshot assets."""
+    snapshot = tmp_path / "images" / "pages" / "page_0001.png"
+    snapshot.parent.mkdir(parents=True)
+    snapshot.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc```\x00\x00"
+        b"\x00\x04\x00\x01\xf6\x178U\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    stale_path = tmp_path / "old-output" / "images" / "pages" / "page_0001.png"
+    document = sample_document()
+    document["pages"] = [
+        {
+            "physical_page": 1,
+            "snapshot": {"required": True, "asset_id": "page-0001-snapshot"},
+        }
+    ]
+    document["assets"]["images"] = [
+        {
+            "image_id": "page-0001-snapshot",
+            "path": str(stale_path),
+            "media_type": "image/png",
+            "role": "page_snapshot",
+            "source": {"page": 1},
+        }
+    ]
+    document["blocks"] = [
+        {
+            "block_id": "b_p1",
+            "type": "paragraph",
+            "text": "Text replaced by snapshot",
+            "source": {"page": 1},
+            "attrs": {},
+        }
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        names = set(zf.namelist())
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+
+    assert "image-placeholder" not in html
+    assert "Text replaced by snapshot" not in html
+    assert '<img src="images/page-0001-snapshot_page_0001.png" alt="Page 1"/>' in html
+    assert "EPUB/images/page-0001-snapshot_page_0001.png" in names
 
 
 def test_all_blocks_suppressed_produces_fallback_chapter(tmp_path):
@@ -1633,7 +1685,7 @@ def test_figure_caption_newlines_render_as_structured_paragraphs(tmp_path):
 def test_captioned_figure_has_new_css_classes(tmp_path):
     """Captioned figures should include figure-block and has-caption CSS
     classes, and remain inside <figure>. The CSS stylesheet should contain
-    .figure-block break-inside rules and constrained image max-height."""
+    .figure-block break-inside rules and caption-aware image max-height."""
     img_dir = tmp_path / "images"
     img_dir.mkdir()
     img_file = img_dir / "fig.jpg"
@@ -1670,6 +1722,167 @@ def test_captioned_figure_has_new_css_classes(tmp_path):
     # CSS: figure-block img should have constrained max-height
     assert ".figure-block img" in css
     assert "max-height: 85vh" in css
+    assert "width: auto" in css
+    # CSS: captioned figures reserve room for figcaption on the same page
+    assert ".figure-block.has-caption img" in css
+    assert "max-height: 70vh" in css
+    assert "max-height: calc(100vh - 8em)" in css
+
+
+def test_long_captioned_figure_gets_more_constrained_image_css(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "fig.jpg"
+    img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5},
+            "attrs": {
+                "image_path": "images/fig.jpg",
+                "captions": [
+                    "在意想不到的地方找到文书\n"
+                    "这尊纸俑出土于吐鲁番墓中，年代为七世纪。仔细看可看到其手腕处有纸伸出来。"
+                    "俑人胳膊是用废纸卷做成的。考古学家把这类纸俑用蒸汽熏软，从中拆出了很多种文书。"
+                    "其中包括当铺小票，小票上还提到了长安地名，这是确定纸俑产地的关键证据。"
+                ],
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    assert 'class="figure-block has-caption caption-long"' in html
+    assert 'style="height: 20em; max-height: 20em; width: auto; max-width: 100%;"' in html
+    assert ".figure-block.has-caption.caption-long img" in css
+    assert "max-height: 52vh" in css
+    assert "max-height: min(52vh, calc(100vh - 14em))" in css
+    assert "break-before: avoid" in css
+    assert "page-break-before: avoid" in css
+
+
+def test_tall_captioned_figure_gets_more_constrained_image_css(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "fig.jpg"
+    img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5, "bbox": [170, 108, 881, 919]},
+            "attrs": {
+                "image_path": "images/fig.jpg",
+                "image_bbox": [173, 108, 880, 826],
+                "caption_bbox": [170, 838, 881, 919],
+                "captions": [
+                    "纪念鸠摩罗什\n"
+                    "巨大的鸠摩罗什铜像在克孜尔石窟前欢迎四方来客，"
+                    "由此可见这位译师直到今天依然赫赫有名。因为鸠摩罗什没有肖像流传下来，"
+                    "雕刻家只能全凭想象创作。"
+                ],
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+
+    assert 'class="figure-block has-caption caption-long"' in html
+    assert 'style="height: 20em; max-height: 20em; width: auto; max-width: 100%;"' in html
+
+
+def test_side_caption_layout_for_figure_with_side_caption_bbox(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "fig.jpg"
+    img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5, "bbox": [140, 145, 881, 475]},
+            "attrs": {
+                "image_path": "images/fig.jpg",
+                "image_bbox": [140, 145, 489, 453],
+                "caption_bbox": [541, 356, 881, 475],
+                "captions": [
+                    "吐鲁番出土的干饺子\n"
+                    "吐鲁番干燥的环境保存了如食物等易腐败的物品。"
+                ],
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    assert 'class="figure-block has-caption caption-side"' in html
+    assert 'style="height: 20em; max-height: 20em; width: auto; max-width: 58%;"' in html
+    assert ".figure-block.caption-side img" in css
+    assert "max-width: 58%" in css
+    assert ".figure-block.caption-side figcaption" in css
+    assert "display: inline-block" in css
+    assert "width: 36%" in css
+
+
+def test_side_caption_layout_for_tall_captioned_figure(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "fig.jpg"
+    img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5, "bbox": [100, 100, 420, 620]},
+            "attrs": {
+                "image_path": "images/fig.jpg",
+                "captions": [
+                    "高图说明\n"
+                    "这是一段较长的图片说明，用来验证纵向图片会将说明排到图片旁边，"
+                    "从而减少图片和说明被分页拆开的概率。"
+                ],
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+
+    assert 'class="figure-block has-caption caption-side"' in html
 
 
 def test_footnote_marker_stripped_with_note_marker_attr(tmp_path):

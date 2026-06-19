@@ -401,7 +401,6 @@ def _figure_html(
     captions: list[dict[str, Any]] | None = None,
 ) -> str:
     text = (block.get("text") or "").strip()
-    source = block.get("source") or {}
     attrs = block.get("attrs") or {}
     image_assets = image_assets or {}
     inline_images = inline_images or {}
@@ -433,8 +432,16 @@ def _figure_html(
 
     has_caption = len(segments) > 0
     figure_classes = ["figure-block"]
+    image_attrs = ""
     if has_caption:
         figure_classes.append("has-caption")
+        caption_side = _should_place_caption_side(block, segments)
+        if caption_side:
+            figure_classes.append("caption-side")
+            image_attrs = ' style="height: 20em; max-height: 20em; width: auto; max-width: 58%;"'
+        if not caption_side and _should_use_compact_captioned_image(block, segments):
+            figure_classes.append("caption-long")
+            image_attrs = ' style="height: 20em; max-height: 20em; width: auto; max-width: 100%;"'
     figure_class_attr = ' class="' + " ".join(figure_classes) + '"'
 
     if has_caption:
@@ -451,7 +458,7 @@ def _figure_html(
         alt = text or ""
         return (
             f"<figure{figure_class_attr}>"
-            f'<img src="images/{escape(image_name, quote=True)}" alt="{escape(alt, quote=True)}"/>'
+            f'<img src="images/{escape(image_name, quote=True)}" alt="{escape(alt, quote=True)}"{image_attrs}/>'
             f"\n  {caption_html}\n"
             "</figure>"
         )
@@ -463,7 +470,7 @@ def _figure_html(
         alt = text or ""
         return (
             f"<figure{figure_class_attr}>"
-            f'<img src="images/{escape(epub_name, quote=True)}" alt="{escape(alt, quote=True)}"/>'
+            f'<img src="images/{escape(epub_name, quote=True)}" alt="{escape(alt, quote=True)}"{image_attrs}/>'
             f"\n  {caption_html}\n"
             "</figure>"
         )
@@ -481,6 +488,78 @@ def _figure_html(
         '<div role="img" aria-label="Image">[Image]</div>'
         "</figure>"
     )
+
+
+def _should_place_caption_side(block: dict[str, Any], caption_segments: list[str]) -> bool:
+    if not caption_segments:
+        return False
+    attrs = block.get("attrs") or {}
+    image_bbox = attrs.get("image_bbox")
+    caption_bbox = attrs.get("caption_bbox")
+    if _bbox_has_side_caption(image_bbox, caption_bbox):
+        return True
+    bbox = image_bbox or (block.get("source") or {}).get("bbox")
+    if not isinstance(bbox, list) or len(bbox) < 4:
+        return False
+    width = max(1.0, float(bbox[2]) - float(bbox[0]))
+    height = max(1.0, float(bbox[3]) - float(bbox[1]))
+    caption_chars = sum(len(segment) for segment in caption_segments)
+    return height >= width * 1.15 and caption_chars >= 40
+
+
+def _should_use_compact_captioned_image(
+    block: dict[str, Any], caption_segments: list[str]
+) -> bool:
+    caption_chars = sum(len(segment) for segment in caption_segments)
+    if caption_chars >= 120:
+        return True
+    if caption_chars < 70:
+        return False
+    attrs = block.get("attrs") or {}
+    source_bbox = (block.get("source") or {}).get("bbox")
+    image_bbox = attrs.get("image_bbox")
+    caption_bbox = attrs.get("caption_bbox")
+    source_height = _bbox_height(source_bbox)
+    image_height = _bbox_height(image_bbox)
+    caption_height = _bbox_height(caption_bbox)
+    image_width = _bbox_width(image_bbox)
+    return (
+        source_height >= 780.0
+        or image_height >= 680.0
+        or (image_height >= image_width * 0.98 and caption_height >= 70.0)
+    )
+
+
+def _bbox_height(bbox: Any) -> float:
+    if not isinstance(bbox, list) or len(bbox) < 4:
+        return 0.0
+    return max(0.0, float(bbox[3]) - float(bbox[1]))
+
+
+def _bbox_width(bbox: Any) -> float:
+    if not isinstance(bbox, list) or len(bbox) < 4:
+        return 0.0
+    return max(0.0, float(bbox[2]) - float(bbox[0]))
+
+
+def _bbox_has_side_caption(image_bbox: Any, caption_bbox: Any) -> bool:
+    if not (
+        isinstance(image_bbox, list)
+        and isinstance(caption_bbox, list)
+        and len(image_bbox) >= 4
+        and len(caption_bbox) >= 4
+    ):
+        return False
+    image_left, image_top, image_right, image_bottom = [float(v) for v in image_bbox[:4]]
+    caption_left, caption_top, caption_right, caption_bottom = [float(v) for v in caption_bbox[:4]]
+    image_width = max(1.0, image_right - image_left)
+    caption_width = max(1.0, caption_right - caption_left)
+    vertical_overlap = min(image_bottom, caption_bottom) - max(image_top, caption_top)
+    if vertical_overlap <= 0:
+        return False
+    right_side = caption_left >= image_right - image_width * 0.08
+    left_side = caption_right <= image_left + image_width * 0.08
+    return (right_side or left_side) and caption_width >= image_width * 0.35
 
 
 def _collect_trailing_captions(blocks: list[dict[str, Any]], start: int) -> list[dict[str, Any]]:
@@ -690,7 +769,7 @@ def _caption_html(block: dict[str, Any], blocks: list[dict[str, Any]], index: in
         # Legacy path for figure-trailing captions not consumed by
         # _collect_trailing_captions — structure multi-line text.
         return _figcaption_structured(text)
-    lines = [l for l in text.split("\n") if l.strip()]
+    lines = [line for line in text.split("\n") if line.strip()]
     if len(lines) <= 1:
         return f'<p class="caption">{escape(text)}</p>'
     parts: list[str] = []
@@ -703,7 +782,7 @@ def _caption_html(block: dict[str, Any], blocks: list[dict[str, Any]], index: in
 def _figcaption_structured(text: str) -> str:
     """Render raw text as structured <figcaption> with caption-title/caption-body.
     Handles escaping internally — callers should pass unescaped text."""
-    lines = [l for l in text.split("\n") if l.strip()]
+    lines = [line for line in text.split("\n") if line.strip()]
     if len(lines) <= 1:
         return f"<figcaption>{escape(text)}</figcaption>"
     parts: list[str] = []

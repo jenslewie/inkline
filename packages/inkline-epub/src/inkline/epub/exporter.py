@@ -28,7 +28,7 @@ def export_epub(
 
     metadata = document["metadata"]
     identifier = f"{metadata['doc_id']}-{metadata['parser_name']}-{uuid.uuid4()}"
-    image_assets = image_assets_by_id(document)
+    image_assets = image_assets_by_id(document, base_dir=base_dir)
     inline_images = collect_inline_images(document, base_dir=base_dir, image_assets=image_assets)
     toc = document.get("toc", [])
     toc_heading_ids = toc_heading_block_ids(document)

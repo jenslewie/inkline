@@ -5,15 +5,44 @@ from pathlib import Path
 from typing import Any
 
 
-def image_assets_by_id(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def image_assets_by_id(
+    document: dict[str, Any], *, base_dir: str | Path | None = None
+) -> dict[str, dict[str, Any]]:
     images = document.get("assets", {}).get("images", [])
     if not isinstance(images, list):
         return {}
-    return {
-        image["image_id"]: image
-        for image in images
-        if isinstance(image, dict) and image.get("image_id") and image.get("path")
-    }
+    out: dict[str, dict[str, Any]] = {}
+    for image in images:
+        if not isinstance(image, dict) or not image.get("image_id") or not image.get("path"):
+            continue
+        asset = dict(image)
+        resolved = resolve_asset_path(str(asset["path"]), base_dir=base_dir)
+        if resolved is not None:
+            asset["path"] = str(resolved)
+        out[str(asset["image_id"])] = asset
+    return out
+
+
+def resolve_asset_path(image_path: str, *, base_dir: str | Path | None = None) -> Path | None:
+    candidate = Path(image_path)
+    if candidate.exists():
+        return candidate
+    if base_dir is None:
+        return None
+
+    base = Path(base_dir)
+    if not candidate.is_absolute():
+        joined = base / candidate
+        if joined.exists():
+            return joined
+
+    parts = candidate.parts
+    if "images" in parts:
+        image_tail = Path(*parts[parts.index("images") :])
+        joined = base / image_tail
+        if joined.exists():
+            return joined
+    return None
 
 
 def collect_inline_images(
