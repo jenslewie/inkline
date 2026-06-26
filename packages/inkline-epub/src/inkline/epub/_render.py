@@ -436,7 +436,6 @@ def _figure_html(
     image_asset = image_assets.get(image_id) if image_id else None
     inline_img = inline_images.get(block_id)
     image_dimensions = _image_pixel_dimensions(image_asset or inline_img)
-    image_attrs = _figure_image_attrs(block, page_width)
 
     # Collect caption segments from all sources (figure text, attrs.captions,
     # trailing caption blocks).  Each source part is itself split on newline
@@ -461,6 +460,8 @@ def _figure_html(
                 segments.append(stripped)
 
     has_caption = len(segments) > 0
+    side_layout = _caption_side_layout(block) if has_caption else None
+    image_attrs = "" if side_layout else _figure_image_attrs(block, page_width)
     figure_classes = ["figure-block"]
     if _should_use_full_width_image(
         has_caption=has_caption, image_dimensions=image_dimensions
@@ -468,6 +469,10 @@ def _figure_html(
         figure_classes.append("figure-fullwidth")
     if has_caption:
         figure_classes.append("has-caption")
+        if side_layout:
+            figure_classes.append("caption-side")
+            if side_layout.side == "left":
+                figure_classes.append("caption-left")
     figure_class_attr = ' class="' + " ".join(figure_classes) + '"'
 
     if has_caption:
@@ -486,6 +491,12 @@ def _figure_html(
             f'<img src="images/{escape(image_name, quote=True)}" '
             f'alt="{escape(alt, quote=True)}"{image_attrs}/>'
         )
+        if side_layout:
+            return _figure_with_page_break(
+                _side_caption_figure_html(
+                    figure_class_attr, image_html, caption_html, side_layout
+                )
+            )
         return _figure_with_page_break(
             f"<figure{figure_class_attr}>"
             f"{image_html}"
@@ -500,6 +511,12 @@ def _figure_html(
             f'<img src="images/{escape(epub_name, quote=True)}" '
             f'alt="{escape(alt, quote=True)}"{image_attrs}/>'
         )
+        if side_layout:
+            return _figure_with_page_break(
+                _side_caption_figure_html(
+                    figure_class_attr, image_html, caption_html, side_layout
+                )
+            )
         return _figure_with_page_break(
             f"<figure{figure_class_attr}>"
             f"{image_html}"
@@ -526,6 +543,76 @@ def _figure_with_page_break(figure_html: str) -> str:
     return '<div class="figure-page-break" aria-hidden="true"></div>\n' + figure_html
 
 
+class _SideCaptionLayout:
+    def __init__(self, *, side: str, image_percent: float, caption_percent: float) -> None:
+        self.side = side
+        self.image_percent = image_percent
+        self.caption_percent = caption_percent
+
+
+def _side_caption_figure_html(
+    figure_class_attr: str,
+    image_html: str,
+    caption_html: str,
+    layout: _SideCaptionLayout,
+) -> str:
+    image_part = (
+        '<div class="figure-side-image" '
+        f'style="flex-basis: {_format_percent(layout.image_percent)}%;">'
+        f"{image_html}</div>"
+    )
+    caption_part = caption_html.replace(
+        "<figcaption>",
+        f'<figcaption style="flex-basis: {_format_percent(layout.caption_percent)}%;">',
+        1,
+    )
+    if layout.side == "left":
+        content = f"{caption_part}\n  {image_part}"
+    else:
+        content = f"{image_part}\n  {caption_part}"
+    return f"<figure{figure_class_attr}>{content}\n</figure>"
+
+
+def _caption_side_layout(block: dict[str, Any]) -> _SideCaptionLayout | None:
+    attrs = block.get("attrs") or {}
+    image_bbox = attrs.get("image_bbox")
+    caption_bbox = attrs.get("caption_bbox")
+    source_bbox = (block.get("source") or {}).get("bbox")
+    if not (
+        _is_bbox(image_bbox)
+        and _is_bbox(caption_bbox)
+        and _is_bbox(source_bbox)
+    ):
+        return None
+    image_left, image_top, image_right, image_bottom = [float(v) for v in image_bbox[:4]]
+    caption_left, caption_top, caption_right, caption_bottom = [
+        float(v) for v in caption_bbox[:4]
+    ]
+    image_width = max(1.0, image_right - image_left)
+    image_height = max(1.0, image_bottom - image_top)
+    caption_width = max(1.0, caption_right - caption_left)
+    caption_height = max(1.0, caption_bottom - caption_top)
+    vertical_overlap = min(image_bottom, caption_bottom) - max(image_top, caption_top)
+    min_height = min(image_height, caption_height)
+    if vertical_overlap < min_height * 0.25:
+        return None
+    side = ""
+    if caption_left >= image_right - image_width * 0.05:
+        side = "right"
+    elif caption_right <= image_left + image_width * 0.05:
+        side = "left"
+    if not side:
+        return None
+    source_width = _bbox_width(source_bbox)
+    if source_width <= 0:
+        return None
+    return _SideCaptionLayout(
+        side=side,
+        image_percent=min(100.0, max(1.0, image_width / source_width * 100.0)),
+        caption_percent=min(100.0, max(1.0, caption_width / source_width * 100.0)),
+    )
+
+
 def _figure_image_attrs(block: dict[str, Any], page_width: float | None) -> str:
     if not page_width or page_width <= 0:
         return ""
@@ -547,6 +634,10 @@ def _bbox_width(bbox: Any) -> float:
     except (TypeError, ValueError):
         return 0.0
     return max(0.0, right - left)
+
+
+def _is_bbox(value: Any) -> bool:
+    return isinstance(value, list) and len(value) >= 4
 
 
 def _format_percent(value: float) -> str:

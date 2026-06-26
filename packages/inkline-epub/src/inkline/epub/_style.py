@@ -128,6 +128,49 @@ figcaption p {
   break-before: avoid;
   page-break-before: avoid;
 }
+.figure-block.caption-side {
+  display: -webkit-box;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 100%;
+  text-align: left;
+  gap: 1em;
+}
+.figure-block.caption-side .figure-side-image {
+  min-width: 0;
+  text-align: center;
+  flex-grow: 0;
+  flex-shrink: 1;
+}
+.figure-block.caption-side .figure-side-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  max-height: 32em;
+  max-height: calc(100vh - 8em);
+  margin: 0 auto;
+}
+.figure-block.caption-side figcaption {
+  min-width: 0;
+  margin-top: 0;
+  flex-grow: 0;
+  flex-shrink: 1;
+}
+@media all and (max-width: 42em) {
+  .figure-block.caption-side {
+    display: block;
+  }
+  .figure-block.caption-side .figure-side-image {
+    display: block;
+    width: 100%;
+  }
+  .figure-block.caption-side figcaption {
+    display: block;
+    width: auto;
+    margin-top: 0.6em;
+  }
+}
 .caption {
   font-family: "Kaiti SC", STKaiti, KaiTi, FangSong, STFangsong, serif;
   font-size: 0.85em;

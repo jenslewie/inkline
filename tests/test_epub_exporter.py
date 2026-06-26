@@ -1789,7 +1789,8 @@ def test_captioned_figure_has_new_css_classes(tmp_path):
     assert ".figure-block.has-caption img" in css
     assert "max-height: calc(100vh - 8em)" in css
     assert "max-width: 100%" in css
-    assert "caption-side" not in css
+    assert ".figure-block.caption-side" in css
+    assert "@media all and (max-width: 42em)" in css
     assert "portrait-tall" not in css
     assert "caption-long" not in css
 
@@ -1881,7 +1882,7 @@ def test_tall_captioned_figure_gets_more_constrained_image_css(tmp_path):
     assert "figure-side-image" not in figure_html
 
 
-def test_captioned_figure_keeps_caption_below_for_tall_image_ratio(tmp_path):
+def test_caption_bbox_on_side_uses_side_caption_layout(tmp_path):
     img_dir = tmp_path / "images"
     img_dir.mkdir()
     img_file = img_dir / "fig.png"
@@ -1911,19 +1912,20 @@ def test_captioned_figure_keeps_caption_below_for_tall_image_ratio(tmp_path):
         )
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
 
-    assert 'class="figure-block has-caption"' in html
-    assert 'style="max-width: 39.614%;"' in html
+    assert 'class="figure-block has-caption caption-side"' in html
     assert "height: 20em" not in html
-    assert "caption-side" not in html
     assert "<img " in html
-    assert "figure-side-image" not in html
-    assert "caption-side" not in css
+    assert '<div class="figure-side-image" style="flex-basis: 47.099%;">' in html
+    assert '<figcaption style="flex-basis: 45.884%;">' in html
+    figure_start = html.index('class="figure-block has-caption caption-side"')
+    figure_end = html.index("</figure>", figure_start)
+    figure_html = html[figure_start:figure_end]
+    assert figure_html.index("figure-side-image") < figure_html.index("<figcaption")
+    assert ".figure-block.caption-side .figure-side-image" in css
+    assert ".figure-block.caption-side figcaption" in css
     image_rule = css.split(".figure-block.has-caption img {", 1)[1].split("}", 1)[0]
     assert "max-width: 100%" in image_rule
     assert "max-height: calc(100vh - 8em)" in image_rule
-    caption_rule = css.split(".figure-block.has-caption figcaption {", 1)[1].split("}", 1)[0]
-    assert "page-break-before: avoid" in caption_rule
-    assert "break-before: page" not in caption_rule
 
 
 def test_tall_captioned_figure_keeps_caption_below(tmp_path):
