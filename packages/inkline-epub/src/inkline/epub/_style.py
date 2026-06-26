@@ -117,16 +117,58 @@ figcaption p {
   max-height: 32em;
   max-height: calc(100vh - 4em);
 }
-.figure-block.has-caption img {
-  width: auto;
+.figure-block.has-caption {
+  margin: 1.2em 0;
+  padding: 0;
+  text-align: center;
+  display: block;
+  width: 100%;
   max-width: 100%;
-  height: auto;
-  max-height: 32em;
-  max-height: calc(100vh - 8em);
+  float: none !important;
+  clear: both;
+  page-break-inside: avoid;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+}
+.figure-block.has-caption img {
+  display: block;
+  margin: 0 auto 0.6em;
+  width: auto !important;
+  height: auto !important;
+  max-width: 60% !important;
+  max-height: 16em !important;
+  object-fit: contain;
+  page-break-after: avoid;
+  break-after: avoid;
+  -webkit-column-break-after: avoid;
 }
 .figure-block.has-caption figcaption {
+  margin: 0 auto;
+  width: 100%;
+  max-width: 34em;
+  font-size: 0.86em;
+  line-height: 1.35;
+  text-align: left;
   break-before: avoid;
   page-break-before: avoid;
+  -webkit-column-break-before: avoid;
+  break-inside: avoid;
+  page-break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+}
+.figure-block.has-caption figcaption p {
+  margin: 0;
+}
+.figure-block.has-caption figcaption p + p {
+  margin-top: 0.35em;
+}
+.figure-block.has-caption .caption-title {
+  font-weight: bold;
+  text-align: left;
+}
+.figure-block.figure-portrait.has-caption img {
+  max-width: 50% !important;
+  max-height: 18em !important;
 }
 .figure-block.caption-side {
   display: -webkit-box;

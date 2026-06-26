@@ -461,7 +461,7 @@ def _figure_html(
 
     has_caption = len(segments) > 0
     side_layout = _caption_side_layout(block) if has_caption else None
-    image_attrs = "" if side_layout else _figure_image_attrs(block, page_width)
+    image_attrs = "" if has_caption else _figure_image_attrs(block, page_width)
     figure_classes = ["figure-block"]
     if _should_use_full_width_image(
         has_caption=has_caption, image_dimensions=image_dimensions
@@ -469,6 +469,8 @@ def _figure_html(
         figure_classes.append("figure-fullwidth")
     if has_caption:
         figure_classes.append("has-caption")
+        if not side_layout and _is_portrait_image(image_dimensions):
+            figure_classes.append("figure-portrait")
         if side_layout:
             figure_classes.append("caption-side")
             if side_layout.side == "left":
@@ -614,10 +616,10 @@ def _caption_side_layout(block: dict[str, Any]) -> _SideCaptionLayout | None:
 
 
 def _figure_image_attrs(block: dict[str, Any], page_width: float | None) -> str:
-    if not page_width or page_width <= 0:
-        return ""
     attrs = block.get("attrs") or {}
     bbox = attrs.get("image_bbox") or (block.get("source") or {}).get("bbox")
+    if not page_width or page_width <= 0:
+        return ""
     width = _bbox_width(bbox)
     if width <= 0:
         return ""
@@ -668,6 +670,13 @@ def _should_use_full_width_image(
         return False
     width, height = image_dimensions
     return width > 0 and height > 0 and width / height >= 0.6
+
+
+def _is_portrait_image(image_dimensions: tuple[int, int] | None) -> bool:
+    if not image_dimensions:
+        return False
+    width, height = image_dimensions
+    return width > 0 and height > 0 and height / width >= 1.25
 
 
 def _png_dimensions(data: bytes) -> tuple[int, int] | None:

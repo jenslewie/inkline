@@ -1786,9 +1786,13 @@ def test_captioned_figure_has_new_css_classes(tmp_path):
     assert "display: block" in css
     assert "page-break-after: always" in css
     # CSS: captioned figures reserve room for figcaption on the same page
+    assert ".figure-block.has-caption" in css
     assert ".figure-block.has-caption img" in css
-    assert "max-height: calc(100vh - 8em)" in css
-    assert "max-width: 100%" in css
+    assert "display: block" in css
+    assert "float: none !important" in css
+    assert "max-height: 16em !important" in css
+    assert "max-width: 60% !important" in css
+    assert ".figure-block.figure-portrait.has-caption img" in css
     assert ".figure-block.caption-side" in css
     assert "@media all and (max-width: 42em)" in css
     assert "portrait-tall" not in css
@@ -1834,7 +1838,7 @@ def test_long_captioned_figure_gets_more_constrained_image_css(tmp_path):
     assert "caption-long" not in html
     assert "caption-long" not in css
     assert ".figure-block.has-caption img" in css
-    assert "max-height: calc(100vh - 8em)" in css
+    assert "max-height: 16em !important" in css
     assert "break-before: avoid" in css
     assert "page-break-before: avoid" in css
 
@@ -1873,8 +1877,8 @@ def test_tall_captioned_figure_gets_more_constrained_image_css(tmp_path):
             zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
         )
 
-    assert 'class="figure-block has-caption"' in html
-    figure_start = html.index('class="figure-block has-caption"')
+    assert 'class="figure-block has-caption figure-portrait"' in html
+    figure_start = html.index('class="figure-block has-caption figure-portrait"')
     figure_end = html.index("</figure>", figure_start)
     figure_html = html[figure_start:figure_end]
     assert figure_html.index("<img ") < figure_html.index("<figcaption>")
@@ -1924,8 +1928,8 @@ def test_caption_bbox_on_side_uses_side_caption_layout(tmp_path):
     assert ".figure-block.caption-side .figure-side-image" in css
     assert ".figure-block.caption-side figcaption" in css
     image_rule = css.split(".figure-block.has-caption img {", 1)[1].split("}", 1)[0]
-    assert "max-width: 100%" in image_rule
-    assert "max-height: calc(100vh - 8em)" in image_rule
+    assert "max-width: 60% !important" in image_rule
+    assert "max-height: 16em !important" in image_rule
 
 
 def test_tall_captioned_figure_keeps_caption_below(tmp_path):
@@ -1959,9 +1963,9 @@ def test_tall_captioned_figure_keeps_caption_below(tmp_path):
             zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
         )
 
-    assert 'class="figure-block has-caption"' in html
+    assert 'class="figure-block has-caption figure-portrait"' in html
     assert "caption-side" not in html
-    figure_start = html.index('class="figure-block has-caption"')
+    figure_start = html.index('class="figure-block has-caption figure-portrait"')
     figure_end = html.index("</figure>", figure_start)
     figure_html = html[figure_start:figure_end]
     assert figure_html.index("<img ") < figure_html.index("<figcaption>")
@@ -1998,11 +2002,10 @@ def test_tall_image_pixel_ratio_keeps_caption_below(tmp_path):
             zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
         )
 
-    assert 'class="figure-block has-caption"' in html
+    assert 'class="figure-block has-caption figure-portrait"' in html
     assert "caption-side" not in html
     assert '<div class="figure-side-image"><img ' not in html
-    assert 'style="max-width: 88.636%;"' in html
-    assert "height: 20em" not in html
+    assert 'style="' not in html
 
 
 def test_very_tall_captioned_image_uses_same_caption_below_layout(tmp_path):
@@ -2037,14 +2040,13 @@ def test_very_tall_captioned_image_uses_same_caption_below_layout(tmp_path):
         )
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
 
-    assert 'class="figure-block has-caption"' in html
+    assert 'class="figure-block has-caption figure-portrait"' in html
     assert '<div class="figure-page-break" aria-hidden="true"></div>' in html
     assert "portrait-tall" not in html
     assert "page-start" not in html
     assert "caption-side" not in html
     assert '<div class="figure-side-image"><img ' not in html
-    assert 'style="max-width: 88.636%;"' in html
-    assert "height: 20em" not in html
+    assert 'style="' not in html
     assert "break-after: page" in css
     assert "page-break-after: always" in css
     assert "portrait-tall" not in css
@@ -2122,8 +2124,7 @@ def test_landscape_long_captioned_image_does_not_force_fixed_height(tmp_path):
 
     assert 'class="figure-block has-caption"' in html
     assert "caption-long" not in html
-    assert 'style="max-width: 86.644%;"' in html
-    assert "height: 20em" not in html
+    assert 'style="' not in html
 
 
 def test_figure_image_width_uses_canonical_bbox_not_pixel_dimensions(tmp_path):
@@ -2174,8 +2175,7 @@ def test_figure_image_width_uses_canonical_bbox_not_pixel_dimensions(tmp_path):
             zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
         )
 
-    assert html.count('style="max-width: 40%;"') == 2
-    assert "height: 20em" not in html
+    assert 'style="' not in html
 
 
 def test_uncaptioned_map_like_images_render_full_width(tmp_path):
