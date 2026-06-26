@@ -57,6 +57,41 @@ def normalize_ws(text: str) -> str:
     return text.strip()
 
 
+def _normalize_extracted_text(text: str) -> str:
+    return normalize_ws(_collapse_mineru_prose_wraps(text))
+
+
+def _collapse_mineru_prose_wraps(text: str) -> str:
+    if "\n" not in text:
+        return text
+    lines = text.split("\n")
+    out: List[str] = []
+    for line in lines:
+        current = line.strip()
+        if not out:
+            out.append(current)
+            continue
+        if _is_mineru_prose_wrap(out[-1], current):
+            out[-1] = f"{out[-1]}{current}"
+        else:
+            out.append(current)
+    return "\n".join(out)
+
+
+def _is_mineru_prose_wrap(prev_line: str, next_line: str) -> bool:
+    prev = prev_line.strip()
+    nxt = next_line.strip()
+    if not prev or not nxt:
+        return False
+    if len(re.sub(r"\s+", "", prev)) < 20 or len(re.sub(r"\s+", "", nxt)) < 20:
+        return False
+    if prev[-1] in "。？！；：:”’）】》":
+        return False
+    if re.match(r"^[0-9A-Za-z（(【《一二三四五六七八九十]+[、.．)]", nxt):
+        return False
+    return bool(CHINESE_RE.search(prev[-1]) and CHINESE_RE.search(nxt[0]))
+
+
 def chinese_len(text: str) -> int:
     return len(CHINESE_RE.findall(text or ""))
 
@@ -132,7 +167,10 @@ def extract_text_notes_and_runs(obj: Any) -> Tuple[str, List[NoteRef], List[Dict
                 rec(y)
 
     rec(obj)
-    return normalize_ws("".join(parts)), notes, runs
+    for run in runs:
+        if run.get("type") == "text":
+            run["text"] = _normalize_extracted_text(str(run.get("text", "")))
+    return _normalize_extracted_text("".join(parts)), notes, runs
 
 
 def extract_list_item_text(item: Dict[str, Any]) -> Tuple[str, List[NoteRef]]:

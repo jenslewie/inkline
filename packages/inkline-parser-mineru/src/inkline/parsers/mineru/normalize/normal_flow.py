@@ -23,7 +23,7 @@ from ..schema.block_types import (
     TABLE_CONTINUATION,
 )
 from ..schema.models import IdFactory, LayoutStats, RawBlock, canonical_block
-from ..schema.patterns import CHAPTER_RE, CN_LIST_ITEM_RE
+from ..schema.patterns import CHAPTER_RE
 from .builders import (
     make_chart_table,
     make_display_block,
@@ -33,11 +33,11 @@ from .builders import (
     make_paragraph,
     make_table,
 )
+from .display_geometry import display_attrs_for_group
 from .page_detectors import coord_page_size as _coord_page_size
 from .raw_display_blocks import (
     _RawTextStyleProvider,
     collect_display_block,
-    ends_with_terminal_punctuation,
     should_start_display_block,
 )
 from .raw_display_blocks import (
@@ -169,7 +169,7 @@ def process_normal_flow(
 
             if _is_flush_right_terminal_line_before_section_boundary(content_blocks, i, layout):
                 out.append(make_flush_right_terminal_block(ids, [b]))
-                prev_major_type = "flush_right_terminal_block"
+                prev_major_type = DISPLAY_BLOCK
                 i += 1
                 continue
 
@@ -181,7 +181,7 @@ def process_normal_flow(
             ):
                 out.append(make_paragraph(ids, b))
                 out.append(make_flush_right_terminal_block(ids, terminal_after_body_line))
-                prev_major_type = "flush_right_terminal_block"
+                prev_major_type = DISPLAY_BLOCK
                 i += 1 + len(terminal_after_body_line)
                 continue
 
@@ -202,22 +202,8 @@ def process_normal_flow(
                 and all(_is_flush_right_terminal_line(x, layout) for x in remaining)
             ):
                 out.append(make_flush_right_terminal_block(ids, remaining))
-                prev_major_type = "flush_right_terminal_block"
+                prev_major_type = DISPLAY_BLOCK
                 i = len(content_blocks)
-                continue
-
-            if CN_LIST_ITEM_RE.match(block_text(b)):
-                out.append(
-                    make_paragraph(
-                        ids,
-                        b,
-                        block_type=LIST_ITEM,
-                        extra_attrs={"list_marker_style": "cjk_decimal"},
-                    )
-                )
-                last_text_context = block_text(b)
-                prev_major_type = LIST_ITEM
-                i += 1
                 continue
 
             prev_text = last_text_context or (
@@ -233,7 +219,11 @@ def process_normal_flow(
                     display_boundary_attrs[id(content_blocks[j])] = boundary_reason
                 out.append(
                     make_display_block(
-                        ids, group, layout_role="inline_display_block", prev_text=prev_text
+                        ids,
+                        group,
+                        layout_role="inline_display_block",
+                        prev_text=prev_text,
+                        extra_attrs=display_attrs_for_group(group, content_blocks, layout),
                     )
                 )
                 prev_major_type = DISPLAY_BLOCK
@@ -265,7 +255,7 @@ def _is_centered_table_heading_continuation(
     if block.raw_type != "paragraph" or not block.bbox:
         return False
     text = normalize_ws(block_text(block))
-    if not text or len(text) > 40 or ends_with_terminal_punctuation(text):
+    if not text or len(text) > 40:
         return False
 
     prev = _previous_meaningful_block(blocks, i)
@@ -336,7 +326,7 @@ def _is_left_body_line_before_terminal_block(
     if block.raw_type != "paragraph" or not block.bbox:
         return False
     text = normalize_ws(block_text(block))
-    if not text or len(text) > 90 or ends_with_terminal_punctuation(text):
+    if not text or len(text) > 90:
         return False
     if _is_flush_right_terminal_line(block, layout):
         return False

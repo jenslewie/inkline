@@ -78,13 +78,16 @@ def make_display_block(
     layout_role: str,
     prev_text: str,
     level: Optional[int] = None,
+    extra_attrs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     raw_lines = [block_text(b) for b in blocks if block_text(b)]
     attrs, _ = _build_display_attrs(raw_lines, blocks, layout_role)
+    if extra_attrs:
+        attrs.update(extra_attrs)
     text = "\n".join(raw_lines).strip()
     page = blocks[0].page if blocks else None
     bbox = union_bbox([b.bbox for b in blocks if b.bbox])
-    return canonical_block(
+    block = canonical_block(
         ids.next(),
         DISPLAY_BLOCK,
         text,
@@ -94,6 +97,26 @@ def make_display_block(
         level=level,
         source_pages=_unique_pages(blocks),
     )
+    source_spans = _source_spans_for_blocks(blocks)
+    if len(source_spans) > 1:
+        block["source"]["spans"] = source_spans
+    return block
+
+
+def _source_spans_for_blocks(blocks: Sequence[RawBlock]) -> List[Dict[str, Any]]:
+    spans: List[Dict[str, Any]] = []
+    for block in blocks:
+        if not block_text(block) or not block.bbox:
+            continue
+        spans.append(
+            {
+                "page": block.page,
+                "bbox": block.bbox,
+                "block_id": f"raw:{block.page}:{block.index}",
+                "text": block_text(block),
+            }
+        )
+    return spans
 
 
 def make_display_group(ids: IdFactory, groups: List[List[RawBlock]]) -> Dict[str, Any]:
@@ -176,7 +199,8 @@ def make_flush_right_terminal_block(ids: IdFactory, blocks: Sequence[RawBlock]) 
     lines = [block_text(b) for b in blocks if block_text(b)]
     text = "\n".join(lines)
     attrs = {
-        "layout_role": "flush_right_terminal_block",
+        "layout_role": "inline_display_block",
+        "layout_form": "short_line_group",
         "alignment": "right",
         "line_count": len(lines),
         "raw_types": [b.raw_type for b in blocks],

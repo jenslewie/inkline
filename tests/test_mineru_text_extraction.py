@@ -54,3 +54,34 @@ def test_preserves_complex_non_note_equation_verbatim() -> None:
     assert text == r"x^{2}+y^{2}"
     assert notes == []
     assert runs == [{"type": "text", "text": r"x^{2}+y^{2}"}]
+
+
+def test_collapses_mineru_prose_wraps_inside_single_text_run() -> None:
+    text, notes, runs = extract_text_notes_and_runs(
+        [
+            {
+                "type": "text",
+                "content": (
+                    "在一片低矮的沙丘中，出现了古代果树枯萎的树干。继续往北走\n"
+                    "了不到两英里，我很快就看到了最先出现的两间旧屋"
+                ),
+            }
+        ]
+    )
+
+    assert text == (
+        "在一片低矮的沙丘中，出现了古代果树枯萎的树干。继续往北走"
+        "了不到两英里，我很快就看到了最先出现的两间旧屋"
+    )
+    assert notes == []
+    assert runs == [{"type": "text", "text": text}]
+
+
+def test_preserves_short_structural_newlines_inside_single_text_run() -> None:
+    text, notes, runs = extract_text_notes_and_runs(
+        [{"type": "text", "content": "502—640年\n鞠氏高昌"}]
+    )
+
+    assert text == "502—640年\n鞠氏高昌"
+    assert notes == []
+    assert runs == [{"type": "text", "text": "502—640年\n鞠氏高昌"}]

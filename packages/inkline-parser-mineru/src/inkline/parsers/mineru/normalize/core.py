@@ -34,8 +34,8 @@ build_canonical() runs in four layers:
      reduced false flow boundaries.
    - Recover missing note references and resolve note links, optionally using
      the Qwen marker-locator repair loop before the final recovery/link pass.
-   - Run display block reconciliation passes for layout-specific,
-     CJK-numbered, and generic display-block structures.
+   - Run display block reconciliation passes for page geometry and generic
+     display-block structures.
    - Normalize display blocks to the public layout schema and remove internal
      note-ref indexes.
 
@@ -68,7 +68,6 @@ from ..reconcile import (
     merge_cross_page_paragraphs,
     promote_cross_page_footnote_continuation_paragraphs,
     promote_page_reference_list_footnotes,
-    reconcile_cjk_numbered_display_blocks,
     reconcile_display_blocks,
     reconcile_figure_captions,
     reconcile_generic_display_block_structures,
@@ -172,7 +171,6 @@ def build_canonical(
         finally:
             note_cache.close()
     reconcile_display_blocks(blocks, layout)
-    reconcile_cjk_numbered_display_blocks(blocks, layout)
     reconcile_generic_display_block_structures(blocks, layout)
     normalize_display_blocks_for_layout_schema(blocks)
     remove_internal_note_ref_indexes(blocks)

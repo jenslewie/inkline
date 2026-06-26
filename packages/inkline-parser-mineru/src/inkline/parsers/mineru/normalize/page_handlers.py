@@ -6,7 +6,6 @@ from statistics import median
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from ..analysis.layout import (
-    has_attribution_line,
     is_full_page_image_page,
     is_title_only_page,
     page_has_images,
@@ -22,7 +21,7 @@ from ..schema.block_types import (
     TOC_ITEM,
 )
 from ..schema.models import IdFactory, LayoutStats, RawBlock, canonical_block
-from ..schema.patterns import ATTR_RE, CHAPTER_RE, PART_RE, TOC_LINE_RE
+from ..schema.patterns import CHAPTER_RE, PART_RE, TOC_LINE_RE
 from .builders import (
     make_chart_table,
     make_display_block,
@@ -35,6 +34,7 @@ from .builders import (
     make_toc_item,
     union_bbox,
 )
+from .display_geometry import PageLayoutProfile
 from .normal_flow import _looks_like_note_definition_footer, process_normal_flow
 from .page_detectors import dominant_block as _dominant_block
 from .page_detectors import should_snapshot_layout_page
@@ -48,26 +48,67 @@ class _PageResult(NamedTuple):
 
 
 def group_sparse_display_page(
-    blocks: Sequence[RawBlock], prev_major_type: Optional[str]
+    blocks: Sequence[RawBlock], prev_major_type: Optional[str], layout: LayoutStats
 ) -> Optional[List[List[RawBlock]]]:
     if any(b.raw_type in {"image", "chart", "table"} for b in blocks):
         return None
     paras = [b for b in blocks if b.raw_type == "paragraph" and block_text(b)]
-    if not paras or not has_attribution_line(paras):
+    if not paras or len(paras) > 6:
         return None
+    profile = PageLayoutProfile.from_blocks(paras, layout)
+    if _has_page_local_body_flow(paras, profile):
+        return None
+    if not all(_is_sparse_display_page_line(block, profile) for block in paras):
+        return None
+    if len(paras) == 1 and prev_major_type not in {"part_title", "chapter_title", HEADING}:
+        return None
+    return _group_sparse_display_lines(paras, profile)
+
+
+def _has_page_local_body_flow(blocks: Sequence[RawBlock], profile: PageLayoutProfile) -> bool:
+    if any(profile.is_body_like(block) for block in blocks):
+        return True
+    wide = [block for block in blocks if block.bbox and block.width >= 600.0]
+    if len(wide) < 2:
+        return False
+    left = median(float(block.x0) for block in wide)
+    right = median(float(block.x1) for block in wide)
+    body_width = right - left
+    if body_width < 500.0:
+        return False
+    aligned = [
+        block
+        for block in wide
+        if abs(float(block.x0) - left) <= 28.0 and block.width >= body_width * 0.88
+    ]
+    return len(aligned) >= 2
+
+
+def _is_sparse_display_page_line(block: RawBlock, profile: PageLayoutProfile) -> bool:
+    if not block.bbox:
+        return False
+    return (
+        block.x0 >= profile.body_x0 + max(35.0, profile.body_w * 0.04)
+        or block.width <= profile.body_w * 0.82
+    )
+
+
+def _group_sparse_display_lines(
+    blocks: Sequence[RawBlock], profile: PageLayoutProfile
+) -> List[List[RawBlock]]:
     groups: List[List[RawBlock]] = []
-    buf: List[RawBlock] = []
-    for b in paras:
-        buf.append(b)
-        if ATTR_RE.match(block_text(b)):
-            groups.append(buf)
-            buf = []
-    if buf and prev_major_type in {"part_title", "chapter_title", HEADING}:
-        groups.append(buf)
-    grouped_count = sum(len(g) for g in groups)
-    if groups and (grouped_count == len(paras) or len(groups) * 2 >= len(paras)):
-        return groups
-    return None
+    current: List[RawBlock] = []
+    previous: RawBlock | None = None
+    gap_threshold = max(42.0, profile.page_height * 0.045)
+    for block in blocks:
+        if previous is not None and block.y0 - previous.y1 > gap_threshold:
+            groups.append(current)
+            current = []
+        current.append(block)
+        previous = block
+    if current:
+        groups.append(current)
+    return groups
 
 
 def build_toc_from_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -363,10 +404,11 @@ def _title_page_level(content_blocks: List[RawBlock]) -> int:
 def _try_process_sparse_display_page(
     ids: IdFactory,
     content_blocks: List[RawBlock],
+    layout: LayoutStats,
     prev_major_type: Optional[str],
     in_toc: bool,
 ) -> Optional[_PageResult]:
-    groups = group_sparse_display_page(content_blocks, prev_major_type)
+    groups = group_sparse_display_page(content_blocks, prev_major_type, layout)
     if not groups:
         return None
     if len(groups) == 1:
@@ -464,7 +506,9 @@ def process_page(
             if is_title_only_page(blocks)
             else None
         ),
-        lambda: _try_process_sparse_display_page(ids, content_blocks, prev_major_type, in_toc),
+        lambda: _try_process_sparse_display_page(
+            ids, content_blocks, layout, prev_major_type, in_toc
+        ),
         lambda: _try_process_full_page_image(ids, content_blocks, layout, in_toc),
         lambda: _try_process_plate_page(ids, content_blocks, layout, prev_major_type, in_toc),
     ):
