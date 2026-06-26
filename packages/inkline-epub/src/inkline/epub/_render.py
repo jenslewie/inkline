@@ -66,6 +66,27 @@ def _build_snapshot_asset_id_map(document: dict[str, Any]) -> dict[int, str]:
     return result
 
 
+def _estimate_document_page_width(document: dict[str, Any]) -> float | None:
+    """Estimate the canonical page coordinate width from block geometry."""
+    right_edges: list[float] = []
+    for block in document.get("blocks", []):
+        source = block.get("source") or {}
+        bbox = source.get("bbox")
+        if not isinstance(bbox, list) or len(bbox) < 4:
+            continue
+        try:
+            right = float(bbox[2])
+        except (TypeError, ValueError):
+            continue
+        if right > 0:
+            right_edges.append(right)
+    if not right_edges:
+        return None
+    right_edges.sort()
+    index = min(len(right_edges) - 1, int(len(right_edges) * 0.95))
+    return max(1.0, right_edges[index])
+
+
 def chapter_documents(
     document: dict[str, Any],
     *,
@@ -77,6 +98,7 @@ def chapter_documents(
     visual_pages = _build_visual_page_set(document)
     full_page_figures = _build_full_page_figure_map(document)
     snapshot_asset_ids = _build_snapshot_asset_id_map(document)
+    page_width = _estimate_document_page_width(document)
 
     chapters: list[tuple[str, list[str], str | None]] = []
     current_title = document["metadata"].get("title") or document["metadata"]["doc_id"]
@@ -163,9 +185,7 @@ def chapter_documents(
                 heading_tag = f"<h{block_level}>{heading_text}</h{block_level}>"
                 # For chapter-splitting headings, wrap in a title-page div
                 # with a page break after the heading.
-                current_html.append(
-                    f'<div class="chapter-title-page">\n  {heading_tag}\n</div>'
-                )
+                current_html.append(f'<div class="chapter-title-page">\n  {heading_tag}\n</div>')
 
         # === Visual page early-exit ===
         # If this block belongs to a visual page whose image has already
@@ -203,6 +223,7 @@ def chapter_documents(
                             image_assets=image_assets,
                             inline_images=inline_images,
                             captions=captions,
+                            page_width=page_width,
                         )
                     )
                     i += len(captions)
@@ -265,7 +286,11 @@ def chapter_documents(
             captions = _collect_trailing_captions(blocks, i + 1)
             current_html.append(
                 _figure_html(
-                    block, image_assets=image_assets, inline_images=inline_images, captions=captions
+                    block,
+                    image_assets=image_assets,
+                    inline_images=inline_images,
+                    captions=captions,
+                    page_width=page_width,
                 )
             )
             i += len(captions)
@@ -399,14 +424,19 @@ def _figure_html(
     image_assets: dict[str, dict[str, Any]] | None = None,
     inline_images: dict[str, dict[str, Any]] | None = None,
     captions: list[dict[str, Any]] | None = None,
+    page_width: float | None = None,
 ) -> str:
     text = (block.get("text") or "").strip()
     attrs = block.get("attrs") or {}
     image_assets = image_assets or {}
     inline_images = inline_images or {}
     captions = captions or []
+    block_id = block.get("block_id", "")
     image_id = attrs.get("image_id")
     image_asset = image_assets.get(image_id) if image_id else None
+    inline_img = inline_images.get(block_id)
+    image_dimensions = _image_pixel_dimensions(image_asset or inline_img)
+    image_attrs = _figure_image_attrs(block, page_width)
 
     # Collect caption segments from all sources (figure text, attrs.captions,
     # trailing caption blocks).  Each source part is itself split on newline
@@ -432,16 +462,12 @@ def _figure_html(
 
     has_caption = len(segments) > 0
     figure_classes = ["figure-block"]
-    image_attrs = ""
+    if _should_use_full_width_image(
+        has_caption=has_caption, image_dimensions=image_dimensions
+    ):
+        figure_classes.append("figure-fullwidth")
     if has_caption:
         figure_classes.append("has-caption")
-        caption_side = _should_place_caption_side(block, segments)
-        if caption_side:
-            figure_classes.append("caption-side")
-            image_attrs = ' style="height: 20em; max-height: 20em; width: auto; max-width: 58%;"'
-        if not caption_side and _should_use_compact_captioned_image(block, segments):
-            figure_classes.append("caption-long")
-            image_attrs = ' style="height: 20em; max-height: 20em; width: auto; max-width: 100%;"'
     figure_class_attr = ' class="' + " ".join(figure_classes) + '"'
 
     if has_caption:
@@ -456,110 +482,153 @@ def _figure_html(
     if image_asset and Path(image_asset["path"]).exists():
         image_name = asset_image_name(image_asset)
         alt = text or ""
-        return (
+        image_html = (
+            f'<img src="images/{escape(image_name, quote=True)}" '
+            f'alt="{escape(alt, quote=True)}"{image_attrs}/>'
+        )
+        return _figure_with_page_break(
             f"<figure{figure_class_attr}>"
-            f'<img src="images/{escape(image_name, quote=True)}" alt="{escape(alt, quote=True)}"{image_attrs}/>'
+            f"{image_html}"
             f"\n  {caption_html}\n"
             "</figure>"
         )
 
-    block_id = block.get("block_id", "")
-    inline_img = inline_images.get(block_id)
     if inline_img:
         epub_name = inline_img["epub_name"]
         alt = text or ""
-        return (
+        image_html = (
+            f'<img src="images/{escape(epub_name, quote=True)}" '
+            f'alt="{escape(alt, quote=True)}"{image_attrs}/>'
+        )
+        return _figure_with_page_break(
             f"<figure{figure_class_attr}>"
-            f'<img src="images/{escape(epub_name, quote=True)}" alt="{escape(alt, quote=True)}"{image_attrs}/>'
+            f"{image_html}"
             f"\n  {caption_html}\n"
             "</figure>"
         )
 
     # No image available — produce a minimal placeholder without debug text
     if has_caption:
-        return (
+        return _figure_with_page_break(
             f'<figure class="image-placeholder figure-block has-caption">'
             '<div role="img" aria-label="Image">[Image]</div>'
             f"\n  {caption_html}\n"
             "</figure>"
         )
-    return (
+    return _figure_with_page_break(
         '<figure class="image-placeholder figure-block">'
         '<div role="img" aria-label="Image">[Image]</div>'
         "</figure>"
     )
 
 
-def _should_place_caption_side(block: dict[str, Any], caption_segments: list[str]) -> bool:
-    if not caption_segments:
-        return False
+def _figure_with_page_break(figure_html: str) -> str:
+    return '<div class="figure-page-break" aria-hidden="true"></div>\n' + figure_html
+
+
+def _figure_image_attrs(block: dict[str, Any], page_width: float | None) -> str:
+    if not page_width or page_width <= 0:
+        return ""
     attrs = block.get("attrs") or {}
-    image_bbox = attrs.get("image_bbox")
-    caption_bbox = attrs.get("caption_bbox")
-    if _bbox_has_side_caption(image_bbox, caption_bbox):
-        return True
-    bbox = image_bbox or (block.get("source") or {}).get("bbox")
-    if not isinstance(bbox, list) or len(bbox) < 4:
-        return False
-    width = max(1.0, float(bbox[2]) - float(bbox[0]))
-    height = max(1.0, float(bbox[3]) - float(bbox[1]))
-    caption_chars = sum(len(segment) for segment in caption_segments)
-    return height >= width * 1.15 and caption_chars >= 40
-
-
-def _should_use_compact_captioned_image(
-    block: dict[str, Any], caption_segments: list[str]
-) -> bool:
-    caption_chars = sum(len(segment) for segment in caption_segments)
-    if caption_chars >= 120:
-        return True
-    if caption_chars < 70:
-        return False
-    attrs = block.get("attrs") or {}
-    source_bbox = (block.get("source") or {}).get("bbox")
-    image_bbox = attrs.get("image_bbox")
-    caption_bbox = attrs.get("caption_bbox")
-    source_height = _bbox_height(source_bbox)
-    image_height = _bbox_height(image_bbox)
-    caption_height = _bbox_height(caption_bbox)
-    image_width = _bbox_width(image_bbox)
-    return (
-        source_height >= 780.0
-        or image_height >= 680.0
-        or (image_height >= image_width * 0.98 and caption_height >= 70.0)
-    )
-
-
-def _bbox_height(bbox: Any) -> float:
-    if not isinstance(bbox, list) or len(bbox) < 4:
-        return 0.0
-    return max(0.0, float(bbox[3]) - float(bbox[1]))
+    bbox = attrs.get("image_bbox") or (block.get("source") or {}).get("bbox")
+    width = _bbox_width(bbox)
+    if width <= 0:
+        return ""
+    percent = min(100.0, max(1.0, width / page_width * 100.0))
+    return f' style="max-width: {_format_percent(percent)}%;"'
 
 
 def _bbox_width(bbox: Any) -> float:
     if not isinstance(bbox, list) or len(bbox) < 4:
         return 0.0
-    return max(0.0, float(bbox[2]) - float(bbox[0]))
+    try:
+        left = float(bbox[0])
+        right = float(bbox[2])
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, right - left)
 
 
-def _bbox_has_side_caption(image_bbox: Any, caption_bbox: Any) -> bool:
-    if not (
-        isinstance(image_bbox, list)
-        and isinstance(caption_bbox, list)
-        and len(image_bbox) >= 4
-        and len(caption_bbox) >= 4
-    ):
+def _format_percent(value: float) -> str:
+    return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def _image_pixel_dimensions(image_asset: dict[str, Any] | None) -> tuple[int, int] | None:
+    if not image_asset:
+        return None
+    width = image_asset.get("width")
+    height = image_asset.get("height")
+    if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+        return width, height
+    path = image_asset.get("path")
+    if not path:
+        return None
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        return None
+    return _png_dimensions(data) or _jpeg_dimensions(data)
+
+
+def _should_use_full_width_image(
+    *, has_caption: bool, image_dimensions: tuple[int, int] | None
+) -> bool:
+    if has_caption or not image_dimensions:
         return False
-    image_left, image_top, image_right, image_bottom = [float(v) for v in image_bbox[:4]]
-    caption_left, caption_top, caption_right, caption_bottom = [float(v) for v in caption_bbox[:4]]
-    image_width = max(1.0, image_right - image_left)
-    caption_width = max(1.0, caption_right - caption_left)
-    vertical_overlap = min(image_bottom, caption_bottom) - max(image_top, caption_top)
-    if vertical_overlap <= 0:
-        return False
-    right_side = caption_left >= image_right - image_width * 0.08
-    left_side = caption_right <= image_left + image_width * 0.08
-    return (right_side or left_side) and caption_width >= image_width * 0.35
+    width, height = image_dimensions
+    return width > 0 and height > 0 and width / height >= 0.6
+
+
+def _png_dimensions(data: bytes) -> tuple[int, int] | None:
+    if len(data) < 24 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return None
+    if data[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
+def _jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
+    if len(data) < 4 or not data.startswith(b"\xff\xd8"):
+        return None
+    offset = 2
+    sof_markers = {
+        0xC0,
+        0xC1,
+        0xC2,
+        0xC3,
+        0xC5,
+        0xC6,
+        0xC7,
+        0xC9,
+        0xCA,
+        0xCB,
+        0xCD,
+        0xCE,
+        0xCF,
+    }
+    while offset + 4 <= len(data):
+        if data[offset] != 0xFF:
+            offset += 1
+            continue
+        while offset < len(data) and data[offset] == 0xFF:
+            offset += 1
+        if offset >= len(data):
+            return None
+        marker = data[offset]
+        offset += 1
+        if marker in {0xD8, 0xD9}:
+            continue
+        if offset + 2 > len(data):
+            return None
+        segment_length = int.from_bytes(data[offset : offset + 2], "big")
+        if segment_length < 2 or offset + segment_length > len(data):
+            return None
+        if marker in sof_markers and segment_length >= 7:
+            height = int.from_bytes(data[offset + 3 : offset + 5], "big")
+            width = int.from_bytes(data[offset + 5 : offset + 7], "big")
+            return width, height
+        offset += segment_length
+    return None
 
 
 def _collect_trailing_captions(blocks: list[dict[str, Any]], start: int) -> list[dict[str, Any]]:
@@ -615,9 +684,7 @@ def _table_html(block: dict[str, Any]) -> str | None:
     # Filter out continuation-marker text that may have slipped through.
     notes = [n for n in table_notes if n and not _is_continuation_marker_text(n)]
     if notes:
-        notes_html = "".join(
-            f'<p class="table-note">{escape(n)}</p>' for n in notes
-        )
+        notes_html = "".join(f'<p class="table-note">{escape(n)}</p>' for n in notes)
         return f'{table_part}\n<div class="table-notes">{notes_html}</div>'
     return table_part
 
@@ -650,9 +717,7 @@ def _apply_cell_alignments(html: str, cell_alignments: Any) -> str:
     row = 0
     col = 0
     result: list[str] = []
-    tag_pattern = re.compile(
-        r"(<tr[^>]*>)|(<(t[dh])((?:\s[^>]*?)?)>)", re.I
-    )
+    tag_pattern = re.compile(r"(<tr[^>]*>)|(<(t[dh])((?:\s[^>]*?)?)>)", re.I)
     pos = 0
     for m in tag_pattern.finditer(html):
         result.append(html[pos : m.start()])
@@ -669,21 +734,21 @@ def _apply_cell_alignments(html: str, cell_alignments: Any) -> str:
             tag = m.group(3)
             attrs_str = m.group(4) or ""
 
-            alignment = cells_map.get(
-                (row, col)
-            ) or rows_map.get(row) or default
+            alignment = cells_map.get((row, col)) or rows_map.get(row) or default
             col += 1
 
             if alignment in {"left", "center", "right"}:
-                class_match = re.search(
-                    r'\bclass\s*=\s*(["\'])(.*?)\1', attrs_str
-                )
+                class_match = re.search(r'\bclass\s*=\s*(["\'])(.*?)\1', attrs_str)
                 if class_match:
                     quote = class_match.group(1)
                     existing = class_match.group(2)
                     merged = f"{existing} td-align-{alignment}"
-                    full_class = f'class={quote}{merged}{quote}'
-                    new_attrs = attrs_str[:class_match.start()] + full_class + attrs_str[class_match.end():]
+                    full_class = f"class={quote}{merged}{quote}"
+                    new_attrs = (
+                        attrs_str[: class_match.start()]
+                        + full_class
+                        + attrs_str[class_match.end() :]
+                    )
                     result.append(f"<{tag}{new_attrs}>")
                 else:
                     result.append(f'<{tag}{attrs_str} class="td-align-{alignment}">')
@@ -819,4 +884,6 @@ def _display_block_html(
         stripped = segment.strip()
         if stripped:
             paragraphs.append(f'<div class="display-block-paragraph">{stripped}</div>')
-    return f'<blockquote class="{escape(class_attr, quote=True)}">{"".join(paragraphs)}</blockquote>'
+    return (
+        f'<blockquote class="{escape(class_attr, quote=True)}">{"".join(paragraphs)}</blockquote>'
+    )

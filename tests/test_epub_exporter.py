@@ -1,8 +1,60 @@
 import re
+import struct
 import zipfile
+import zlib
 
 from inkline.canonical import sample_document
 from inkline.epub import export_epub
+
+
+def _write_png(path, width: int, height: int) -> None:
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + kind
+            + data
+            + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    row = b"\x00" + b"\xff\xff\xff" * width
+    raw = row * height
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
+def _write_png_with_dark_rect(
+    path, width: int, height: int, rect: tuple[int, int, int, int]
+) -> None:
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + kind
+            + data
+            + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+        )
+
+    left, top, right, bottom = rect
+    rows: list[bytes] = []
+    for y in range(height):
+        row = bytearray(b"\x00")
+        for x in range(width):
+            if left <= x < right and top <= y < bottom:
+                row.extend(b"\x00\x00\x00")
+            else:
+                row.extend(b"\xff\xff\xff")
+        rows.append(bytes(row))
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(b"".join(rows)))
+        + chunk(b"IEND", b"")
+    )
 
 
 def test_export_epub_writes_standard_container(tmp_path):
@@ -38,8 +90,9 @@ def test_export_epub_renders_figure_placeholder(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
+        names = zf.namelist()
         html = "\n".join(
-            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+            zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml")
         )
     # Placeholder should be present but WITHOUT debug metadata
     assert "[Image]" in html
@@ -129,8 +182,9 @@ def test_export_epub_renders_display_blocks_and_list_items(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
+        names = zf.namelist()
         html = "\n".join(
-            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+            zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml")
         )
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
     assert 'class="display-block display-block-standalone"' in html
@@ -1708,8 +1762,9 @@ def test_captioned_figure_has_new_css_classes(tmp_path):
     export_epub(document, output, base_dir=tmp_path)
 
     with zipfile.ZipFile(output) as zf:
+        names = zf.namelist()
         html = "\n".join(
-            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+            zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml")
         )
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
 
@@ -1719,14 +1774,24 @@ def test_captioned_figure_has_new_css_classes(tmp_path):
     # CSS: figure-block should have break-inside rules
     assert "break-inside: avoid" in css
     assert "page-break-inside: avoid" in css
+    assert "-webkit-column-break-inside: avoid" in css
+    assert "display: block" in css
     # CSS: figure-block img should have constrained max-height
     assert ".figure-block img" in css
-    assert "max-height: 85vh" in css
+    assert "max-height: 70vh" in css
     assert "width: auto" in css
+    assert "page-break-after: avoid" in css
+    assert '<div class="figure-page-break" aria-hidden="true"></div>' in html
+    assert ".figure-page-break" in css
+    assert "display: block" in css
+    assert "page-break-after: always" in css
     # CSS: captioned figures reserve room for figcaption on the same page
     assert ".figure-block.has-caption img" in css
-    assert "max-height: 70vh" in css
     assert "max-height: calc(100vh - 8em)" in css
+    assert "max-width: 100%" in css
+    assert "caption-side" not in css
+    assert "portrait-tall" not in css
+    assert "caption-long" not in css
 
 
 def test_long_captioned_figure_gets_more_constrained_image_css(tmp_path):
@@ -1757,16 +1822,18 @@ def test_long_captioned_figure_gets_more_constrained_image_css(tmp_path):
     export_epub(document, output, base_dir=tmp_path)
 
     with zipfile.ZipFile(output) as zf:
+        names = zf.namelist()
         html = "\n".join(
-            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+            zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml")
         )
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
 
-    assert 'class="figure-block has-caption caption-long"' in html
-    assert 'style="height: 20em; max-height: 20em; width: auto; max-width: 100%;"' in html
-    assert ".figure-block.has-caption.caption-long img" in css
-    assert "max-height: 52vh" in css
-    assert "max-height: min(52vh, calc(100vh - 14em))" in css
+    assert 'class="figure-block has-caption"' in html
+    assert 'style="' not in html
+    assert "caption-long" not in html
+    assert "caption-long" not in css
+    assert ".figure-block.has-caption img" in css
+    assert "max-height: calc(100vh - 8em)" in css
     assert "break-before: avoid" in css
     assert "page-break-before: avoid" in css
 
@@ -1774,8 +1841,8 @@ def test_long_captioned_figure_gets_more_constrained_image_css(tmp_path):
 def test_tall_captioned_figure_gets_more_constrained_image_css(tmp_path):
     img_dir = tmp_path / "images"
     img_dir.mkdir()
-    img_file = img_dir / "fig.jpg"
-    img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    img_file = img_dir / "fig.png"
+    _write_png(img_file, width=600, height=900)
     document = sample_document()
     document["blocks"] = [
         {
@@ -1784,7 +1851,7 @@ def test_tall_captioned_figure_gets_more_constrained_image_css(tmp_path):
             "text": "",
             "source": {"page": 5, "bbox": [170, 108, 881, 919]},
             "attrs": {
-                "image_path": "images/fig.jpg",
+                "image_path": "images/fig.png",
                 "image_bbox": [173, 108, 880, 826],
                 "caption_bbox": [170, 838, 881, 919],
                 "captions": [
@@ -1805,15 +1872,20 @@ def test_tall_captioned_figure_gets_more_constrained_image_css(tmp_path):
             zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
         )
 
-    assert 'class="figure-block has-caption caption-long"' in html
-    assert 'style="height: 20em; max-height: 20em; width: auto; max-width: 100%;"' in html
+    assert 'class="figure-block has-caption"' in html
+    figure_start = html.index('class="figure-block has-caption"')
+    figure_end = html.index("</figure>", figure_start)
+    figure_html = html[figure_start:figure_end]
+    assert figure_html.index("<img ") < figure_html.index("<figcaption>")
+    assert "caption-side" not in figure_html
+    assert "figure-side-image" not in figure_html
 
 
-def test_side_caption_layout_for_figure_with_side_caption_bbox(tmp_path):
+def test_captioned_figure_keeps_caption_below_for_tall_image_ratio(tmp_path):
     img_dir = tmp_path / "images"
     img_dir.mkdir()
-    img_file = img_dir / "fig.jpg"
-    img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    img_file = img_dir / "fig.png"
+    _write_png(img_file, width=600, height=900)
     document = sample_document()
     document["blocks"] = [
         {
@@ -1822,13 +1894,10 @@ def test_side_caption_layout_for_figure_with_side_caption_bbox(tmp_path):
             "text": "",
             "source": {"page": 5, "bbox": [140, 145, 881, 475]},
             "attrs": {
-                "image_path": "images/fig.jpg",
+                "image_path": "images/fig.png",
                 "image_bbox": [140, 145, 489, 453],
                 "caption_bbox": [541, 356, 881, 475],
-                "captions": [
-                    "吐鲁番出土的干饺子\n"
-                    "吐鲁番干燥的环境保存了如食物等易腐败的物品。"
-                ],
+                "captions": ["吐鲁番出土的干饺子\n吐鲁番干燥的环境保存了如食物等易腐败的物品。"],
             },
         },
     ]
@@ -1842,20 +1911,26 @@ def test_side_caption_layout_for_figure_with_side_caption_bbox(tmp_path):
         )
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
 
-    assert 'class="figure-block has-caption caption-side"' in html
-    assert 'style="height: 20em; max-height: 20em; width: auto; max-width: 58%;"' in html
-    assert ".figure-block.caption-side img" in css
-    assert "max-width: 58%" in css
-    assert ".figure-block.caption-side figcaption" in css
-    assert "display: inline-block" in css
-    assert "width: 36%" in css
+    assert 'class="figure-block has-caption"' in html
+    assert 'style="max-width: 39.614%;"' in html
+    assert "height: 20em" not in html
+    assert "caption-side" not in html
+    assert "<img " in html
+    assert "figure-side-image" not in html
+    assert "caption-side" not in css
+    image_rule = css.split(".figure-block.has-caption img {", 1)[1].split("}", 1)[0]
+    assert "max-width: 100%" in image_rule
+    assert "max-height: calc(100vh - 8em)" in image_rule
+    caption_rule = css.split(".figure-block.has-caption figcaption {", 1)[1].split("}", 1)[0]
+    assert "page-break-before: avoid" in caption_rule
+    assert "break-before: page" not in caption_rule
 
 
-def test_side_caption_layout_for_tall_captioned_figure(tmp_path):
+def test_tall_captioned_figure_keeps_caption_below(tmp_path):
     img_dir = tmp_path / "images"
     img_dir.mkdir()
-    img_file = img_dir / "fig.jpg"
-    img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    img_file = img_dir / "fig.png"
+    _write_png(img_file, width=600, height=900)
     document = sample_document()
     document["blocks"] = [
         {
@@ -1864,7 +1939,7 @@ def test_side_caption_layout_for_tall_captioned_figure(tmp_path):
             "text": "",
             "source": {"page": 5, "bbox": [100, 100, 420, 620]},
             "attrs": {
-                "image_path": "images/fig.jpg",
+                "image_path": "images/fig.png",
                 "captions": [
                     "高图说明\n"
                     "这是一段较长的图片说明，用来验证纵向图片会将说明排到图片旁边，"
@@ -1882,7 +1957,300 @@ def test_side_caption_layout_for_tall_captioned_figure(tmp_path):
             zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
         )
 
-    assert 'class="figure-block has-caption caption-side"' in html
+    assert 'class="figure-block has-caption"' in html
+    assert "caption-side" not in html
+    figure_start = html.index('class="figure-block has-caption"')
+    figure_end = html.index("</figure>", figure_start)
+    figure_html = html[figure_start:figure_end]
+    assert figure_html.index("<img ") < figure_html.index("<figcaption>")
+
+
+def test_tall_image_pixel_ratio_keeps_caption_below(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "portrait.png"
+    _write_png(img_file, width=600, height=900)
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5, "bbox": [100, 100, 880, 760]},
+            "attrs": {
+                "image_path": "images/portrait.png",
+                "captions": [
+                    "克孜尔石窟壁画\n"
+                    "这幅石窟窟顶壁画展现了克孜尔特有的邮票式菱格。"
+                    "当地画师在这些菱格中描绘佛陀前世的故事。"
+                ],
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+
+    assert 'class="figure-block has-caption"' in html
+    assert "caption-side" not in html
+    assert '<div class="figure-side-image"><img ' not in html
+    assert 'style="max-width: 88.636%;"' in html
+    assert "height: 20em" not in html
+
+
+def test_very_tall_captioned_image_uses_same_caption_below_layout(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "burial.png"
+    _write_png(img_file, width=567, height=1620)
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5, "bbox": [100, 100, 880, 760]},
+            "attrs": {
+                "image_path": "images/burial.png",
+                "captions": [
+                    "营盘墓葬\n"
+                    "死者葬于木制彩棺，戴多层麻布粘成的白色面罩一件。"
+                    "墓葬编号M15，1995年发掘。"
+                ],
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    assert 'class="figure-block has-caption"' in html
+    assert '<div class="figure-page-break" aria-hidden="true"></div>' in html
+    assert "portrait-tall" not in html
+    assert "page-start" not in html
+    assert "caption-side" not in html
+    assert '<div class="figure-side-image"><img ' not in html
+    assert 'style="max-width: 88.636%;"' in html
+    assert "height: 20em" not in html
+    assert "break-after: page" in css
+    assert "page-break-after: always" in css
+    assert "portrait-tall" not in css
+    caption_rule = css.split(".figure-block.has-caption figcaption {", 1)[1].split("}", 1)[0]
+    assert "page-break-before: avoid" in caption_rule
+    assert "page-break-before: always" not in caption_rule
+
+
+def test_landscape_image_pixel_ratio_keeps_caption_below(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "landscape.png"
+    _write_png(img_file, width=900, height=600)
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5, "bbox": [100, 100, 880, 760]},
+            "attrs": {
+                "image_path": "images/landscape.png",
+                "captions": [
+                    "横向图片\n"
+                    "这段说明应当继续放在图片下方，而不是因为 canonical bbox 较高进入右侧布局。"
+                ],
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+
+    assert 'class="figure-block has-caption"' in html
+    assert "caption-side" not in html
+
+
+def test_landscape_long_captioned_image_does_not_force_fixed_height(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "wide.png"
+    _write_png(img_file, width=1200, height=420)
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5, "bbox": [119, 115, 891, 453]},
+            "attrs": {
+                "image_path": "images/wide.png",
+                "captions": [
+                    "丝路文化交流的文字证据\n"
+                    "来自巴基斯坦以及阿富汗北部的移民于公元200年左右将图中木制文书"
+                    "为代表的全新书写技术带到了尚无自己文字的中国西北部。这种文书由一上"
+                    "一下两片木板制成，可以用来还原这些背景完全不同的人们在古代的交往。"
+                    "这些木制文书内容广泛，包括契约、敕令、信件和诉讼判决。"
+                ],
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+
+    assert 'class="figure-block has-caption"' in html
+    assert "caption-long" not in html
+    assert 'style="max-width: 86.644%;"' in html
+    assert "height: 20em" not in html
+
+
+def test_figure_image_width_uses_canonical_bbox_not_pixel_dimensions(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    small_file = img_dir / "small.png"
+    large_file = img_dir / "large.png"
+    _write_png(small_file, width=600, height=300)
+    _write_png(large_file, width=1800, height=900)
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_page_width_anchor",
+            "type": "paragraph",
+            "text": "Page width anchor.",
+            "source": {"page": 5, "bbox": [0, 0, 1000, 40]},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_small",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5, "bbox": [80, 80, 520, 360]},
+            "attrs": {
+                "image_path": "images/small.png",
+                "image_bbox": [100, 100, 500, 300],
+                "captions": ["Same canonical width, small pixels"],
+            },
+        },
+        {
+            "block_id": "b_large",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 6, "bbox": [80, 80, 520, 360]},
+            "attrs": {
+                "image_path": "images/large.png",
+                "image_bbox": [100, 100, 500, 300],
+                "captions": ["Same canonical width, large pixels"],
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+
+    assert html.count('style="max-width: 40%;"') == 2
+    assert "height: 20em" not in html
+
+
+def test_uncaptioned_map_like_images_render_full_width(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    route_map = img_dir / "route.png"
+    page_map = img_dir / "page-map.png"
+    narrow_photo = img_dir / "narrow.png"
+    _write_png(route_map, width=1981, height=2161)
+    _write_png_with_dark_rect(page_map, width=2956, height=4359, rect=(0, 488, 2443, 3708))
+    _write_png(narrow_photo, width=900, height=2100)
+    document = sample_document()
+    document["assets"]["images"] = [
+        {
+            "image_id": "page-map",
+            "path": "images/page-map.png",
+            "media_type": "image/png",
+        }
+    ]
+    document["blocks"] = [
+        {
+            "block_id": "b_route",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 123, "bbox": [161, 117, 998, 734]},
+            "attrs": {
+                "image_path": "images/route.png",
+                "captions": [],
+                "image_id": "route-map",
+            },
+        },
+        {
+            "block_id": "b_page_map",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 124, "bbox": [0, 127, 770, 629]},
+            "attrs": {
+                "image_path": "images/page-map.png",
+                "captions": [],
+                "layout_role": "full_page_image",
+                "image_id": "page-map",
+            },
+        },
+        {
+            "block_id": "b_narrow",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 125, "bbox": [300, 100, 560, 780]},
+            "attrs": {
+                "image_path": "images/narrow.png",
+                "captions": [],
+                "image_id": "narrow",
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        names = zf.namelist()
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml")
+        )
+        css = zf.read("EPUB/styles/book.css").decode("utf-8")
+
+    assert html.count('class="figure-block figure-fullwidth"') == 2
+    assert 'src="images/b_route_route.png"' in html
+    assert 'src="images/page-map_page-map_cropped.png"' in html
+    assert "EPUB/images/page-map_page-map_cropped.png" in names
+    narrow_start = html.index('src="images/b_narrow_narrow.png"')
+    narrow_figure_start = html.rfind("<figure", 0, narrow_start)
+    narrow_figure_end = html.index("</figure>", narrow_start)
+    assert "figure-fullwidth" not in html[narrow_figure_start:narrow_figure_end]
+    fullwidth_rule = css.split(".figure-block.figure-fullwidth img {", 1)[1].split("}", 1)[0]
+    assert "width: auto" in fullwidth_rule
+    assert "max-height: calc(100vh - 4em)" in fullwidth_rule
 
 
 def test_footnote_marker_stripped_with_note_marker_attr(tmp_path):
@@ -1925,15 +2293,13 @@ def test_footnote_marker_stripped_with_note_marker_attr(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        chapter_names = sorted(
-            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
-        )
+        chapter_names = sorted(n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n)
         html = zf.read(chapter_names[0]).decode("utf-8")
 
     # Footnote body should NOT contain leading "3" marker
     assert "Lothar explains this." in html
     # The stripped footnote should not start with "3 Lothar"
-    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    aside_match = re.search(r"<aside[^>]*>.*?</aside>", html, re.DOTALL)
     assert aside_match is not None
     aside_content = aside_match.group()
     # "3" should NOT appear as the leading text in the footnote body
@@ -1980,13 +2346,11 @@ def test_footnote_marker_stripped_without_note_marker_attr(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        chapter_names = sorted(
-            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
-        )
+        chapter_names = sorted(n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n)
         html = zf.read(chapter_names[0]).decode("utf-8")
 
     # Fallback heuristic should strip the leading "3"
-    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    aside_match = re.search(r"<aside[^>]*>.*?</aside>", html, re.DOTALL)
     assert aside_match is not None
     assert "<p>3 Lothar" not in aside_match.group()
     assert "Lothar explains this." in html
@@ -2031,12 +2395,10 @@ def test_footnote_marker_stripped_with_dot_delimiter(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        chapter_names = sorted(
-            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
-        )
+        chapter_names = sorted(n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n)
         html = zf.read(chapter_names[0]).decode("utf-8")
 
-    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    aside_match = re.search(r"<aside[^>]*>.*?</aside>", html, re.DOTALL)
     assert aside_match is not None
     # Should strip "3." completely, not leave ". Note text"
     assert ". Note text" not in aside_match.group()
@@ -2083,12 +2445,10 @@ def test_footnote_superscript_marker_stripped(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        chapter_names = sorted(
-            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
-        )
+        chapter_names = sorted(n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n)
         html = zf.read(chapter_names[0]).decode("utf-8")
 
-    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    aside_match = re.search(r"<aside[^>]*>.*?</aside>", html, re.DOTALL)
     assert aside_match is not None
     # Superscript ³ should be stripped, not left in output
     assert "³ Lothar" not in aside_match.group()
@@ -2133,12 +2493,10 @@ def test_footnote_symbol_marker_fallback(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        chapter_names = sorted(
-            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
-        )
+        chapter_names = sorted(n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n)
         html = zf.read(chapter_names[0]).decode("utf-8")
 
-    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    aside_match = re.search(r"<aside[^>]*>.*?</aside>", html, re.DOTALL)
     assert aside_match is not None
     # Symbol * should be stripped via fallback
     assert "<p>* See appendix" not in aside_match.group()
@@ -2184,16 +2542,14 @@ def test_footnote_marker_not_stripped_without_delimiter(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        chapter_names = sorted(
-            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
-        )
+        chapter_names = sorted(n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n)
         html = zf.read(chapter_names[0]).decode("utf-8")
 
-    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    aside_match = re.search(r"<aside[^>]*>.*?</aside>", html, re.DOTALL)
     assert aside_match is not None
     # "3rd edition note" should NOT be stripped — "3" is part of "3rd", not a marker
     # Check that the <p> starts with "3rd", not "rd"
-    assert re.search(r'<p>3rd edition note</p>', aside_match.group()) is not None
+    assert re.search(r"<p>3rd edition note</p>", aside_match.group()) is not None
 
 
 def test_chapter_title_page_box_sizing(tmp_path):
@@ -2294,9 +2650,7 @@ def test_chapter_heading_newlines_render_as_br(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        chapter_names = sorted(
-            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
-        )
+        chapter_names = sorted(n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n)
         html = zf.read(chapter_names[0]).decode("utf-8")
 
     # Heading newline should become <br/>
@@ -2331,9 +2685,7 @@ def test_chapter_title_page_has_page_break_css(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        chapter_names = sorted(
-            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
-        )
+        chapter_names = sorted(n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n)
         html = zf.read(chapter_names[0]).decode("utf-8")
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
 
@@ -2385,12 +2737,10 @@ def test_footnote_superscript_marker_fallback_without_note_marker(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        chapter_names = sorted(
-            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
-        )
+        chapter_names = sorted(n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n)
         html = zf.read(chapter_names[0]).decode("utf-8")
 
-    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    aside_match = re.search(r"<aside[^>]*>.*?</aside>", html, re.DOTALL)
     assert aside_match is not None
     # The superscript marker ³ should be stripped, leaving just "Lothar explains this."
     assert "Lothar explains this." in aside_match.group()
@@ -2436,12 +2786,10 @@ def test_footnote_multi_digit_superscript_marker_with_note_marker(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        chapter_names = sorted(
-            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
-        )
+        chapter_names = sorted(n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n)
         html = zf.read(chapter_names[0]).decode("utf-8")
 
-    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    aside_match = re.search(r"<aside[^>]*>.*?</aside>", html, re.DOTALL)
     assert aside_match is not None
     # ¹² should be stripped, leaving "Combined references."
     assert "Combined references." in aside_match.group()
@@ -2486,15 +2834,13 @@ def test_footnote_parenthesized_delimiter_ascii(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        chapter_names = sorted(
-            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
-        )
+        chapter_names = sorted(n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n)
         html = zf.read(chapter_names[0]).decode("utf-8")
 
-    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    aside_match = re.search(r"<aside[^>]*>.*?</aside>", html, re.DOTALL)
     assert aside_match is not None
     # "1)" should be stripped, leaving "Note text"
-    assert re.search(r'<p>Note text</p>', aside_match.group()) is not None
+    assert re.search(r"<p>Note text</p>", aside_match.group()) is not None
     assert "1)" not in aside_match.group()
 
 
@@ -2536,15 +2882,13 @@ def test_footnote_parenthesized_delimiter_fullwidth(tmp_path):
     export_epub(document, output)
 
     with zipfile.ZipFile(output) as zf:
-        chapter_names = sorted(
-            n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n
-        )
+        chapter_names = sorted(n for n in zf.namelist() if n.endswith(".xhtml") and "chapter" in n)
         html = zf.read(chapter_names[0]).decode("utf-8")
 
-    aside_match = re.search(r'<aside[^>]*>.*?</aside>', html, re.DOTALL)
+    aside_match = re.search(r"<aside[^>]*>.*?</aside>", html, re.DOTALL)
     assert aside_match is not None
     # "1）" should be stripped, leaving "Note text"
-    assert re.search(r'<p>Note text</p>', aside_match.group()) is not None
+    assert re.search(r"<p>Note text</p>", aside_match.group()) is not None
     assert "1）" not in aside_match.group()
 
 
@@ -2573,7 +2917,7 @@ def test_display_block_multi_line_splits_into_paragraphs(tmp_path):
     assert '<div class="display-block-paragraph">第一行</div>' in html
     assert '<div class="display-block-paragraph">第二行</div>' in html
     assert '<div class="display-block-paragraph">第三行</div>' in html
-    assert "<blockquote class=\"display-block\"><p>" not in html
+    assert '<blockquote class="display-block"><p>' not in html
     # Should NOT contain bare text outside wrappers inside the blockquote.
     assert "第一行<br" not in html
 
@@ -2606,7 +2950,7 @@ def test_display_block_signature_uses_body_size_and_no_indent(tmp_path):
     assert '<div class="display-block-paragraph">落款行一</div>' in html
     assert '<div class="display-block-paragraph">落款行二</div>' in html
     # CSS: .display-block-signature uses body font-size
-    sig_block = re.search(r'\.display-block-signature\s*\{[^}]+\}', css)
+    sig_block = re.search(r"\.display-block-signature\s*\{[^}]+\}", css)
     assert sig_block is not None
     assert "font-size: 1em" in sig_block.group()
     # CSS: nested paragraphs are not indented and right-aligned
@@ -2666,7 +3010,7 @@ def test_caption_css_left_align_distinct_cjk_font_stack(tmp_path):
     assert "Kaiti SC" in fig_section
 
     # .caption (standalone class, not .caption-title or .caption-body)
-    cap_block = re.search(r'\.caption\s*\{[^}]+\}', css)
+    cap_block = re.search(r"\.caption\s*\{[^}]+\}", css)
     assert cap_block is not None
     cap_section = cap_block.group()
     assert "text-align: left" in cap_section
@@ -2685,11 +3029,11 @@ def test_caption_css_no_center(tmp_path):
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
 
     # Extract the figcaption rule block only (up to closing brace)
-    fig_block = re.search(r'figcaption\s*\{[^}]+\}', css)
+    fig_block = re.search(r"figcaption\s*\{[^}]+\}", css)
     assert fig_block is not None
     assert "text-align: center" not in fig_block.group()
 
-    cap_block = re.search(r'\.caption\s*\{[^}]+\}', css)
+    cap_block = re.search(r"\.caption\s*\{[^}]+\}", css)
     assert cap_block is not None
     assert "text-align: center" not in cap_block.group()
 
@@ -2752,11 +3096,11 @@ def test_caption_title_and_body_css(tmp_path):
     with zipfile.ZipFile(output) as zf:
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
 
-    ct_block = re.search(r'\.caption-title\s*\{[^}]+\}', css)
+    ct_block = re.search(r"\.caption-title\s*\{[^}]+\}", css)
     assert ct_block is not None
     assert "text-indent: 0" in ct_block.group()
 
-    cb_block = re.search(r'\.caption-body\s*\{[^}]+\}', css)
+    cb_block = re.search(r"\.caption-body\s*\{[^}]+\}", css)
     assert cb_block is not None
     assert "text-indent: 2em" in cb_block.group()
 
@@ -2771,7 +3115,7 @@ def test_figcaption_p_margin_css(tmp_path):
     with zipfile.ZipFile(output) as zf:
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
 
-    fp_block = re.search(r'figcaption\s+p\s*\{[^}]+\}', css)
+    fp_block = re.search(r"figcaption\s+p\s*\{[^}]+\}", css)
     assert fp_block is not None
     assert "margin" in fp_block.group()
 
@@ -3027,10 +3371,7 @@ def test_export_epub_table_cell_alignment_classes(tmp_path):
             "source": {"page": 1, "bbox": None},
             "attrs": {
                 "html": (
-                    "<table>"
-                    "<tr><td>A</td><td>B</td></tr>"
-                    "<tr><td>C</td><td>D</td></tr>"
-                    "</table>"
+                    "<table><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></table>"
                 ),
                 "cell_alignments": {
                     "default": "center",

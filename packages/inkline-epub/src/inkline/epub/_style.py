@@ -43,12 +43,18 @@ td, th {
 figure {
   margin: 1em 0;
   text-align: center;
+  break-inside: avoid;
+  page-break-inside: avoid;
+  -webkit-column-break-inside: avoid;
 }
 img {
   display: block;
   height: auto;
   margin: 0 auto;
   max-width: 100%;
+  break-inside: avoid;
+  page-break-inside: avoid;
+  -webkit-column-break-inside: avoid;
 }
 .image-placeholder {
   border: 1px solid #aaa;
@@ -81,40 +87,46 @@ figcaption p {
   margin: 0 0 0.3em;
 }
 .figure-block {
+  display: block;
+  max-width: 100%;
+  width: 100%;
   break-inside: avoid;
   page-break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+}
+.figure-page-break {
+  display: block;
+  height: 0;
+  line-height: 0;
+  margin: 0;
+  padding: 0;
+  break-after: page;
+  page-break-after: always;
+  -webkit-column-break-after: always;
 }
 .figure-block img {
-  max-height: 85vh;
+  max-height: 32em;
+  max-height: 70vh;
   width: auto;
+  break-after: avoid;
+  page-break-after: avoid;
+}
+.figure-block.figure-fullwidth img {
+  width: auto;
+  max-width: 100%;
+  max-height: 32em;
+  max-height: calc(100vh - 4em);
 }
 .figure-block.has-caption img {
-  max-height: 70vh;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 32em;
   max-height: calc(100vh - 8em);
-}
-.figure-block.has-caption.caption-long img {
-  max-height: 52vh;
-  max-height: min(52vh, calc(100vh - 14em));
 }
 .figure-block.has-caption figcaption {
   break-before: avoid;
   page-break-before: avoid;
-}
-.figure-block.caption-side {
-  text-align: left;
-}
-.figure-block.caption-side img {
-  display: inline-block;
-  max-width: 58%;
-  max-height: 78vh;
-  vertical-align: top;
-}
-.figure-block.caption-side figcaption {
-  display: inline-block;
-  width: 36%;
-  margin-top: 0;
-  margin-left: 1em;
-  vertical-align: top;
 }
 .caption {
   font-family: "Kaiti SC", STKaiti, KaiTi, FangSong, STFangsong, serif;
