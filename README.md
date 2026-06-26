@@ -48,6 +48,27 @@ lives in `inkline-llm`, which owns the default model and Ollama endpoint
 constants; marker-locator prompts, evidence files, and note writeback rules stay
 inside `inkline-parser-mineru`.
 
+To reuse existing MinerU raw outputs without rerunning MinerU, call the
+parser-specific `mineru-to-canonical` command directly and pass the raw files:
+
+```bash
+uv run --extra mineru mineru-to-canonical \
+  --content-list-v2 data/outputs/丝绸之路新史/mineru_raw/丝绸之路新史/vlm/丝绸之路新史_content_list_v2.json \
+  --middle data/outputs/丝绸之路新史/mineru_raw/丝绸之路新史/vlm/丝绸之路新史_middle.json \
+  --model data/outputs/丝绸之路新史/mineru_raw/丝绸之路新史/vlm/丝绸之路新史_model.json \
+  --md data/outputs/丝绸之路新史/mineru_raw/丝绸之路新史/vlm/丝绸之路新史.md \
+  --source-pdf data/samples/丝绸之路新史.pdf \
+  --doc-id 丝绸之路新史 \
+  --title 丝绸之路新史 \
+  --marker-locator-repair \
+  --output data/outputs/丝绸之路新史/canonical.json
+```
+
+`--source-pdf` is required when `--marker-locator-repair` is enabled because the
+Qwen locator renders PDF pages for visual marker evidence. Marker evidence and
+timing logs default to a sibling directory named after the output stem, such as
+`data/outputs/丝绸之路新史/canonical_qwen_marker_locator/`.
+
 RAG chunking, embedding, indexing, and search live in `inkline-rag`. Future
 answer-generation code should use `inkline-llm` for the local model call and
 consume canonical/chunk/search records rather than importing parser-specific
