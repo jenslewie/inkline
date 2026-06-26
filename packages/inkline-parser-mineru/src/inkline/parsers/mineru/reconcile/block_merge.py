@@ -51,11 +51,25 @@ def _merge_block_pair(
     spans = lsrc.setdefault("spans", [])
     if not spans:
         spans.append(
-            {"page": lsrc.get("page"), "bbox": lsrc.get("bbox"), "block_id": left.get("block_id")}
+            {
+                "page": lsrc.get("page"),
+                "bbox": lsrc.get("bbox"),
+                "block_id": left.get("block_id"),
+                "text": original_left_text,
+            }
         )
-    spans.append(
-        {"page": rsrc.get("page"), "bbox": rsrc.get("bbox"), "block_id": right.get("block_id")}
-    )
+    right_spans = [span for span in rsrc.get("spans") or [] if isinstance(span, dict)]
+    if right_spans:
+        spans.extend(dict(span) for span in right_spans)
+    else:
+        spans.append(
+            {
+                "page": rsrc.get("page"),
+                "bbox": rsrc.get("bbox"),
+                "block_id": right.get("block_id"),
+                "text": original_right_text,
+            }
+        )
     if interruptions:
         ints = lsrc.setdefault("interruption_spans", [])
         ints.extend(interruptions)

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Protocol
 from ..normalize.builders import union_bbox
 from ..schema.block_types import (
     CAPTION,
+    DISPLAY_BLOCK,
     FIGURE,
     FOOTNOTE,
     HEADING,
@@ -23,7 +24,7 @@ from .layout_helpers import _page_coord_heights, _page_coord_widths
 
 __all__ = ["reconcile_figure_captions"]
 
-CAPTION_TEXT_TYPES = {PARAGRAPH, CAPTION}
+CAPTION_TEXT_TYPES = {PARAGRAPH, CAPTION, DISPLAY_BLOCK}
 FIGURE_FLOW_BOUNDARY_TYPES = {FOOTNOTE, TABLE, FIGURE, TABLE_CONTINUATION}
 FIGURE_EMBEDDED_TEXT_TYPES = {HEADING, PARAGRAPH}
 FIGURE_FOLLOWING_CAPTION_TYPES = {HEADING, PARAGRAPH, CAPTION}
@@ -141,10 +142,7 @@ class _FigureCaptionDetector:
                 )
                 if (
                     not heading_continuation
-                    and (
-                        float(last_cbb[0]) < page_width * 0.12
-                        and last_cw > page_width * 0.50
-                    )
+                    and (float(last_cbb[0]) < page_width * 0.12 and last_cw > page_width * 0.50)
                 ) or (
                     not heading_continuation
                     and last_gap > page_height * 0.10
@@ -319,9 +317,7 @@ def _absorb_image_overlapping_text(blocks: List[Dict[str, Any]]) -> None:
             if not attrs.get("image_bbox"):
                 attrs["image_bbox"] = list(stable_bbox)
 
-            _absorb_text_blocks_into_figure(
-                figure, [candidate], reason="image_overlapping_text"
-            )
+            _absorb_text_blocks_into_figure(figure, [candidate], reason="image_overlapping_text")
             del blocks[j]
             # Do NOT re-check the same figure — stable_bbox is immutable
             # so no snowballing. Just continue scanning remaining candidates.

@@ -7,15 +7,17 @@ from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
 from ...schema.block_types import DISPLAY_BLOCK, PARAGRAPH
+from ...schema.models import BBox
 from ..block_access import block_page as _block_page
 from ..block_access import block_pages as _block_pages
 from ..block_merge import _merge_block_pair, _refresh_display_block_attrs
 from ..block_nav import _prev_text_non_float
 from ..layout_helpers import (
-    _ends_with_terminal,
     _is_near_page_bottom,
     _is_near_page_top,
     _page_coord_heights,
+    _page_coord_widths,
+    _scaled_body_metrics,
 )
 from ..notes.keys import note_ref_key as _note_ref_key
 
@@ -24,6 +26,7 @@ def reconcile_page_bottom_overflow_tail_from_display_block(
     blocks: List[Dict[str, Any]], layout: LayoutStats
 ) -> None:
     page_heights = _page_coord_heights(blocks)
+    page_widths = _page_coord_widths(blocks)
     i = 0
     while i + 1 < len(blocks):
         b = blocks[i]
@@ -49,7 +52,7 @@ def reconcile_page_bottom_overflow_tail_from_display_block(
         if not kept_display_block_text or not tail:
             i += 1
             continue
-        if not _ends_with_terminal(kept_display_block_text) or _ends_with_terminal(tail):
+        if not _has_overflow_tail_geometry(b, nxt, layout, page_widths):
             i += 1
             continue
         display_block_runs, tail_runs = _split_inline_runs_at_last_newline(
@@ -101,6 +104,77 @@ def reconcile_page_bottom_overflow_tail_from_display_block(
         del blocks[i + 1]
         blocks.insert(i + 1, new_para)
         i += 2
+
+
+def _has_overflow_tail_geometry(
+    block: Dict[str, Any],
+    next_block: Dict[str, Any],
+    layout: LayoutStats,
+    page_widths: Dict[int, float],
+) -> bool:
+    lines = [line.strip() for line in str(block.get("text") or "").split("\n") if line.strip()]
+    spans = [
+        span for span in (block.get("source") or {}).get("spans") or [] if isinstance(span, dict)
+    ]
+    if len(lines) < 2 or len(spans) != len(lines):
+        return False
+    tail_span = spans[-1]
+    kept_spans = spans[:-1]
+    return (
+        _span_starts_in_body_lane(tail_span, layout, page_widths)
+        and _has_set_off_display_span(kept_spans, layout, page_widths)
+        and _block_is_body_lane(next_block, layout, page_widths)
+    )
+
+
+def _span_starts_in_body_lane(
+    span: Dict[str, Any], layout: LayoutStats, page_widths: Dict[int, float]
+) -> bool:
+    bbox = _span_bbox(span)
+    page = span.get("page")
+    if not bbox or page is None:
+        return False
+    body_left, _body_right, body_width = _scaled_body_metrics(layout, page_widths.get(int(page)))
+    return float(bbox[0]) <= body_left + max(30.0, body_width * 0.04)
+
+
+def _has_set_off_display_span(
+    spans: List[Dict[str, Any]], layout: LayoutStats, page_widths: Dict[int, float]
+) -> bool:
+    for span in spans:
+        bbox = _span_bbox(span)
+        page = span.get("page")
+        if not bbox or page is None:
+            continue
+        body_left, _body_right, body_width = _scaled_body_metrics(
+            layout, page_widths.get(int(page))
+        )
+        x0 = float(bbox[0])
+        width = max(0.0, float(bbox[2]) - x0)
+        if x0 >= body_left + max(34.0, body_width * 0.045) or width <= body_width * 0.70:
+            return True
+    return False
+
+
+def _block_is_body_lane(
+    block: Dict[str, Any], layout: LayoutStats, page_widths: Dict[int, float]
+) -> bool:
+    source = block.get("source") or {}
+    bbox = source.get("bbox")
+    page = _block_page(block)
+    if not isinstance(bbox, list) or len(bbox) < 4 or page is None:
+        return False
+    body_left, _body_right, body_width = _scaled_body_metrics(layout, page_widths.get(page))
+    x0 = float(bbox[0])
+    width = max(0.0, float(bbox[2]) - x0)
+    return x0 <= body_left + max(48.0, body_width * 0.06) and width >= body_width * 0.70
+
+
+def _span_bbox(span: Dict[str, Any]) -> BBox | None:
+    bbox = span.get("bbox")
+    if isinstance(bbox, list) and len(bbox) >= 4:
+        return bbox
+    return None
 
 
 def _split_inline_runs_at_last_newline(

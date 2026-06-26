@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..analysis.layout import LayoutStats
 from ..analysis.pdf_page_metrics import PdfPageCache, line_bands
-from ..extraction.text import chinese_len, normalize_ws
+from ..extraction.text import chinese_len, normalize_ws, strip_trailing_text_note
 from ..schema.block_types import DISPLAY_BLOCK, FOOTNOTE, HEADING, PARAGRAPH, TABLE
 from ..schema.models import BBox
 from .block_access import block_bbox as _bbox
@@ -20,14 +20,15 @@ from .constants import (
     _NEAR_PAGE_BOTTOM_RATIO,
     FLOAT_LIKE_TYPES,
     MERGEABLE_TEXT_TYPES,
+    TERMINAL_PUNCT,
 )
 from .layout_helpers import (
     _display_block_layout,
-    _ends_with_terminal,
     _is_near_page_bottom,
     _is_near_page_top,
     _page_coord_heights,
     _page_coord_widths,
+    _scaled_body_metrics,
 )
 from .notes.keys import leading_note_marker as _leading_note_marker
 from .notes.marker_inline import _note_refs
@@ -47,6 +48,13 @@ _MIN_CHAR_WIDTH = 6.0
 _MAX_CHAR_WIDTH = 18.0
 _FOOTNOTE_GAP_MAX_PX = 95.0
 _FOOTNOTE_GAP_RATIO = 0.095
+
+
+def _ends_with_terminal(text: str) -> bool:
+    t = normalize_ws(text or "")
+    t, _ = strip_trailing_text_note(t)
+    t = t.rstrip()
+    return bool(t and t[-1] in TERMINAL_PUNCT)
 
 
 def resolve_source_pdf_path(pdf_path: Optional[str], allow_missing: bool = False) -> Optional[str]:
@@ -266,17 +274,22 @@ def _starts_after_next_page_float(
     return top_y <= h * 0.25 and bottom_y <= float(rbb[1]) <= bottom_y + h * 0.16
 
 
-def _looks_like_body_resumption(block: Dict[str, Any], layout: LayoutStats) -> bool:
+def _looks_like_body_resumption(
+    block: Dict[str, Any],
+    layout: LayoutStats,
+    page_widths: Dict[int, float] | None = None,
+) -> bool:
     bb = _bbox(block)
     if not bb:
         return False
     x0, _y0, x1, _y1 = [float(v) for v in bb]
     width = max(0.0, x1 - x0)
-    near_body_left = x0 <= layout.body_left + max(
-        _BODY_INDENT_MAX_PX, layout.body_width * _BODY_INDENT_RATIO
-    )
-    body_width = width >= layout.body_width * _BODY_WIDTH_RATIO
-    return near_body_left and body_width
+    page = _block_page(block)
+    coord_width = page_widths.get(page) if page is not None and page_widths else None
+    body_left, _body_right, body_width = _scaled_body_metrics(layout, coord_width)
+    near_body_left = x0 <= body_left + max(_BODY_INDENT_MAX_PX, body_width * _BODY_INDENT_RATIO)
+    has_body_width = width >= body_width * _BODY_WIDTH_RATIO
+    return near_body_left and has_body_width
 
 
 def _left_refs_interrupted_footnote(
@@ -498,9 +511,8 @@ def merge_cross_page_paragraphs(
                 i += 1
                 continue
             # Do not let paragraph-continuation merging cross a set-off display
-            # boundary.  A prose introducer at a page bottom followed by a
-            # display block on the next page must remain separate; display text followed by
-            # normal narrative must also remain separate. True cross-page
+            # boundary. Page-bottom set-off text followed by a float and
+            # normal narrative must remain separate. True cross-page
             # display_block continuations are handled by display_block
             # reconciliation when the next fragment has display layout.
             if left.get("type") == PARAGRAPH and right.get("type") == DISPLAY_BLOCK:
@@ -510,7 +522,7 @@ def merge_cross_page_paragraphs(
                 left.get("type") == DISPLAY_BLOCK
                 and right.get("type") == PARAGRAPH
                 and layout is not None
-                and not _display_block_layout(right, layout)
+                and not _display_block_layout(right, layout, page_widths.get(_block_page(right)))
             ):
                 i += 1
                 continue
@@ -519,7 +531,7 @@ def merge_cross_page_paragraphs(
                 display_like
                 and right.get("type") == PARAGRAPH
                 and layout is not None
-                and not _display_block_layout(right, layout)
+                and not _display_block_layout(right, layout, page_widths.get(_block_page(right)))
             ):
                 i += 1
                 continue
@@ -535,12 +547,30 @@ def merge_cross_page_paragraphs(
             if not _is_near_page_top(right, page_heights) and not starts_after_float:
                 i += 1
                 continue
+            if _set_off_display_before_float_body_resume(
+                blocks,
+                i,
+                left,
+                right,
+                interruptions,
+                starts_after_float,
+                layout,
+                page_widths,
+                page_heights,
+            ):
+                attrs = left.setdefault("attrs", {})
+                attrs["display_boundary_after_float_body_resume"] = True
+                evidence = attrs.setdefault("classification_evidence", [])
+                if "set_off_display_before_float_body_resume" not in evidence:
+                    evidence.append("set_off_display_before_float_body_resume")
+                i += 1
+                continue
             if (
                 display_like
                 and right.get("type") == PARAGRAPH
                 and layout is not None
                 and starts_after_float
-                and _looks_like_body_resumption(right, layout)
+                and _looks_like_body_resumption(right, layout, page_widths)
             ):
                 i += 1
                 continue
@@ -597,3 +627,129 @@ def merge_cross_page_paragraphs(
 
     finally:
         line_extractor.close()
+
+
+def _set_off_display_before_float_body_resume(
+    blocks: List[Dict[str, Any]],
+    idx: int,
+    left: Dict[str, Any],
+    right: Dict[str, Any],
+    interruptions: List[Dict[str, Any]],
+    starts_after_float: bool,
+    layout: Optional[LayoutStats],
+    page_widths: Dict[int, float],
+    page_heights: Dict[int, float],
+) -> bool:
+    if layout is None or not starts_after_float:
+        return False
+    if left.get("type") != PARAGRAPH or right.get("type") != PARAGRAPH:
+        return False
+    if not any(item.get("type") in FLOAT_INTERRUPTION_TYPES for item in interruptions):
+        return False
+    if _has_tight_body_flow_from_previous_body(blocks, idx, layout, page_widths, page_heights):
+        return False
+    page_local_set_off = _is_set_off_from_previous_body(blocks, idx, layout, page_widths)
+    if (
+        not _display_block_layout(left, layout, page_widths.get(_block_page(left)))
+        and not page_local_set_off
+    ):
+        return False
+    if not _looks_like_body_resumption(right, layout, page_widths):
+        return False
+    return page_local_set_off or not _looks_like_strict_body_lane(left, layout, page_widths)
+
+
+def _has_tight_body_flow_from_previous_body(
+    blocks: List[Dict[str, Any]],
+    idx: int,
+    layout: LayoutStats,
+    page_widths: Dict[int, float],
+    page_heights: Dict[int, float],
+) -> bool:
+    block = blocks[idx]
+    bb = _bbox(block)
+    page = _block_page(block)
+    if page is None or not bb:
+        return False
+    prev = None
+    for candidate in reversed(blocks[:idx]):
+        candidate_page = _block_page(candidate)
+        if candidate_page != page:
+            break
+        if candidate.get("type") == FOOTNOTE:
+            continue
+        prev = candidate
+        break
+    if prev is None or prev.get("type") != PARAGRAPH:
+        return False
+    if not _looks_like_body_resumption(prev, layout, page_widths):
+        return False
+    pbb = _bbox(prev)
+    if not pbb:
+        return False
+    coord_width = page_widths.get(page)
+    _body_left, _body_right, body_width = _scaled_body_metrics(layout, coord_width)
+    x0, y0, x1, _y1 = [float(v) for v in bb]
+    px0, _py0, _px1, py1 = [float(v) for v in pbb]
+    vertical_gap = y0 - py1
+    page_height = page_heights.get(page, _DEFAULT_PAGE_HEIGHT)
+    if not (0 <= vertical_gap <= max(18.0, page_height * 0.018)):
+        return False
+    indent = x0 - px0
+    first_line_indent = max(34.0, body_width * 0.045) <= indent <= max(82.0, body_width * 0.11)
+    near_body_width = max(0.0, x1 - x0) >= body_width * 0.70
+    return first_line_indent and near_body_width
+
+
+def _is_set_off_from_previous_body(
+    blocks: List[Dict[str, Any]],
+    idx: int,
+    layout: LayoutStats,
+    page_widths: Dict[int, float] | None = None,
+) -> bool:
+    block = blocks[idx]
+    bb = _bbox(block)
+    page = _block_page(block)
+    if page is None or not bb:
+        return False
+    prev = None
+    for candidate in reversed(blocks[:idx]):
+        candidate_page = _block_page(candidate)
+        if candidate_page != page:
+            break
+        if candidate.get("type") == FOOTNOTE:
+            continue
+        prev = candidate
+        break
+    if prev is None or not _looks_like_body_resumption(prev, layout, page_widths):
+        return False
+    pbb = _bbox(prev)
+    if not pbb:
+        return False
+    coord_width = page_widths.get(page) if page_widths else None
+    _body_left, _body_right, body_width = _scaled_body_metrics(layout, coord_width)
+    x0, _y0, x1, _y1 = [float(v) for v in bb]
+    px0, _py0, px1, _py1 = [float(v) for v in pbb]
+    width = max(0.0, x1 - x0)
+    prev_width = max(0.0, px1 - px0)
+    shifted_from_body = x0 - px0 >= max(34.0, body_width * 0.04)
+    not_wider_than_body_lane = width <= prev_width + max(28.0, body_width * 0.04)
+    return shifted_from_body and not_wider_than_body_lane
+
+
+def _looks_like_strict_body_lane(
+    block: Dict[str, Any],
+    layout: LayoutStats,
+    page_widths: Dict[int, float] | None = None,
+) -> bool:
+    bb = _bbox(block)
+    if not bb:
+        return False
+    x0, _y0, x1, _y1 = [float(v) for v in bb]
+    width = max(0.0, x1 - x0)
+    page = _block_page(block)
+    coord_width = page_widths.get(page) if page is not None and page_widths else None
+    body_left, _body_right, body_width = _scaled_body_metrics(layout, coord_width)
+    near_body_left = x0 <= body_left + max(24.0, body_width * 0.03)
+    has_body_width = width >= body_width * 0.88
+    return near_body_left and has_body_width

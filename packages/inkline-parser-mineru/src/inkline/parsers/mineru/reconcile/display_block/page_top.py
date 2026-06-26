@@ -11,7 +11,12 @@ from ..block_access import block_bbox as _bbox
 from ..block_access import block_page as _block_page
 from ..block_nav import _prev_text_non_float
 from ..constants import FLOAT_LIKE_TYPES
-from ..layout_helpers import _is_near_page_top, _page_coord_heights
+from ..layout_helpers import (
+    _is_near_page_top,
+    _page_coord_heights,
+    _page_coord_widths,
+    _scaled_body_metrics,
+)
 from .helpers import force_generic_display_block_attrs
 
 
@@ -21,6 +26,7 @@ class _PageTopSetOffDisplayDetector:
 
     layout: LayoutStats
     page_heights: Dict[int, float]
+    page_widths: Dict[int, float]
 
     def matches(self, blocks: List[Dict[str, Any]], idx: int) -> bool:
         cur = blocks[idx]
@@ -29,25 +35,26 @@ class _PageTopSetOffDisplayDetector:
         text = str(cur.get("text", "")).strip()
         if cur.get("type") != PARAGRAPH or page is None or not bb or not text:
             return False
-        if not self._has_candidate_position_and_measure(cur, text, bb):
+        if not self._has_candidate_position_and_measure(cur, text, bb, page):
             return False
         if self._has_prior_same_page_content(blocks, idx, page, float(bb[1])):
             return False
         return self._has_following_same_page_separation(blocks, idx, page, bb)
 
     def _has_candidate_position_and_measure(
-        self, cur: Dict[str, Any], text: str, bb: List[float]
+        self, cur: Dict[str, Any], text: str, bb: List[float], page: int
     ) -> bool:
         if not _is_near_page_top(cur, self.page_heights):
             return False
         if len(text) < 45 or len(text) > 220:
             return False
-        if text.endswith(("：", ":")):
-            return False
+        body_left, _body_right, body_width = _scaled_body_metrics(
+            self.layout, self.page_widths.get(page)
+        )
         width = float(bb[2]) - float(bb[0])
-        if float(bb[0]) < self.layout.body_left + 28:
+        if float(bb[0]) < body_left + 28:
             return False
-        return width <= self.layout.body_width * 0.96
+        return width <= body_width * 0.96
 
     def _has_prior_same_page_content(
         self, blocks: List[Dict[str, Any]], idx: int, page: int, top: float
@@ -99,7 +106,9 @@ def reconcile_page_top_set_off_display_blocks(
 ) -> None:
     """Promote page-top paragraphs that are laid out as standalone display text."""
     detector = _PageTopSetOffDisplayDetector(
-        layout=layout, page_heights=_page_coord_heights(blocks)
+        layout=layout,
+        page_heights=_page_coord_heights(blocks),
+        page_widths=_page_coord_widths(blocks),
     )
     for i, cur in enumerate(blocks):
         if not detector.matches(blocks, i):

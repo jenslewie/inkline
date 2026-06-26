@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from .cross_page import merge_cross_page_paragraphs, resolve_source_pdf_path
 from .display_block import reconcile_generic_display_block_structures
-from .display_block.cjk_numbered import reconcile_cjk_numbered_display_blocks
 from .display_block.layout import reconcile_display_blocks
 from .figure import reconcile_figure_captions
 from .footnote import (
@@ -23,7 +22,6 @@ __all__ = [
     "merge_cross_page_paragraphs",
     "promote_cross_page_footnote_continuation_paragraphs",
     "promote_page_reference_list_footnotes",
-    "reconcile_cjk_numbered_display_blocks",
     "reconcile_display_blocks",
     "reconcile_figure_captions",
     "reconcile_generic_display_block_structures",

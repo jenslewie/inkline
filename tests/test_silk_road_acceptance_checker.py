@@ -141,9 +141,7 @@ def test_plan2_accepts_display_target_absorbed_into_merged_block() -> None:
     failures = {(item.plan, item.check) for item in findings if item.status == "FAIL"}
     assert ("plan2", "b000982") not in failures
     assert any(
-        item.status == "PASS"
-        and item.check == "b000982"
-        and "b000981" in item.detail
+        item.status == "PASS" and item.check == "b000982" and "b000981" in item.detail
         for item in findings
     )
 
@@ -337,6 +335,112 @@ def test_plan2_accepts_storyteller_army_body_as_paragraph() -> None:
     assert ("plan2", "storyteller_army_body") not in failures
 
 
+def test_plan2_rejects_gaochang_king_intro_as_display_block() -> None:
+    target = "高昌王想劝他留下："
+    findings = checker.check_plan2_display(
+        {},
+        {
+            "b000789": _block(
+                "b000789",
+                "display_block",
+                target,
+            )
+        },
+    )
+
+    failures = {(item.plan, item.check) for item in findings if item.status == "FAIL"}
+    assert ("plan2", "gaochang_king_intro") in failures
+
+
+def test_plan2_accepts_gaochang_king_intro_as_paragraph() -> None:
+    target = "高昌王想劝他留下："
+    findings = checker.check_plan2_display(
+        {},
+        {
+            "b000789": _block(
+                "b000789",
+                "paragraph",
+                target,
+            )
+        },
+    )
+
+    failures = {(item.plan, item.check) for item in findings if item.status == "FAIL"}
+    assert ("plan2", "gaochang_king_intro") not in failures
+
+
+def test_plan2_rejects_gaochang_dispute_tail_left_in_display_block() -> None:
+    findings = checker.check_plan2_display(
+        {},
+        {
+            "b000790": _block(
+                "b000790",
+                "display_block",
+                "自承法师名。\n玄奘不同意，二人便开始争吵。高昌王威胁要把玄奘遣送回国。玄奘",
+            ),
+            "b000797": _block(
+                "b000797",
+                "paragraph",
+                "坚持要走，国王就把玄奘锁在宫里。",
+            ),
+        },
+    )
+
+    failures = {(item.plan, item.check) for item in findings if item.status == "FAIL"}
+    assert ("plan2", "gaochang_dispute_joined_body") in failures
+
+
+def test_plan2_accepts_gaochang_dispute_tail_joined_as_paragraph() -> None:
+    findings = checker.check_plan2_display(
+        {},
+        {
+            "b000791_body": _block(
+                "b000791_body",
+                "paragraph",
+                "玄奘不同意，二人便开始争吵。高昌王威胁要把玄奘遣送回国。"
+                "玄奘坚持要走，国王就把玄奘锁在宫里。",
+            ),
+        },
+    )
+
+    failures = {(item.plan, item.check) for item in findings if item.status == "FAIL"}
+    assert ("plan2", "gaochang_dispute_joined_body") not in failures
+
+
+def test_plan2_rejects_gaochang_route_body_as_display_block() -> None:
+    target = "玄奘的路线让他可以尽量处在西突厥及其同盟的控制区内"
+    findings = checker.check_plan2_display(
+        {},
+        {
+            "b000799": _block(
+                "b000799",
+                "display_block",
+                target,
+            )
+        },
+    )
+
+    failures = {(item.plan, item.check) for item in findings if item.status == "FAIL"}
+    assert ("plan2", "gaochang_route_body") in failures
+
+
+def test_plan2_accepts_gaochang_route_body_as_paragraph() -> None:
+    target = "玄奘的路线让他可以尽量处在西突厥及其同盟的控制区内"
+    findings = checker.check_plan2_display(
+        {},
+        {
+            "b000799": _block(
+                "b000799",
+                "paragraph",
+                target,
+            )
+        },
+    )
+
+    failures = {(item.plan, item.check) for item in findings if item.status == "FAIL"}
+    assert ("plan2", "gaochang_route_body") not in failures
+
+
 def test_plan1_rejects_gaochang_caption_spilled_into_flow_blocks() -> None:
     baseline = _document(
         [
@@ -355,7 +459,9 @@ def test_plan1_rejects_gaochang_caption_spilled_into_flow_blocks() -> None:
         [
             _block("b000791", "figure", attrs={"captions": []}),
             _block("b000792", "heading", "高昌故城遗址"),
-            _block("b000793", "paragraph", "吐鲁番附近高昌故城夯土墙是中国境内为数不多的地上古迹之一。"),
+            _block(
+                "b000793", "paragraph", "吐鲁番附近高昌故城夯土墙是中国境内为数不多的地上古迹之一。"
+            ),
         ]
     )
 
@@ -584,9 +690,7 @@ def test_plan5_accepts_table_notes_after_table_id_drift() -> None:
                 "b000712",
                 "table",
                 attrs={
-                    "table_notes": [
-                        "资料来源：Georges-Jean Pinault, Mission Paul Pelliot VIII."
-                    ]
+                    "table_notes": ["资料来源：Georges-Jean Pinault, Mission Paul Pelliot VIII."]
                 },
             ),
         ]

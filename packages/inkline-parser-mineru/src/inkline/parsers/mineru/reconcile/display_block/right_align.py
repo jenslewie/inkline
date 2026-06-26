@@ -13,7 +13,12 @@ from ..block_access import block_page as _block_page
 from ..block_merge import _refresh_display_block_attrs
 from ..block_nav import _prev_text_non_float
 from ..constants import FLOAT_LIKE_TYPES
-from ..layout_helpers import _is_near_page_bottom, _page_coord_heights
+from ..layout_helpers import (
+    _is_near_page_bottom,
+    _page_coord_heights,
+    _page_coord_widths,
+    _scaled_body_metrics,
+)
 
 
 def reconcile_right_aligned_terminal_blocks(
@@ -30,11 +35,14 @@ def reconcile_right_aligned_terminal_blocks(
       5. Following block (if any) is on a different page or is also right-aligned.
     """
     page_heights = _page_coord_heights(blocks)
+    page_widths = _page_coord_widths(blocks)
 
     for idx, b in enumerate(blocks):
         if b.get("type") not in {PARAGRAPH, HEADING}:
             continue
-        if not _is_right_aligned_terminal_candidate(b, blocks, idx, layout, page_heights):
+        if not _is_right_aligned_terminal_candidate(
+            b, blocks, idx, layout, page_heights, page_widths
+        ):
             continue
 
         # Promote to display_block
@@ -42,6 +50,7 @@ def reconcile_right_aligned_terminal_blocks(
         b.pop("level", None)
         _refresh_display_block_attrs(b, prev_text=_prev_text_non_float(blocks, idx))
         attrs = b.setdefault("attrs", {})
+        attrs["layout_form"] = "short_line_group"
         attrs["alignment"] = "right"
         sh = attrs.setdefault("style_hints", {})
         sh["text_align"] = "right"
@@ -56,6 +65,7 @@ def _is_right_aligned_terminal_candidate(
     idx: int,
     layout: LayoutStats,
     page_heights: Dict[int, float],
+    page_widths: Dict[int, float] | None = None,
 ) -> bool:
     text = str(b.get("text", "")).strip()
     if not text:
@@ -76,24 +86,27 @@ def _is_right_aligned_terminal_candidate(
     x2 = float(bb[2])
     width = max(0.0, x2 - x0)
 
+    page = _block_page(b)
+    if page is None:
+        return False
+    body_left, body_right, body_width = _scaled_body_metrics(
+        layout, page_widths.get(page) if page_widths else None
+    )
+
     # Must be right-aligned: right edge near body_right
-    right_near_edge = x2 >= layout.body_right - max(80.0, layout.body_width * 0.08)
+    right_near_edge = x2 >= body_right - max(80.0, body_width * 0.08)
     if not right_near_edge:
         return False
 
     # Left edge must be past body center (not just mildly indented)
-    body_center = (layout.body_left + layout.body_right) / 2.0
-    past_center = x0 >= body_center - max(40.0, layout.body_width * 0.05)
+    body_center = (body_left + body_right) / 2.0
+    past_center = x0 >= body_center - max(40.0, body_width * 0.05)
     # Width must be compact (not a full-width block at right margin)
-    compact = width <= layout.body_width * 0.55
+    compact = width <= body_width * 0.55
     if not past_center or not compact:
         return False
 
     # Position: near bottom of page OR significant gap from previous block
-    page = _block_page(b)
-    if page is None:
-        return False
-
     at_page_end = _is_near_page_bottom(b, page_heights)
 
     # Gap from previous non-float block
@@ -123,11 +136,9 @@ def _is_right_aligned_terminal_candidate(
         if nxt_page == page:
             nbb = _bbox(nxt)
             if nbb:
-                nxt_at_left = float(nbb[0]) <= layout.body_left + max(
-                    48.0, layout.body_width * 0.06
-                )
+                nxt_at_left = float(nbb[0]) <= body_left + max(48.0, body_width * 0.06)
                 nxt_width = max(0.0, float(nbb[2]) - float(nbb[0]))
-                nxt_full_width = nxt_width >= layout.body_width * 0.88
+                nxt_full_width = nxt_width >= body_width * 0.88
                 if nxt_at_left and nxt_full_width:
                     gap = float(nbb[1]) - float(bb[3])
                     block_height = float(bb[3]) - float(bb[1])

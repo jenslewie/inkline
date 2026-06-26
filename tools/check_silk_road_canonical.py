@@ -34,7 +34,11 @@ PLAN1_PAGE51_PARAGRAPH_FIXES = {
     ),
     "date_range_tail_joined": ("这种方法只能得到一个大致的时间范围，即一到八世纪之间。",),
 }
-PLAN1_EXPECTED_REMOVED = {"b000272", *PLAN1_FIGURE_GROUPS["b000102"], *PLAN1_FIGURE_GROUPS["b001422"]}
+PLAN1_EXPECTED_REMOVED = {
+    "b000272",
+    *PLAN1_FIGURE_GROUPS["b000102"],
+    *PLAN1_FIGURE_GROUPS["b001422"],
+}
 
 PLAN2_DISPLAY_BLOCKS = {
     "b000058",
@@ -51,6 +55,9 @@ PLAN2_PARAGRAPH_TEXTS = {
     "manual_audience_identity": "只有僧人或者资深的佛教学习者才会用到这样的句子",
     "manual_pilgrim_user": "手册的假想使用者是朝觐路上的僧侣",
     "animal_loss_letter": "一封随从的信解释了牲口是怎么丢的。",
+    "gaochang_dispute_joined_body": "玄奘不同意，二人便开始争吵。高昌王威胁要把玄奘遣送回国。玄奘坚持要走",
+    "gaochang_king_intro": "高昌王想劝他留下：",
+    "gaochang_route_body": "玄奘的路线让他可以尽量处在西突厥及其同盟的控制区内",
     "loulan_king_commands_body": "这些命令都来自楼兰王，写给相当于刺史的当地最高长官cozbo",
     "storyteller_army_body": "然后说书人指着画中军队的图说：“煞戮横尸遍野处。” 虽然这类画无一保留下来",
 }
@@ -126,7 +133,14 @@ def check_plan1_figures(
     removed_caption = "b000272" not in candidate_by_id
     repaired_image = "repaired/" in str(attrs_of(figure).get("image_path") or "")
     if figure and figure.get("type") == "figure" and removed_caption and repaired_image:
-        findings.append(finding("PASS", "plan1", "b000271_visual_image", "b000272 removed and repaired figure image is used"))
+        findings.append(
+            finding(
+                "PASS",
+                "plan1",
+                "b000271_visual_image",
+                "b000272 removed and repaired figure image is used",
+            )
+        )
     else:
         findings.append(
             finding(
@@ -178,7 +192,9 @@ def check_plan1_figures(
             for block in candidate_by_id.values()
         ):
             continue
-        figure = _figure_caption_carrier(candidate_by_id, snippets) or candidate_by_id.get(figure_id)
+        figure = _figure_caption_carrier(candidate_by_id, snippets) or candidate_by_id.get(
+            figure_id
+        )
         carrier_id = str((figure or {}).get("block_id") or figure_id)
         caption_text = "\n".join(str(item) for item in attrs_of(figure).get("captions") or [])
         spilled = [
@@ -188,7 +204,12 @@ def check_plan1_figures(
             and block.get("type") in {"heading", "paragraph", "caption"}
             and any(snippet in text_of(block) for snippet in snippets)
         ]
-        if figure and figure.get("type") == "figure" and all(snippet in caption_text for snippet in snippets) and not spilled:
+        if (
+            figure
+            and figure.get("type") == "figure"
+            and all(snippet in caption_text for snippet in snippets)
+            and not spilled
+        ):
             findings.append(
                 finding(
                     "PASS",
@@ -208,9 +229,13 @@ def check_plan1_figures(
             )
 
     blocks = list(candidate_by_id.values())
-    page51_relevant = "b000289" in baseline_by_id or "b000289" in candidate_by_id or any(
-        any(snippet in text_of(block) for snippet in PLAN1_PAGE51_CAPTION)
-        for block in candidate_by_id.values()
+    page51_relevant = (
+        "b000289" in baseline_by_id
+        or "b000289" in candidate_by_id
+        or any(
+            any(snippet in text_of(block) for snippet in PLAN1_PAGE51_CAPTION)
+            for block in candidate_by_id.values()
+        )
     )
     if page51_relevant:
         page51_figure = candidate_by_id.get("b000289")
@@ -253,7 +278,9 @@ def check_plan1_figures(
             ]
             if carriers:
                 ids = [str(block.get("block_id")) for block in carriers]
-                findings.append(finding("PASS", "plan1", check_name, f"paragraph text carried by {ids}"))
+                findings.append(
+                    finding("PASS", "plan1", check_name, f"paragraph text carried by {ids}")
+                )
             else:
                 findings.append(
                     finding(
@@ -279,7 +306,9 @@ def check_plan1_figures(
                 )
             )
         else:
-            findings.append(finding("PASS", "plan1", "page51_no_bad_time_join", "no bad time/page join"))
+            findings.append(
+                finding("PASS", "plan1", "page51_no_bad_time_join", "no bad time/page join")
+            )
 
     caption_spills = figure_caption_spills(baseline_by_id, candidate_by_id)
     if caption_spills:
@@ -295,7 +324,11 @@ def check_plan1_figures(
             )
         )
     else:
-        findings.append(finding("PASS", "plan1", "no_figure_caption_spillover", "no lost figure captions detected"))
+        findings.append(
+            finding(
+                "PASS", "plan1", "no_figure_caption_spillover", "no lost figure captions detected"
+            )
+        )
 
     return findings
 
@@ -408,7 +441,9 @@ def check_plan2_display(
             continue
         if block.get("type") != "display_block":
             findings.append(
-                finding("FAIL", "plan2", block_id, f"expected display_block, got {block.get('type')}")
+                finding(
+                    "FAIL", "plan2", block_id, f"expected display_block, got {block.get('type')}"
+                )
             )
             continue
         if block_id == "b000058" and attrs_of(block).get("alignment") != "right":
@@ -448,7 +483,9 @@ def check_plan2_display(
                 finding("FAIL", "plan2", block_id, f"expected paragraph, got {block.get('type')}")
             )
         else:
-            findings.append(finding("PASS", "plan2", block_id, "paragraph classification is correct"))
+            findings.append(
+                finding("PASS", "plan2", block_id, "paragraph classification is correct")
+            )
 
     blocks = list(candidate_by_id.values())
     for name, needle in PLAN2_DISPLAY_TEXTS.items():
@@ -472,7 +509,9 @@ def check_plan2_display(
             )
         else:
             ids = [str(block.get("block_id")) for block in carriers]
-            findings.append(finding("PASS", "plan2", name, f"target text carried by display blocks {ids}"))
+            findings.append(
+                finding("PASS", "plan2", name, f"target text carried by display blocks {ids}")
+            )
 
     for name, expected_text in PLAN2_EXACT_DISPLAY_TEXTS.items():
         expected = _normalize_multiline_text(expected_text)
@@ -522,7 +561,9 @@ def check_plan2_display(
             )
         else:
             ids = [str(block.get("block_id")) for block in carriers]
-            findings.append(finding("PASS", "plan2", name, f"target text carried by paragraphs {ids}"))
+            findings.append(
+                finding("PASS", "plan2", name, f"target text carried by paragraphs {ids}")
+            )
     return findings
 
 
@@ -617,9 +658,7 @@ def _typed_text_carrier(
     return None
 
 
-def _text_carriers(
-    candidate_by_id: dict[str, dict[str, Any]], text: str
-) -> list[dict[str, Any]]:
+def _text_carriers(candidate_by_id: dict[str, dict[str, Any]], text: str) -> list[dict[str, Any]]:
     if not text:
         return []
     normalized = "".join(str(text).split())
@@ -650,8 +689,12 @@ def check_plan4_footnote_contract(
         for block_id in sorted(set(old_footnotes) & set(new_footnotes))
         if old_footnotes[block_id] != new_footnotes[block_id]
     ]
-    old_markers = sum(1 for text in old_footnotes.values() if FOOTNOTE_MARKER_RE.match(text.strip()))
-    new_markers = sum(1 for text in new_footnotes.values() if FOOTNOTE_MARKER_RE.match(text.strip()))
+    old_markers = sum(
+        1 for text in old_footnotes.values() if FOOTNOTE_MARKER_RE.match(text.strip())
+    )
+    new_markers = sum(
+        1 for text in new_footnotes.values() if FOOTNOTE_MARKER_RE.match(text.strip())
+    )
     if changed:
         return [
             finding(
@@ -674,7 +717,9 @@ def check_plan4_footnote_contract(
 def check_plan5_tables(candidate_by_id: dict[str, dict[str, Any]]) -> list[Finding]:
     findings: list[Finding] = []
     for block_id, expected_substring in PLAN5_TABLE_NOTES.items():
-        block = _table_note_carrier(candidate_by_id, expected_substring) or candidate_by_id.get(block_id)
+        block = _table_note_carrier(candidate_by_id, expected_substring) or candidate_by_id.get(
+            block_id
+        )
         attrs = attrs_of(block)
         notes = attrs.get("table_notes")
         if block is None or block.get("type") != "table":
@@ -686,13 +731,23 @@ def check_plan5_tables(candidate_by_id: dict[str, dict[str, Any]]) -> list[Findi
         joined = "\n".join(str(note) for note in notes)
         if expected_substring not in joined:
             findings.append(
-                finding("FAIL", "plan5", block_id, f"missing expected table note substring {expected_substring!r}")
+                finding(
+                    "FAIL",
+                    "plan5",
+                    block_id,
+                    f"missing expected table note substring {expected_substring!r}",
+                )
             )
             continue
         markers = [note for note in notes if is_continuation_marker(str(note))]
         if markers:
             findings.append(
-                finding("FAIL", "plan5", block_id, f"table_notes contains continuation markers {markers}")
+                finding(
+                    "FAIL",
+                    "plan5",
+                    block_id,
+                    f"table_notes contains continuation markers {markers}",
+                )
             )
             continue
         findings.append(
@@ -711,7 +766,12 @@ def check_plan5_tables(candidate_by_id: dict[str, dict[str, Any]]) -> list[Findi
     ]
     if blocks_with_alignment:
         findings.append(
-            finding("PASS", "plan5", "cell_alignments_present", f"found on blocks {blocks_with_alignment}")
+            finding(
+                "PASS",
+                "plan5",
+                "cell_alignments_present",
+                f"found on blocks {blocks_with_alignment}",
+            )
         )
     else:
         findings.append(
@@ -841,9 +901,7 @@ def check_display_scope_regression(
     unexpected_added = [
         block_id for block_id in added if not block_id.endswith(ALLOWED_NEW_BLOCK_SUFFIXES)
     ]
-    unexpected_removed = [
-        block_id for block_id in removed if block_id not in allowed_target_ids
-    ]
+    unexpected_removed = [block_id for block_id in removed if block_id not in allowed_target_ids]
 
     if unexpected_added:
         findings.append(

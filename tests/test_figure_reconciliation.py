@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from inkline.parsers.mineru.reconcile.figure import reconcile_figure_captions
-from inkline.parsers.mineru.schema.block_types import CAPTION, FIGURE, HEADING, PARAGRAPH
+from inkline.parsers.mineru.schema.block_types import (
+    CAPTION,
+    DISPLAY_BLOCK,
+    FIGURE,
+    HEADING,
+    PARAGRAPH,
+)
 
 
 def _block(type_: str, text: str, page: int = 1, bbox: tuple | None = None) -> dict:
@@ -145,7 +151,10 @@ def test_absorb_text_overlapping_figure_bbox_area() -> None:
 def test_absorb_text_tightly_adjacent_with_ocr_match() -> None:
     """PARAGRAPH flush against image bottom edge with OCR text match should be absorbed."""
     figure = _block(
-        FIGURE, "", page=1, bbox=[100, 100, 700, 600],
+        FIGURE,
+        "",
+        page=1,
+        bbox=[100, 100, 700, 600],
     )
     figure["attrs"] = {"ocr_text_in_image": "北京 上海 广州 深圳"}
     # text block center at y=603 — 3px from figure bottom edge (600)
@@ -230,7 +239,11 @@ def test_absorb_following_visual_legend_strip_with_interleaved_small_figure() ->
 
     assert len(blocks) == 1
     attrs = blocks[0]["attrs"]
-    assert attrs["absorbed_block_ids"] == [title["block_id"], route_a["block_id"], route_b["block_id"]]
+    assert attrs["absorbed_block_ids"] == [
+        title["block_id"],
+        route_a["block_id"],
+        route_b["block_id"],
+    ]
     assert attrs["fragment_block_ids"] == [figure["block_id"], scale["block_id"]]
     assert attrs["embedded_text_absorb_reason"] == "following_visual_legend_strip"
     assert attrs["captions"] == []
@@ -334,7 +347,9 @@ def test_body_paragraph_after_large_float_still_rejected() -> None:
     figure = _block(FIGURE, "", page=1, bbox=[100, 100, 700, 500])
     # This body paragraph is below the figure but looks like caption position.
     # However its left edge < 120 and width > 500 → should be rejected.
-    body = _block(PARAGRAPH, "根据上图可以看出，整体趋势是向上的。", page=1, bbox=[80, 510, 900, 560])
+    body = _block(
+        PARAGRAPH, "根据上图可以看出，整体趋势是向上的。", page=1, bbox=[80, 510, 900, 560]
+    )
     blocks = [figure, body]
 
     reconcile_figure_captions(blocks)
@@ -368,6 +383,45 @@ def test_heading_title_and_body_width_paragraph_merge_as_caption() -> None:
     ]
     assert attrs["caption_block_ids"] == [title["block_id"], body["block_id"]]
     assert blocks[0]["source"]["bbox"] == [81, 227, 850, 550]
+
+
+def test_right_side_heading_and_display_block_merge_as_caption() -> None:
+    figure = _block(FIGURE, "", page=71, bbox=[133, 118, 532, 518])
+    title = _block(HEADING, "东西方相会于佉卢文书", page=71, bbox=[562, 337, 765, 354])
+    body = _block(
+        DISPLAY_BLOCK,
+        "这件尼雅出土的木制文书完好无损，上下两片合在一起，用绳子穿过沟槽绑好后再用泥封住。"
+        "左边印章上是汉字；右边印章上是西方人样貌的头像，很可能是希腊罗马的某神，"
+        "这种图像常见于健陀罗印章。这份双木板文书记录了一桩进行奴隶、牲畜、土地等交易的情况，"
+        "其中还给出了记录交易的官员姓名。",
+        page=71,
+        bbox=[560, 358, 901, 520],
+    )
+    body["attrs"] = {
+        "layout_role": "inline_display_block",
+        "classification_evidence": ["geometry_right_aligned_group"],
+    }
+    body_after = _block(
+        PARAGRAPH,
+        "这些命令都来自楼兰王，写给相当于刺史的当地最高长官cozbo。",
+        page=71,
+        bbox=[127, 553, 899, 602],
+    )
+    blocks = [figure, title, body, body_after]
+
+    reconcile_figure_captions(blocks)
+
+    assert len(blocks) == 2
+    attrs = blocks[0]["attrs"]
+    assert attrs["captions"] == [
+        "东西方相会于佉卢文书\n"
+        "这件尼雅出土的木制文书完好无损，上下两片合在一起，用绳子穿过沟槽绑好后再用泥封住。"
+        "左边印章上是汉字；右边印章上是西方人样貌的头像，很可能是希腊罗马的某神，"
+        "这种图像常见于健陀罗印章。这份双木板文书记录了一桩进行奴隶、牲畜、土地等交易的情况，"
+        "其中还给出了记录交易的官员姓名。"
+    ]
+    assert attrs["caption_block_ids"] == [title["block_id"], body["block_id"]]
+    assert blocks[1] is body_after
 
 
 def test_heading_caption_title_does_not_absorb_unaligned_body_paragraph() -> None:
