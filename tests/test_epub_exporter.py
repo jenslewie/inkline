@@ -1693,6 +1693,65 @@ def test_chapter_xhtml_readable_block_formatting_and_xml_parseable(tmp_path):
             assert "  <h1>" in content or "  <h2>" in content
 
 
+def test_chapter_xhtml_keeps_block_tags_on_separate_lines(tmp_path):
+    """Generated block containers should not be glued together in chapter XHTML."""
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "fig.jpg"
+    img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 1},
+            "attrs": {
+                "image_path": "images/fig.jpg",
+                "captions": ["Figure title\nFigure body"],
+            },
+        },
+        {
+            "block_id": "b_note",
+            "type": "footnote",
+            "text": "1 Footnote text",
+            "source": {"page": 1},
+            "attrs": {"note_id": "note_1"},
+        },
+        {
+            "block_id": "b_display",
+            "type": "display_block",
+            "text": "Display line one\nDisplay line two",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_caption",
+            "type": "caption",
+            "text": "Standalone caption\ncaption body",
+            "source": {"page": 1},
+            "attrs": {},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8")
+            for name in zf.namelist()
+            if name.startswith("EPUB/chapter_") and name.endswith(".xhtml")
+        )
+
+    assert "</p><" not in html
+    assert "</div><" not in html
+    assert "</figure><" not in html
+    assert "</figcaption><" not in html
+    assert "</aside><" not in html
+    assert "</blockquote><" not in html
+
+
 def test_figure_caption_newlines_render_as_structured_paragraphs(tmp_path):
     """Figure captions with embedded newlines should render as
     <figcaption><p class="caption-title">...</p><p class="caption-body">...</p>

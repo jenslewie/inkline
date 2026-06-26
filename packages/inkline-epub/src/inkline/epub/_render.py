@@ -245,9 +245,13 @@ def chapter_documents(
                 # Snapshot asset not found — produce a clean placeholder so
                 # the page position is not silently blank.
                 current_html.append(
-                    '<figure class="visual-page image-placeholder">'
-                    '<div role="img" aria-label="Image">[Image]</div>'
-                    "</figure>"
+                    "\n".join(
+                        [
+                            '<figure class="visual-page image-placeholder">',
+                            '  <div role="img" aria-label="Image">[Image]</div>',
+                            "</figure>",
+                        ]
+                    )
                 )
             # Skip this block — the snapshot (or placeholder) replaces it.
             # Also skip any trailing captions if the block is a figure.
@@ -302,7 +306,13 @@ def chapter_documents(
             id_attr = f' id="{escape(str(note_id), quote=True)}"' if note_id else ""
             stripped_text = strip_footnote_marker(text, attrs)
             current_html.append(
-                f'<aside epub:type="footnote"{id_attr}><p>{escape(stripped_text)}</p></aside>'
+                "\n".join(
+                    [
+                        f'<aside epub:type="footnote"{id_attr}>',
+                        f"  <p>{escape(stripped_text)}</p>",
+                        "</aside>",
+                    ]
+                )
             )
 
         i += 1
@@ -351,10 +361,12 @@ def _snapshot_figure_html(
         return None
     image_name = asset_image_name(asset)
     alt = f"Page {page_num}"
-    return (
-        '<figure class="visual-page">'
-        f'<img src="images/{escape(image_name, quote=True)}" alt="{escape(alt, quote=True)}"/>'
-        "</figure>"
+    return "\n".join(
+        [
+            '<figure class="visual-page">',
+            f'  <img src="images/{escape(image_name, quote=True)}" alt="{escape(alt, quote=True)}"/>',
+            "</figure>",
+        ]
     )
 
 
@@ -477,14 +489,7 @@ def _figure_html(
                 figure_classes.append("caption-left")
     figure_class_attr = ' class="' + " ".join(figure_classes) + '"'
 
-    if has_caption:
-        cap_parts: list[str] = []
-        cap_parts.append(f'<p class="caption-title">{segments[0]}</p>')
-        for seg in segments[1:]:
-            cap_parts.append(f'<p class="caption-body">{seg}</p>')
-        caption_html = "<figcaption>" + "".join(cap_parts) + "</figcaption>"
-    else:
-        caption_html = ""
+    caption_html = _figure_caption_html(segments) if has_caption else ""
 
     if image_asset and Path(image_asset["path"]).exists():
         image_name = asset_image_name(image_asset)
@@ -500,10 +505,7 @@ def _figure_html(
                 )
             )
         return _figure_with_page_break(
-            f"<figure{figure_class_attr}>"
-            f"{image_html}"
-            f"\n  {caption_html}\n"
-            "</figure>"
+            _stacked_figure_html(figure_class_attr, image_html, caption_html)
         )
 
     if inline_img:
@@ -520,29 +522,47 @@ def _figure_html(
                 )
             )
         return _figure_with_page_break(
-            f"<figure{figure_class_attr}>"
-            f"{image_html}"
-            f"\n  {caption_html}\n"
-            "</figure>"
+            _stacked_figure_html(figure_class_attr, image_html, caption_html)
         )
 
     # No image available — produce a minimal placeholder without debug text
     if has_caption:
         return _figure_with_page_break(
-            f'<figure class="image-placeholder figure-block has-caption">'
-            '<div role="img" aria-label="Image">[Image]</div>'
-            f"\n  {caption_html}\n"
-            "</figure>"
+            _stacked_figure_html(
+                ' class="image-placeholder figure-block has-caption"',
+                '<div role="img" aria-label="Image">[Image]</div>',
+                caption_html,
+            )
         )
     return _figure_with_page_break(
-        '<figure class="image-placeholder figure-block">'
-        '<div role="img" aria-label="Image">[Image]</div>'
-        "</figure>"
+        _stacked_figure_html(
+            ' class="image-placeholder figure-block"',
+            '<div role="img" aria-label="Image">[Image]</div>',
+            "",
+        )
     )
 
 
 def _figure_with_page_break(figure_html: str) -> str:
     return '<div class="figure-page-break" aria-hidden="true"></div>\n' + figure_html
+
+
+def _figure_caption_html(segments: list[str], attrs: str = "") -> str:
+    cap_parts = [f'<p class="caption-title">{segments[0]}</p>']
+    cap_parts.extend(f'<p class="caption-body">{seg}</p>' for seg in segments[1:])
+    return "\n".join(
+        [f"<figcaption{attrs}>", *_indent_lines(cap_parts, "  "), "</figcaption>"]
+    )
+
+
+def _stacked_figure_html(
+    figure_class_attr: str, image_html: str, caption_html: str
+) -> str:
+    parts = [f"<figure{figure_class_attr}>", *_indent_lines([image_html], "  ")]
+    if caption_html:
+        parts.extend(_indent_lines(caption_html.splitlines(), "  "))
+    parts.append("</figure>")
+    return "\n".join(parts)
 
 
 class _SideCaptionLayout:
@@ -558,10 +578,13 @@ def _side_caption_figure_html(
     caption_html: str,
     layout: _SideCaptionLayout,
 ) -> str:
-    image_part = (
-        '<div class="figure-side-image" '
-        f'style="flex-basis: {_format_percent(layout.image_percent)}%;">'
-        f"{image_html}</div>"
+    image_part = "\n".join(
+        [
+            '<div class="figure-side-image" '
+            f'style="flex-basis: {_format_percent(layout.image_percent)}%;">',
+            *_indent_lines([image_html], "  "),
+            "</div>",
+        ]
     )
     caption_part = caption_html.replace(
         "<figcaption>",
@@ -569,10 +592,23 @@ def _side_caption_figure_html(
         1,
     )
     if layout.side == "left":
-        content = f"{caption_part}\n  {image_part}"
+        content_parts = [caption_part, image_part]
     else:
-        content = f"{image_part}\n  {caption_part}"
-    return f"<figure{figure_class_attr}>{content}\n</figure>"
+        content_parts = [image_part, caption_part]
+    content_lines: list[str] = []
+    for part in content_parts:
+        content_lines.extend(_indent_lines(part.splitlines(), "  "))
+    return "\n".join(
+        [
+            f"<figure{figure_class_attr}>",
+            *content_lines,
+            "</figure>",
+        ]
+    )
+
+
+def _indent_lines(lines: list[str], prefix: str) -> list[str]:
+    return [prefix + line if line.strip() else line for line in lines]
 
 
 def _caption_side_layout(block: dict[str, Any]) -> _SideCaptionLayout | None:
@@ -772,7 +808,7 @@ def _table_html(block: dict[str, Any]) -> str | None:
                 if cells:
                     rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
             if rows:
-                table_part = "<table>" + "".join(rows) + "</table>"
+                table_part = "\n".join(["<table>", *_indent_lines(rows, "  "), "</table>"])
                 table_part = _apply_cell_alignments(table_part, attrs.get("cell_alignments"))
 
     if table_part is None:
@@ -784,8 +820,11 @@ def _table_html(block: dict[str, Any]) -> str | None:
     # Filter out continuation-marker text that may have slipped through.
     notes = [n for n in table_notes if n and not _is_continuation_marker_text(n)]
     if notes:
-        notes_html = "".join(f'<p class="table-note">{escape(n)}</p>' for n in notes)
-        return f'{table_part}\n<div class="table-notes">{notes_html}</div>'
+        notes_html = [f'<p class="table-note">{escape(n)}</p>' for n in notes]
+        table_notes_html = "\n".join(
+            ['<div class="table-notes">', *_indent_lines(notes_html, "  "), "</div>"]
+        )
+        return f"{table_part}\n{table_notes_html}"
     return table_part
 
 
@@ -941,7 +980,7 @@ def _caption_html(block: dict[str, Any], blocks: list[dict[str, Any]], index: in
     parts.append(f'<p class="caption-title">{escape(lines[0])}</p>')
     for line in lines[1:]:
         parts.append(f'<p class="caption-body">{escape(line)}</p>')
-    return f'<div class="caption">{"".join(parts)}</div>'
+    return "\n".join(['<div class="caption">', *_indent_lines(parts, "  "), "</div>"])
 
 
 def _figcaption_structured(text: str) -> str:
@@ -954,7 +993,7 @@ def _figcaption_structured(text: str) -> str:
     parts.append(f'<p class="caption-title">{escape(lines[0])}</p>')
     for line in lines[1:]:
         parts.append(f'<p class="caption-body">{escape(line)}</p>')
-    return f"<figcaption>{''.join(parts)}</figcaption>"
+    return "\n".join(["<figcaption>", *_indent_lines(parts, "  "), "</figcaption>"])
 
 
 def _display_block_html(
@@ -984,6 +1023,10 @@ def _display_block_html(
         stripped = segment.strip()
         if stripped:
             paragraphs.append(f'<div class="display-block-paragraph">{stripped}</div>')
-    return (
-        f'<blockquote class="{escape(class_attr, quote=True)}">{"".join(paragraphs)}</blockquote>'
+    return "\n".join(
+        [
+            f'<blockquote class="{escape(class_attr, quote=True)}">',
+            *_indent_lines(paragraphs, "  "),
+            "</blockquote>",
+        ]
     )

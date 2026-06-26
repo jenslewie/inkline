@@ -22,20 +22,20 @@ def container_xml() -> str:
 
 def wrap_chapter(body: str, metadata: dict[str, Any]) -> str:
     lang = escape(metadata.get("language") or "zh-CN", quote=True)
-    # Indent each line of body by 2 spaces for readable XHTML output
-    indented_body = "\n".join("  " + line if line.strip() else line for line in body.split("\n"))
+    # Keep generated chapter XHTML readable while preserving existing body newlines.
+    indented_body = "\n".join("      " + line if line.strip() else line for line in body.split("\n"))
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{lang}" xml:lang="{lang}">
-<head>
-  <title>{escape(metadata.get("title") or metadata.get("doc_id") or "Book")}</title>
-  <link href="styles/book.css" rel="stylesheet" type="text/css"/>
-</head>
-<body>
-<main>
+  <head>
+    <title>{escape(metadata.get("title") or metadata.get("doc_id") or "Book")}</title>
+    <link href="styles/book.css" rel="stylesheet" type="text/css"/>
+  </head>
+  <body>
+    <main>
 {indented_body}
-</main>
-</body>
+    </main>
+  </body>
 </html>
 """
 
