@@ -6,11 +6,17 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from inkline.epub._assets import asset_image_name, collect_inline_images, image_assets_by_id
-from inkline.epub._nav import nav_xhtml, toc_heading_block_ids
-from inkline.epub._opf import container_xml, opf, wrap_chapter
-from inkline.epub._render import chapter_documents
-from inkline.epub._style import BOOK_CSS
+from inkline.epub.assets.resolver import (
+    asset_image_name,
+    collect_inline_images,
+    image_assets_by_id,
+)
+from inkline.epub.navigation.html import render_nav_xhtml
+from inkline.epub.navigation.resolver import resolve_nav_view, toc_heading_block_ids
+from inkline.epub.package.resolver import resolve_package_view
+from inkline.epub.package.xml import container_xml, render_opf_xml, wrap_chapter
+from inkline.epub.renderer import chapter_documents
+from inkline.epub.theme.style import BOOK_CSS
 
 
 def export_epub(
@@ -38,7 +44,9 @@ def export_epub(
         image_assets = _materialize_cropped_full_page_assets(
             document, image_assets=image_assets, temp_dir=Path(temp_dir)
         )
-        chapters = chapter_documents(document, image_assets=image_assets, inline_images=inline_images)
+        chapters = chapter_documents(
+            document, image_assets=image_assets, inline_images=inline_images
+        )
 
         with zipfile.ZipFile(output_file, "w") as archive:
             archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
@@ -46,10 +54,21 @@ def export_epub(
             archive.writestr("EPUB/styles/book.css", BOOK_CSS)
             archive.writestr(
                 "EPUB/nav.xhtml",
-                nav_xhtml(metadata, chapters, toc=toc, toc_heading_ids=toc_heading_ids),
+                render_nav_xhtml(
+                    resolve_nav_view(metadata, chapters, toc=toc, toc_heading_ids=toc_heading_ids)
+                ),
             )
             archive.writestr(
-                "EPUB/content.opf", opf(metadata, identifier, chapters, image_assets, inline_images)
+                "EPUB/content.opf",
+                render_opf_xml(
+                    resolve_package_view(
+                        metadata,
+                        identifier,
+                        chapters,
+                        image_assets,
+                        inline_images,
+                    )
+                ),
             )
             for index, chapter in enumerate(chapters, 1):
                 archive.writestr(

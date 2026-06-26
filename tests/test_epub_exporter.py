@@ -91,9 +91,7 @@ def test_export_epub_renders_figure_placeholder(tmp_path):
 
     with zipfile.ZipFile(output) as zf:
         names = zf.namelist()
-        html = "\n".join(
-            zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml")
-        )
+        html = "\n".join(zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml"))
     # Placeholder should be present but WITHOUT debug metadata
     assert "[Image]" in html
     assert "Image placeholder" not in html
@@ -183,9 +181,7 @@ def test_export_epub_renders_display_blocks_and_list_items(tmp_path):
 
     with zipfile.ZipFile(output) as zf:
         names = zf.namelist()
-        html = "\n".join(
-            zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml")
-        )
+        html = "\n".join(zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml"))
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
     assert 'class="display-block display-block-standalone"' in html
     assert 'class="display-block display-block-signature"' in html
@@ -1822,9 +1818,7 @@ def test_captioned_figure_has_new_css_classes(tmp_path):
 
     with zipfile.ZipFile(output) as zf:
         names = zf.namelist()
-        html = "\n".join(
-            zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml")
-        )
+        html = "\n".join(zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml"))
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
 
     # XHTML: figure should have figure-block and has-caption classes
@@ -1887,9 +1881,7 @@ def test_long_captioned_figure_gets_more_constrained_image_css(tmp_path):
 
     with zipfile.ZipFile(output) as zf:
         names = zf.namelist()
-        html = "\n".join(
-            zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml")
-        )
+        html = "\n".join(zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml"))
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
 
     assert 'class="figure-block has-caption"' in html
@@ -1989,6 +1981,43 @@ def test_caption_bbox_on_side_uses_side_caption_layout(tmp_path):
     image_rule = css.split(".figure-block.has-caption img {", 1)[1].split("}", 1)[0]
     assert "max-width: 60% !important" in image_rule
     assert "max-height: 16em !important" in image_rule
+
+
+def test_left_caption_bbox_uses_dom_order_without_extra_class(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    img_file = img_dir / "fig.png"
+    _write_png(img_file, width=600, height=900)
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_fig",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5, "bbox": [100, 145, 900, 475]},
+            "attrs": {
+                "image_path": "images/fig.png",
+                "image_bbox": [500, 145, 900, 453],
+                "caption_bbox": [100, 356, 450, 475],
+                "captions": ["左侧图注"],
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+
+    assert 'class="figure-block has-caption caption-side"' in html
+    figure_start = html.index('class="figure-block has-caption caption-side"')
+    figure_end = html.index("</figure>", figure_start)
+    figure_html = html[figure_start:figure_end]
+    assert "caption-left" not in figure_html
+    assert figure_html.index("<figcaption") < figure_html.index("figure-side-image")
 
 
 def test_tall_captioned_figure_keeps_caption_below(tmp_path):
@@ -2296,9 +2325,7 @@ def test_uncaptioned_map_like_images_render_full_width(tmp_path):
 
     with zipfile.ZipFile(output) as zf:
         names = zf.namelist()
-        html = "\n".join(
-            zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml")
-        )
+        html = "\n".join(zf.read(name).decode("utf-8") for name in names if name.endswith(".xhtml"))
         css = zf.read("EPUB/styles/book.css").decode("utf-8")
 
     assert html.count('class="figure-block figure-fullwidth"') == 2
