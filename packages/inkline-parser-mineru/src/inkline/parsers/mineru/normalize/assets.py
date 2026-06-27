@@ -253,7 +253,7 @@ def materialize_repaired_figure_image_assets(
             image_name = f"{block_id}_page_{page:04d}.png"
             image_path = asset_dir / image_name
             pix = doc[page - 1].get_pixmap(matrix=matrix, clip=rect, alpha=False)
-            _save_optimized_grayscale_png(pix, image_path)
+            _save_optimized_png(pix, image_path)
             attrs = b.setdefault("attrs", {})
             image_id = f"{block_id}-image"
             original = attrs.get("image_path")
@@ -281,7 +281,7 @@ def materialize_repaired_figure_image_assets(
         doc.close()
 
 
-def _save_optimized_grayscale_png(pix: Any, image_path: Path) -> None:
+def _save_optimized_png(pix: Any, image_path: Path) -> None:
     try:
         from PIL import Image  # type: ignore
     except Exception:
@@ -289,10 +289,33 @@ def _save_optimized_grayscale_png(pix: Any, image_path: Path) -> None:
         return
 
     try:
-        image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
+        image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        if _is_effectively_grayscale(image):
+            image = image.convert("L")
         image.save(image_path, optimize=True)
     except Exception:
         pix.save(str(image_path))
+
+
+def _is_effectively_grayscale(
+    image: Any, *, channel_delta: int = 5, min_gray_ratio: float = 0.99
+) -> bool:
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    if width <= 0 or height <= 0:
+        return False
+    x_step = max(1, width // 96)
+    y_step = max(1, height // 96)
+    pixels = rgb.load()
+    total = 0
+    gray = 0
+    for y in range(0, height, y_step):
+        for x in range(0, width, x_step):
+            r, g, b = pixels[x, y]
+            total += 1
+            if max(r, g, b) - min(r, g, b) <= channel_delta:
+                gray += 1
+    return bool(total and gray / total >= min_gray_ratio)
 
 
 def materialize_figure_path_assets(canonical: Dict[str, Any], output_dir: Path) -> None:

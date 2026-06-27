@@ -4,6 +4,8 @@ from typing import Any, cast
 
 from inkline.epub.figure.model import Caption, CaptionSide, ImageRef, SideCaptionLayout
 
+FULL_WIDTH_IMAGE_MIN_PERCENT = 80.0
+
 
 def estimate_document_page_width(document: dict[str, Any]) -> float | None:
     right_edges: list[float] = []
@@ -63,6 +65,13 @@ def infer_side_caption_layout(block: dict[str, Any]) -> SideCaptionLayout | None
 
 
 def infer_image_max_width_percent(block: dict[str, Any], page_width: float | None) -> float | None:
+    percent = infer_image_width_percent(block, page_width)
+    if percent is None or percent >= FULL_WIDTH_IMAGE_MIN_PERCENT:
+        return None
+    return percent
+
+
+def infer_image_width_percent(block: dict[str, Any], page_width: float | None) -> float | None:
     attrs = block.get("attrs") or {}
     bbox = attrs.get("image_bbox") or (block.get("source") or {}).get("bbox")
     if not page_width or page_width <= 0:
@@ -70,10 +79,7 @@ def infer_image_max_width_percent(block: dict[str, Any], page_width: float | Non
     width = bbox_width(bbox)
     if width <= 0:
         return None
-    percent = min(100.0, max(1.0, width / page_width * 100.0))
-    if percent >= 95.0:
-        return None
-    return percent
+    return min(100.0, max(1.0, width / page_width * 100.0))
 
 
 def infer_figure_classes(
@@ -85,7 +91,7 @@ def infer_figure_classes(
     classes = ["figure-block"]
     if image.kind == "placeholder":
         classes.insert(0, "image-placeholder")
-    if should_use_full_width_image(caption=caption, image=image):
+    if image.full_width:
         classes.append("figure-fullwidth")
     if caption:
         classes.append("has-caption")
@@ -100,12 +106,6 @@ def is_portrait_image(image: ImageRef | None) -> bool:
     if not image or not image.width or not image.height:
         return False
     return image.width > 0 and image.height > 0 and image.height / image.width >= 1.25
-
-
-def should_use_full_width_image(*, caption: Caption | None, image: ImageRef) -> bool:
-    if caption or not image.width or not image.height:
-        return False
-    return image.width > 0 and image.height > 0 and image.width / image.height >= 0.6
 
 
 def bbox_width(bbox: Any) -> float:

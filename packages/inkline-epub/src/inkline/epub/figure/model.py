@@ -15,6 +15,7 @@ class ImageRef:
     width: int | None = None
     height: int | None = None
     max_width_percent: float | None = None
+    full_width: bool = False
 
 
 @dataclass(frozen=True)

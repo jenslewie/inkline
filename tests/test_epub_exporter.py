@@ -37,6 +37,17 @@ def _write_png_with_dark_rect(
 def _write_png_with_dark_rects(
     path, *, width: int, height: int, rects: list[tuple[int, int, int, int]]
 ) -> None:
+    _write_png_with_rects(path, width=width, height=height, rects=rects)
+
+
+def _write_png_with_rects(
+    path,
+    *,
+    width: int,
+    height: int,
+    rects: list[tuple[int, int, int, int]],
+    rect_color: tuple[int, int, int] = (0, 0, 0),
+) -> None:
     def chunk(kind: bytes, data: bytes) -> bytes:
         return (
             struct.pack(">I", len(data))
@@ -50,7 +61,7 @@ def _write_png_with_dark_rects(
         row = bytearray(b"\x00")
         for x in range(width):
             if any(left <= x < right and top <= y < bottom for left, top, right, bottom in rects):
-                row.extend(b"\x00\x00\x00")
+                row.extend(bytes(rect_color))
             else:
                 row.extend(b"\xff\xff\xff")
         rows.append(bytes(row))
@@ -2360,6 +2371,45 @@ def test_fullwidth_map_pair_omits_inline_width_even_when_bboxes_differ(tmp_path)
     assert "max-width:" not in html
 
 
+def test_uncaptioned_landscape_figure_keeps_canonical_width_when_not_near_page_width(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    small_map = img_dir / "small-map.png"
+    _write_png(small_map, width=800, height=500)
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_page_width_anchor",
+            "type": "paragraph",
+            "text": "Page width anchor.",
+            "source": {"page": 5, "bbox": [0, 0, 1000, 40]},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_small_map",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5, "bbox": [100, 80, 400, 360]},
+            "attrs": {"image_path": "images/small-map.png", "captions": []},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+
+    image_start = html.index('src="images/b_small_map_small-map.png"')
+    figure_start = html.rfind("<figure", 0, image_start)
+    figure_end = html.index("</figure>", image_start)
+    figure_html = html[figure_start:figure_end]
+    assert "figure-fullwidth" not in figure_html
+    assert 'style="max-width: 30%;"' in figure_html
+
+
 def test_full_page_image_crop_trims_blank_below_bottom_rule(tmp_path):
     img_dir = tmp_path / "images"
     img_dir.mkdir()
@@ -2404,6 +2454,52 @@ def test_full_page_image_crop_trims_blank_below_bottom_rule(tmp_path):
         with Image.open(io.BytesIO(zf.read(image_name))) as cropped:
             assert cropped.mode == "L"
             assert cropped.height <= 35
+
+
+def test_full_page_image_crop_preserves_color_when_content_is_color(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    page_map = img_dir / "color-page-map.png"
+    _write_png_with_rects(
+        page_map,
+        width=420,
+        height=620,
+        rects=[(40, 200, 360, 360)],
+        rect_color=(180, 40, 20),
+    )
+    document = sample_document()
+    document["assets"]["images"] = [
+        {
+            "image_id": "page-map",
+            "path": "images/color-page-map.png",
+            "media_type": "image/png",
+        }
+    ]
+    document["blocks"] = [
+        {
+            "block_id": "b_page_map",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 124, "bbox": [0, 127, 770, 629]},
+            "attrs": {
+                "image_path": "images/color-page-map.png",
+                "captions": [],
+                "layout_role": "full_page_image",
+                "image_id": "page-map",
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        image_name = "EPUB/images/page-map_color-page-map_cropped.png"
+        assert image_name in zf.namelist()
+        from PIL import Image
+
+        with Image.open(io.BytesIO(zf.read(image_name))) as cropped:
+            assert cropped.mode == "RGB"
 
 
 def test_uncaptioned_map_like_images_render_full_width(tmp_path):

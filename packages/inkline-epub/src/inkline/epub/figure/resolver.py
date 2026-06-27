@@ -6,10 +6,11 @@ from typing import Any
 from inkline.epub.assets.resolver import asset_image_name
 from inkline.epub.figure.image_probe import image_pixel_dimensions
 from inkline.epub.figure.layout import (
+    FULL_WIDTH_IMAGE_MIN_PERCENT,
     infer_figure_classes,
     infer_image_max_width_percent,
+    infer_image_width_percent,
     infer_side_caption_layout,
-    should_use_full_width_image,
 )
 from inkline.epub.figure.model import Caption, FigureView, ImageRef
 
@@ -65,11 +66,9 @@ def resolve_figure_image(
 
     if image_asset and Path(image_asset["path"]).exists():
         width, height = _dimensions_or_empty(image_asset)
-        max_width_percent = _resolved_image_max_width_percent(
+        max_width_percent, full_width = _resolved_image_layout(
             block,
             caption=caption,
-            width=width,
-            height=height,
             page_width=page_width,
         )
         return ImageRef(
@@ -79,14 +78,13 @@ def resolve_figure_image(
             width=width,
             height=height,
             max_width_percent=max_width_percent,
+            full_width=full_width,
         )
     if inline_img:
         width, height = _dimensions_or_empty(inline_img)
-        max_width_percent = _resolved_image_max_width_percent(
+        max_width_percent, full_width = _resolved_image_layout(
             block,
             caption=caption,
-            width=width,
-            height=height,
             page_width=page_width,
         )
         return ImageRef(
@@ -96,24 +94,28 @@ def resolve_figure_image(
             width=width,
             height=height,
             max_width_percent=max_width_percent,
+            full_width=full_width,
         )
     return ImageRef(kind="placeholder", src=None, alt=text)
 
 
-def _resolved_image_max_width_percent(
+def _resolved_image_layout(
     block: dict[str, Any],
     *,
     caption: Caption | None,
-    width: int | None,
-    height: int | None,
     page_width: float | None,
-) -> float | None:
+) -> tuple[float | None, bool]:
     if caption:
-        return None
-    image = ImageRef(kind="asset", src=None, alt="", width=width, height=height)
-    if should_use_full_width_image(caption=caption, image=image):
-        return None
-    return infer_image_max_width_percent(block, page_width)
+        return None, False
+    attrs = block.get("attrs") or {}
+    width_percent = infer_image_width_percent(block, page_width)
+    full_width = bool(
+        attrs.get("layout_role") == "full_page_image"
+        or (width_percent is not None and width_percent >= FULL_WIDTH_IMAGE_MIN_PERCENT)
+    )
+    if full_width:
+        return None, True
+    return infer_image_max_width_percent(block, page_width), False
 
 
 def normalize_figure_caption(

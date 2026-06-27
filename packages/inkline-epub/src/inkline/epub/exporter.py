@@ -136,13 +136,41 @@ def _crop_asset_to_content(asset: dict[str, Any], *, temp_dir: Path) -> dict[str
             if crop_width >= width * 0.98 and crop_height >= height * 0.98:
                 return None
             output = temp_dir / f"{path.stem}_cropped.png"
-            rgb.crop(crop_box).convert("L").save(output, optimize=True)
+            _save_optimized_png(rgb.crop(crop_box), output)
     except OSError:
         return None
     cropped = dict(asset)
     cropped["path"] = str(output)
     cropped["media_type"] = "image/png"
     return cropped
+
+
+def _save_optimized_png(image: Any, output: Path) -> None:
+    if _is_effectively_grayscale(image):
+        image.convert("L").save(output, optimize=True)
+        return
+    image.save(output, optimize=True)
+
+
+def _is_effectively_grayscale(
+    image: Any, *, channel_delta: int = 5, min_gray_ratio: float = 0.99
+) -> bool:
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    if width <= 0 or height <= 0:
+        return False
+    x_step = max(1, width // 96)
+    y_step = max(1, height // 96)
+    pixels = rgb.load()
+    total = 0
+    gray = 0
+    for y in range(0, height, y_step):
+        for x in range(0, width, x_step):
+            r, g, b = pixels[x, y]
+            total += 1
+            if max(r, g, b) - min(r, g, b) <= channel_delta:
+                gray += 1
+    return bool(total and gray / total >= min_gray_ratio)
 
 
 def _trim_crop_bottom_to_horizontal_rule(
