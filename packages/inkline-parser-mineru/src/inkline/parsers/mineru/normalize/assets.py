@@ -237,8 +237,15 @@ def materialize_repaired_figure_image_assets(
             if not isinstance(page, int) or page < 1 or page > len(doc) or not bbox:
                 continue
             rect = _scale_bbox_to_pdf_rect(page, doc[page - 1].rect, bbox, geometry)
+            original_rect = rect
             if _should_expand_repaired_figure_crop(b):
                 rect = _expand_rect_to_visible_content(doc[page - 1], rect)
+            if _is_auto_repaired_dense_text_image(b) and not _rect_expanded_bottom(
+                original_rect, rect
+            ):
+                continue
+            if _is_auto_repaired_dense_text_image(b):
+                rect = _trim_rect_bottom_to_horizontal_rule(doc[page - 1], rect, original_rect)
             rect = _pad_and_clip_rect(rect, doc[page - 1].rect)
             if rect.is_empty or rect.width <= 1 or rect.height <= 1:
                 continue
@@ -246,7 +253,7 @@ def materialize_repaired_figure_image_assets(
             image_name = f"{block_id}_page_{page:04d}.png"
             image_path = asset_dir / image_name
             pix = doc[page - 1].get_pixmap(matrix=matrix, clip=rect, alpha=False)
-            pix.save(str(image_path))
+            _save_optimized_grayscale_png(pix, image_path)
             attrs = b.setdefault("attrs", {})
             image_id = f"{block_id}-image"
             original = attrs.get("image_path")
@@ -272,6 +279,20 @@ def materialize_repaired_figure_image_assets(
             )
     finally:
         doc.close()
+
+
+def _save_optimized_grayscale_png(pix: Any, image_path: Path) -> None:
+    try:
+        from PIL import Image  # type: ignore
+    except Exception:
+        pix.save(str(image_path))
+        return
+
+    try:
+        image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
+        image.save(image_path, optimize=True)
+    except Exception:
+        pix.save(str(image_path))
 
 
 def materialize_figure_path_assets(canonical: Dict[str, Any], output_dir: Path) -> None:
@@ -355,7 +376,11 @@ def _needs_repaired_figure_asset(block: Dict[str, Any]) -> bool:
     attrs = block.get("attrs") or {}
     if attrs.get("layout_role") == "full_page_image":
         return False
-    return bool(attrs.get("fragment_block_ids") or attrs.get("embedded_text_absorb_reason"))
+    return bool(
+        attrs.get("fragment_block_ids")
+        or attrs.get("embedded_text_absorb_reason")
+        or _is_dense_text_image(block)
+    )
 
 
 def _related_block_ids_by_page(canonical: Dict[str, Any]) -> Dict[int, list[str]]:
@@ -393,8 +418,64 @@ def _should_expand_repaired_figure_crop(block: Dict[str, Any]) -> bool:
     attrs = block.get("attrs") or {}
     return bool(
         attrs.get("sub_type") == "text_image"
-        and (attrs.get("fragment_block_ids") or attrs.get("embedded_text_absorb_reason"))
+        and (
+            attrs.get("fragment_block_ids")
+            or attrs.get("embedded_text_absorb_reason")
+            or _is_dense_text_image(block)
+        )
     )
+
+
+def _is_auto_repaired_dense_text_image(block: Dict[str, Any]) -> bool:
+    attrs = block.get("attrs") or {}
+    return bool(
+        _is_dense_text_image(block)
+        and not attrs.get("fragment_block_ids")
+        and not attrs.get("embedded_text_absorb_reason")
+    )
+
+
+def _is_dense_text_image(block: Dict[str, Any]) -> bool:
+    attrs = block.get("attrs") or {}
+    if attrs.get("sub_type") != "text_image":
+        return False
+    ocr_text = attrs.get("ocr_text_in_image")
+    if not isinstance(ocr_text, str):
+        return False
+    label_lines = [line for line in ocr_text.splitlines() if line.strip()]
+    return len(label_lines) >= 12
+
+
+def _rect_expanded_bottom(original: Any, candidate: Any, threshold: float = 2.0) -> bool:
+    return bool(candidate.y1 > original.y1 + threshold)
+
+
+def _trim_rect_bottom_to_horizontal_rule(page: Any, rect: Any, original_rect: Any) -> Any:
+    try:
+        import fitz  # type: ignore
+        from PIL import Image  # type: ignore
+    except Exception:
+        return rect
+
+    try:
+        pix = page.get_pixmap(matrix=fitz.Matrix(1, 1), clip=rect, alpha=False)
+        image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
+    except Exception:
+        return rect
+    if pix.width <= 0 or pix.height <= 0:
+        return rect
+
+    min_dark_pixels = max(24, int(pix.width * 0.62))
+    row_pdf_height = rect.height / pix.height
+    pixels = image.load()
+    for row in range(pix.height - 1, -1, -1):
+        row_bottom = rect.y0 + (row + 1) * row_pdf_height
+        if row_bottom <= original_rect.y1 + 2.0:
+            break
+        dark_pixels = sum(1 for col in range(pix.width) if pixels[col, row] < 220)
+        if dark_pixels >= min_dark_pixels:
+            return fitz.Rect(rect.x0, rect.y0, rect.x1, row_bottom)
+    return rect
 
 
 def _repaired_figure_crop_bbox(block: Dict[str, Any]) -> Optional[list[float]]:

@@ -130,18 +130,43 @@ def _crop_asset_to_content(asset: dict[str, Any], *, temp_dir: Path) -> dict[str
                 min(width, right + pad),
                 min(height, bottom + pad),
             )
+            crop_box = _trim_crop_bottom_to_horizontal_rule(rgb, crop_box, pad=pad)
             crop_width = crop_box[2] - crop_box[0]
             crop_height = crop_box[3] - crop_box[1]
             if crop_width >= width * 0.98 and crop_height >= height * 0.98:
                 return None
             output = temp_dir / f"{path.stem}_cropped.png"
-            rgb.crop(crop_box).save(output)
+            rgb.crop(crop_box).convert("L").save(output, optimize=True)
     except OSError:
         return None
     cropped = dict(asset)
     cropped["path"] = str(output)
     cropped["media_type"] = "image/png"
     return cropped
+
+
+def _trim_crop_bottom_to_horizontal_rule(
+    image: Any, crop_box: tuple[int, int, int, int], *, pad: int
+) -> tuple[int, int, int, int]:
+    left, top, right, bottom = crop_box
+    crop_width = right - left
+    crop_height = bottom - top
+    if crop_width <= 0 or crop_height <= 0:
+        return crop_box
+    min_dark_pixels = max(24, int(crop_width * 0.62))
+    pixels = image.load()
+    for y in range(bottom - 1, top - 1, -1):
+        dark_pixels = 0
+        for x in range(left, right):
+            r, g, b = pixels[x, y]
+            if min(r, g, b) < 220:
+                dark_pixels += 1
+        if dark_pixels >= min_dark_pixels:
+            trimmed_bottom = min(bottom, y + 1 + pad)
+            if trimmed_bottom < bottom - pad:
+                return (left, top, right, trimmed_bottom)
+            return crop_box
+    return crop_box
 
 
 def _non_blank_bbox(image: Any) -> tuple[int, int, int, int] | None:

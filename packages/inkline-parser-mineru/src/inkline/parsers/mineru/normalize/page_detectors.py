@@ -136,9 +136,11 @@ class _LayoutSnapshotPageDetector:
         media_like: Sequence[RawBlock],
         body_width_long_text: Sequence[RawBlock],
     ) -> bool:
-        if body_width_long_text or len(text_like) < 4:
+        if body_width_long_text:
             return False
         page_width, page_height = coord_page_size(meaningful, self.layout)
+        if len(text_like) < 4:
+            return False
         text_lengths = [len(block_text(b)) for b in text_like]
         short_count = sum(1 for length in text_lengths if length <= 40)
         if short_count < max(4, int(len(text_like) * 0.8)):

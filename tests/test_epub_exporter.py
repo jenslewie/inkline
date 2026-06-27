@@ -1,3 +1,4 @@
+import io
 import re
 import struct
 import zipfile
@@ -30,6 +31,12 @@ def _write_png(path, width: int, height: int) -> None:
 def _write_png_with_dark_rect(
     path, width: int, height: int, rect: tuple[int, int, int, int]
 ) -> None:
+    _write_png_with_dark_rects(path, width=width, height=height, rects=[rect])
+
+
+def _write_png_with_dark_rects(
+    path, *, width: int, height: int, rects: list[tuple[int, int, int, int]]
+) -> None:
     def chunk(kind: bytes, data: bytes) -> bytes:
         return (
             struct.pack(">I", len(data))
@@ -38,12 +45,11 @@ def _write_png_with_dark_rect(
             + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
         )
 
-    left, top, right, bottom = rect
     rows: list[bytes] = []
     for y in range(height):
         row = bytearray(b"\x00")
         for x in range(width):
-            if left <= x < right and top <= y < bottom:
+            if any(left <= x < right and top <= y < bottom for left, top, right, bottom in rects):
                 row.extend(b"\x00\x00\x00")
             else:
                 row.extend(b"\xff\xff\xff")
@@ -2264,6 +2270,140 @@ def test_figure_image_width_uses_canonical_bbox_not_pixel_dimensions(tmp_path):
         )
 
     assert 'style="' not in html
+
+
+def test_near_page_width_uncaptioned_figures_omit_inline_width(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    left_map = img_dir / "left-map.png"
+    right_map = img_dir / "right-map.png"
+    _write_png(left_map, width=2637, height=3061)
+    _write_png(right_map, width=2828, height=3062)
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_page_width_anchor",
+            "type": "paragraph",
+            "text": "Page width anchor.",
+            "source": {"page": 5, "bbox": [0, 0, 1000, 40]},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_left",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 5, "bbox": [10, 80, 982, 360]},
+            "attrs": {"image_path": "images/left-map.png", "captions": []},
+        },
+        {
+            "block_id": "b_right",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 6, "bbox": [0, 80, 996, 360]},
+            "attrs": {"image_path": "images/right-map.png", "captions": []},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+
+    assert html.count('class="figure-block figure-fullwidth"') == 2
+    assert "max-width:" not in html
+
+
+def test_fullwidth_map_pair_omits_inline_width_even_when_bboxes_differ(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    left_map = img_dir / "left-map.png"
+    right_map = img_dir / "right-map.png"
+    _write_png(left_map, width=2489, height=2740)
+    _write_png(right_map, width=2472, height=3278)
+    document = sample_document()
+    document["blocks"] = [
+        {
+            "block_id": "b_page_width_anchor",
+            "type": "paragraph",
+            "text": "Page width anchor.",
+            "source": {"page": 5, "bbox": [0, 0, 1000, 40]},
+            "attrs": {},
+        },
+        {
+            "block_id": "b_left",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 123, "bbox": [158, 115, 1000, 835]},
+            "attrs": {"image_path": "images/left-map.png", "captions": []},
+        },
+        {
+            "block_id": "b_right",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 124, "bbox": [0, 127, 854, 629]},
+            "attrs": {"image_path": "images/right-map.png", "captions": []},
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        html = "\n".join(
+            zf.read(name).decode("utf-8") for name in zf.namelist() if name.endswith(".xhtml")
+        )
+
+    assert html.count('class="figure-block figure-fullwidth"') == 2
+    assert "max-width:" not in html
+
+
+def test_full_page_image_crop_trims_blank_below_bottom_rule(tmp_path):
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    page_map = img_dir / "page-map.png"
+    _write_png_with_dark_rects(
+        page_map,
+        width=420,
+        height=620,
+        rects=[(40, 350, 360, 355), (358, 355, 360, 520)],
+    )
+    document = sample_document()
+    document["assets"]["images"] = [
+        {
+            "image_id": "page-map",
+            "path": "images/page-map.png",
+            "media_type": "image/png",
+        }
+    ]
+    document["blocks"] = [
+        {
+            "block_id": "b_page_map",
+            "type": "figure",
+            "text": "",
+            "source": {"page": 124, "bbox": [0, 127, 770, 629]},
+            "attrs": {
+                "image_path": "images/page-map.png",
+                "captions": [],
+                "layout_role": "full_page_image",
+                "image_id": "page-map",
+            },
+        },
+    ]
+    output = tmp_path / "book.epub"
+
+    export_epub(document, output, base_dir=tmp_path)
+
+    with zipfile.ZipFile(output) as zf:
+        image_name = "EPUB/images/page-map_page-map_cropped.png"
+        assert image_name in zf.namelist()
+        from PIL import Image
+
+        with Image.open(io.BytesIO(zf.read(image_name))) as cropped:
+            assert cropped.mode == "L"
+            assert cropped.height <= 35
 
 
 def test_uncaptioned_map_like_images_render_full_width(tmp_path):

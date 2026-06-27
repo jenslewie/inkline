@@ -302,11 +302,12 @@ def make_full_page_figure(
 def make_page_snapshot_figure(
     ids: IdFactory, page: int, blocks: Sequence[RawBlock], role: str
 ) -> Dict[str, Any]:
-    text_blocks = [b for b in blocks if block_text(b)]
+    visual_texts = [_visual_snapshot_text(b) for b in blocks]
+    visual_texts = [text for text in visual_texts if text]
     attrs = {
         "image_path": None,
         "sub_type": "page_snapshot",
-        "ocr_text_in_image": normalize_ws("\n".join(block_text(b) for b in text_blocks)),
+        "ocr_text_in_image": normalize_ws("\n".join(visual_texts)),
         "captions": [],
         "footnotes": [],
         "layout_role": "full_page_image",
@@ -317,7 +318,7 @@ def make_page_snapshot_figure(
     }
     if role == "visual_label_page":
         attrs["absorbed_block_ids"] = [f"raw:{b.page}:{b.index}" for b in blocks]
-        attrs["absorbed_text"] = [block_text(b) for b in text_blocks]
+        attrs["absorbed_text"] = visual_texts
     return canonical_block(
         ids.next(),
         FIGURE,
@@ -327,6 +328,17 @@ def make_page_snapshot_figure(
         attrs=attrs,
         source_pages=_unique_pages(blocks),
     )
+
+
+def _visual_snapshot_text(block: RawBlock) -> str:
+    text = block_text(block)
+    if text:
+        return text
+    if block.raw_type == "image":
+        content = block.raw.get("content")
+        if isinstance(content, dict):
+            return normalize_ws(str(content.get("content") or ""))
+    return ""
 
 
 def make_table(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:

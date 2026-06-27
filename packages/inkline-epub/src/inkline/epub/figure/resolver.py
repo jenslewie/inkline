@@ -9,6 +9,7 @@ from inkline.epub.figure.layout import (
     infer_figure_classes,
     infer_image_max_width_percent,
     infer_side_caption_layout,
+    should_use_full_width_image,
 )
 from inkline.epub.figure.model import Caption, FigureView, ImageRef
 
@@ -61,10 +62,16 @@ def resolve_figure_image(
     image_id = attrs.get("image_id")
     image_asset = image_assets.get(image_id) if image_id else None
     inline_img = inline_images.get(block_id)
-    max_width_percent = None if caption else infer_image_max_width_percent(block, page_width)
 
     if image_asset and Path(image_asset["path"]).exists():
         width, height = _dimensions_or_empty(image_asset)
+        max_width_percent = _resolved_image_max_width_percent(
+            block,
+            caption=caption,
+            width=width,
+            height=height,
+            page_width=page_width,
+        )
         return ImageRef(
             kind="asset",
             src=asset_image_name(image_asset),
@@ -75,6 +82,13 @@ def resolve_figure_image(
         )
     if inline_img:
         width, height = _dimensions_or_empty(inline_img)
+        max_width_percent = _resolved_image_max_width_percent(
+            block,
+            caption=caption,
+            width=width,
+            height=height,
+            page_width=page_width,
+        )
         return ImageRef(
             kind="inline",
             src=inline_img["epub_name"],
@@ -84,6 +98,22 @@ def resolve_figure_image(
             max_width_percent=max_width_percent,
         )
     return ImageRef(kind="placeholder", src=None, alt=text)
+
+
+def _resolved_image_max_width_percent(
+    block: dict[str, Any],
+    *,
+    caption: Caption | None,
+    width: int | None,
+    height: int | None,
+    page_width: float | None,
+) -> float | None:
+    if caption:
+        return None
+    image = ImageRef(kind="asset", src=None, alt="", width=width, height=height)
+    if should_use_full_width_image(caption=caption, image=image):
+        return None
+    return infer_image_max_width_percent(block, page_width)
 
 
 def normalize_figure_caption(

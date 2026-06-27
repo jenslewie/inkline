@@ -445,6 +445,52 @@ def test_visual_label_page_stays_float_like_figure(tmp_path) -> None:
     assert document["pages"][0]["snapshot"]["role"] == "visual_label_page"
 
 
+def test_dense_single_text_image_map_stays_regular_figure(tmp_path) -> None:
+    content_list_v2 = tmp_path / "sample_content_list_v2.json"
+    middle = tmp_path / "sample_middle.json"
+    output = tmp_path / "canonical.json"
+    labels = "\n".join(f"地名{i}" for i in range(30))
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    {
+                        "type": "image",
+                        "sub_type": "text_image",
+                        "content": {
+                            "image_source": {"path": "images/map.jpg"},
+                            "content": labels,
+                        },
+                        "bbox": [229, 247, 1416, 1542],
+                    }
+                ]
+            ]
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(json.dumps({"pdf_info": [{"page_size": [1418, 2098]}]}), encoding="utf-8")
+
+    document = normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        doc_id="silk",
+        title="丝绸之路新史",
+        language="zh-CN",
+    )
+
+    assert len(document["blocks"]) == 1
+    block = document["blocks"][0]
+    assert block["type"] == "figure"
+    assert block["attrs"]["sub_type"] == "text_image"
+    assert "layout_role" not in block["attrs"]
+    assert "snapshot_role" not in block["attrs"]
+    assert "地名29" in block["attrs"]["ocr_text_in_image"]
+    assert document["pages"][0]["snapshot"]["required"] is False
+
+
 def test_mineru_parser_disables_qwen_marker_repair_at_150_dpi_by_default(
     tmp_path, monkeypatch
 ) -> None:

@@ -70,7 +70,10 @@ def infer_image_max_width_percent(block: dict[str, Any], page_width: float | Non
     width = bbox_width(bbox)
     if width <= 0:
         return None
-    return min(100.0, max(1.0, width / page_width * 100.0))
+    percent = min(100.0, max(1.0, width / page_width * 100.0))
+    if percent >= 95.0:
+        return None
+    return percent
 
 
 def infer_figure_classes(
