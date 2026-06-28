@@ -79,6 +79,32 @@ def test_repaired_figure_asset_overwrites_stale_crop(tmp_path) -> None:
     assert attrs["image_render_bbox"][3] >= 188
 
 
+def test_page_snapshot_asset_uses_relative_path(tmp_path) -> None:
+    import fitz  # type: ignore
+
+    from inkline.parsers.mineru.normalize.assets import materialize_page_snapshot_assets
+
+    pdf_path = tmp_path / "source.pdf"
+    doc = fitz.open()
+    doc.new_page(width=220, height=240)
+    doc.save(pdf_path)
+    doc.close()
+    canonical = {
+        "blocks": [],
+        "pages": [
+            {
+                "physical_page": 1,
+                "snapshot": {"required": True, "role": "page_snapshot"},
+            }
+        ],
+    }
+
+    materialize_page_snapshot_assets(canonical, str(pdf_path), tmp_path, dpi=72)
+
+    image_asset = canonical["assets"]["images"][0]
+    assert image_asset["path"] == "images/pages/page_0001.png"
+
+
 def test_dense_text_image_can_repair_missing_visible_edge(tmp_path) -> None:
     import fitz  # type: ignore
 
@@ -118,6 +144,8 @@ def test_dense_text_image_can_repair_missing_visible_edge(tmp_path) -> None:
     assert attrs["image_path"] == "images/repaired/fig_page_0001.png"
     assert attrs["original_image_path"] == "images/original.jpg"
     assert attrs["image_render_bbox"][3] >= 188
+    image_asset = canonical["assets"]["images"][0]
+    assert image_asset["path"] == "images/repaired/fig_page_0001.png"
     from PIL import Image
 
     with Image.open(tmp_path / attrs["image_path"]) as repaired:

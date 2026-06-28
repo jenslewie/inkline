@@ -51,6 +51,7 @@ function call sequence inside build_canonical().
 from __future__ import annotations
 
 import argparse
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
@@ -175,11 +176,12 @@ def build_canonical(
     normalize_display_blocks_for_layout_schema(blocks)
     remove_internal_note_ref_indexes(blocks)
 
+    output_dir = Path(getattr(args, "output", "canonical.json")).parent
     source_files = {}
     for k in ["content_list_v2", "content_list", "middle", "model", "md", "source_pdf"]:
         v = getattr(args, k, None)
         if v:
-            source_files[k] = str(v)
+            source_files[k] = _path_relative_to_output(v, output_dir)
 
     source_file = (
         getattr(args, "source_pdf", None)
@@ -217,7 +219,7 @@ def build_canonical(
             "title": args.title,
             "author": author,
             "language": args.language,
-            "source_file": str(source_file),
+            "source_file": _path_relative_to_output(source_file, output_dir) if source_file else "",
             "source_files": source_files,
             "parser_name": "mineru",
             "parser_mode": str(getattr(args, "parser_mode", "vlm")),
@@ -321,6 +323,14 @@ def _recover_and_resolve_note_refs(
     )
     _clear_note_referenced_by(blocks)
     resolve_note_links(blocks)
+
+
+def _path_relative_to_output(value: Any, output_dir: Path) -> str:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = path.resolve()
+    base = output_dir.expanduser().resolve()
+    return Path(os.path.relpath(path, base)).as_posix()
 
 
 def _missing_body_ref_pages(blocks: List[Dict[str, Any]]) -> List[int]:

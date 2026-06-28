@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -73,7 +74,7 @@ def materialize_page_snapshot_assets(
                 canonical,
                 {
                     "image_id": image_id,
-                    "path": str(image_path),
+                    "path": _path_relative_to_output(image_path, output_dir),
                     "media_type": "image/png",
                     "role": role,
                     "snapshot_role": snapshot.get("role"),
@@ -136,10 +137,13 @@ def materialize_full_page_image_assets(
                 continue
 
             snapshot = snapshot_asset_by_page.get(page)
-            if snapshot and Path(snapshot["path"]).exists():
+            snapshot_path = (
+                _resolve_stored_path(str(snapshot["path"]), output_dir) if snapshot else None
+            )
+            if snapshot and snapshot_path and snapshot_path.exists():
                 # Reuse the snapshot's physical path — same image, no need
                 # to render again.
-                reused_path = snapshot["path"]
+                reused_path = str(snapshot["path"])
                 # Point the block's image_path to the reused location
                 # (images/pages/ instead of images/full_page/) so that the
                 # path reflects the actual physical file.
@@ -190,7 +194,7 @@ def materialize_full_page_image_assets(
                 canonical,
                 {
                     "image_id": image_id,
-                    "path": str(image_path),
+                    "path": _path_relative_to_output(image_path, output_dir),
                     "media_type": "image/png",
                     "role": "figure",
                     "source": {"page": page},
@@ -270,7 +274,7 @@ def materialize_repaired_figure_image_assets(
                 canonical,
                 {
                     "image_id": image_id,
-                    "path": str(image_path),
+                    "path": _path_relative_to_output(image_path, output_dir),
                     "media_type": "image/png",
                     "role": "figure",
                     "source": {"page": page, "bbox": attrs.get("image_render_bbox")},
@@ -340,7 +344,7 @@ def materialize_figure_path_assets(canonical: Dict[str, Any], output_dir: Path) 
             canonical,
             {
                 "image_id": image_id,
-                "path": str(resolved),
+                "path": _path_relative_to_output(resolved, output_dir),
                 "role": "figure",
                 "related_block_ids": [block_id],
             },
@@ -354,10 +358,25 @@ def _source_search_dirs(canonical: Dict[str, Any], output_dir: Path) -> List[Pat
         path = source_files.get(key)
         if not path:
             continue
-        parent = Path(path).parent
+        parent = _resolve_stored_path(str(path), output_dir).parent
         if parent.is_dir() and parent not in dirs:
             dirs.append(parent)
     return dirs
+
+
+def _path_relative_to_output(path: Path, output_dir: Path) -> str:
+    base = output_dir.expanduser().resolve()
+    target = path.expanduser()
+    if not target.is_absolute():
+        target = target.resolve()
+    return Path(os.path.relpath(target, base)).as_posix()
+
+
+def _resolve_stored_path(path: str, output_dir: Path) -> Path:
+    candidate = Path(path).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    return output_dir / candidate
 
 
 def _resolve_figure_image_path(

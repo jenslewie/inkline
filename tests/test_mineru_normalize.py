@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import inkline.parsers.mineru.bridge as mineru_bridge
 from inkline.canonical import BLOCK_TYPES, validate_document
@@ -87,6 +88,11 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     assert {block["type"] for block in document["blocks"]} <= BLOCK_TYPES
     assert document["metadata"]["parser_name"] == "mineru"
     assert document["metadata"]["schema_version"] == "1.0"
+    source_files = document["metadata"]["source_files"]
+    assert document["metadata"]["source_file"] == "sample_content_list_v2.json"
+    assert source_files["content_list_v2"] == "sample_content_list_v2.json"
+    assert source_files["middle"] == "sample_middle.json"
+    assert all(not Path(path).is_absolute() for path in source_files.values())
     assert document["metadata"]["mineru"]["version"] == "3.2.3"
     assert document["metadata"]["mineru"]["vlm_model"]["model_name"] == "MinerU2.5-Pro-2605-1.2B"
     marker_config = document["metadata"]["mineru"]["auxiliary_ocr"]["qwen_marker_locator"]
