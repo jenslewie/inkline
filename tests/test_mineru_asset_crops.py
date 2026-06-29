@@ -105,6 +105,20 @@ def test_page_snapshot_asset_uses_relative_path(tmp_path) -> None:
     assert image_asset["path"] == "images/pages/page_0001.png"
 
 
+def test_asset_relative_path_resolves_relative_to_output_dir(tmp_path, monkeypatch) -> None:
+    from inkline.parsers.mineru.normalize.assets import _asset_path_relative_to_output_dir
+
+    output_dir = tmp_path / "results"
+    output_dir.mkdir()
+    work_dir = tmp_path / "workspace"
+    work_dir.mkdir()
+    monkeypatch.chdir(work_dir)
+
+    relative = _asset_path_relative_to_output_dir("images/pages/page_0001.png", output_dir)
+
+    assert relative == "images/pages/page_0001.png"
+
+
 def test_dense_text_image_can_repair_missing_visible_edge(tmp_path) -> None:
     import fitz  # type: ignore
 

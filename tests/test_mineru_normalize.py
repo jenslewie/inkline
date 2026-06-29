@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import inkline.parsers.mineru.bridge as mineru_bridge
@@ -44,6 +45,7 @@ def _table_item(html: str, bbox: list[int]) -> dict:
 def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     content_list_v2 = tmp_path / "sample_content_list_v2.json"
     middle = tmp_path / "sample_middle.json"
+    model = tmp_path / "sample_model.json"
     output = tmp_path / "canonical.json"
     content_list_v2.write_text(
         json.dumps(
@@ -63,10 +65,12 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
         json.dumps({"pdf_info": [{"page_size": [1000, 1400]}]}),
         encoding="utf-8",
     )
+    model.write_text("{}", encoding="utf-8")
 
     document = normalize_mineru_outputs(
         content_list_v2=content_list_v2,
         middle=middle,
+        model=model,
         markdown=None,
         source_pdf=None,
         output=output,
@@ -92,9 +96,14 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     assert document["metadata"]["source_file"] == "sample_content_list_v2.json"
     assert source_files["content_list_v2"] == "sample_content_list_v2.json"
     assert source_files["middle"] == "sample_middle.json"
+    assert "model" not in source_files
+    assert "md" not in source_files
     assert all(not Path(path).is_absolute() for path in source_files.values())
     assert document["metadata"]["mineru"]["version"] == "3.2.3"
     assert document["metadata"]["mineru"]["vlm_model"]["model_name"] == "MinerU2.5-Pro-2605-1.2B"
+    assert document["metadata"]["mineru"]["vlm_model"]["local_path"] == os.path.relpath(
+        "/cache/MinerU2.5-Pro-2605-1.2B", tmp_path
+    )
     marker_config = document["metadata"]["mineru"]["auxiliary_ocr"]["qwen_marker_locator"]
     assert marker_config["enabled"] is False
     assert marker_config["model"] == DEFAULT_QWEN_MODEL
@@ -106,6 +115,240 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["canonical"] == "canonical.json"
     assert report["summary"]["missing_body_ref_notes"] == 0
+
+
+def test_input_relative_path_resolves_from_cwd_to_output_dir(tmp_path, monkeypatch) -> None:
+    from inkline.parsers.mineru.normalize.core import _input_path_relative_to_output_dir
+
+    work_dir = tmp_path / "workspace" / "job"
+    output_dir = tmp_path / "results"
+    input_pdf = tmp_path / "workspace" / "input.pdf"
+    work_dir.mkdir(parents=True)
+    output_dir.mkdir()
+    input_pdf.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.chdir(work_dir)
+
+    relative = _input_path_relative_to_output_dir("../input.pdf", output_dir)
+
+    expected = Path(os.path.relpath(input_pdf.resolve(), output_dir.resolve())).as_posix()
+    assert relative == expected
+
+
+def test_marker_locator_metadata_paths_are_relative(tmp_path) -> None:
+    from argparse import Namespace
+
+    import fitz  # type: ignore
+
+    from inkline.parsers.mineru.normalize.core import build_canonical
+
+    source_pdf = tmp_path / "source.pdf"
+    doc = fitz.open()
+    doc.new_page(width=100, height=100)
+    doc.save(source_pdf)
+    doc.close()
+    output = tmp_path / "nested" / "canonical.json"
+    artifact_dir = tmp_path / "nested" / "canonical_qwen_marker_locator"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "qwen_marker_evidence.json").write_text("[]", encoding="utf-8")
+    timing_log = artifact_dir / "qwen_marker_timing.jsonl"
+    args = Namespace(
+        content_list_v2=tmp_path / "content_list_v2.json",
+        content_list=None,
+        middle=tmp_path / "middle.json",
+        model=tmp_path / "model.json",
+        md=tmp_path / "source.md",
+        source_pdf=source_pdf,
+        output=output,
+        doc_id="sample",
+        title="Sample",
+        language="zh-CN",
+        allow_missing_pdf_text=True,
+        marker_locator_repair=True,
+        marker_locator_model=DEFAULT_QWEN_MODEL,
+        marker_locator_keep_alive="5m",
+        marker_locator_page_dpi=150,
+        marker_locator_block_dpi=200,
+        marker_locator_artifact_dir=artifact_dir,
+        marker_locator_timing_log=timing_log,
+        marker_locator_reuse_evidence=True,
+        marker_locator_body_mode="page_then_block",
+        marker_locator_dpi=None,
+        note_trace_log=None,
+        note_recovery_mode="qwen",
+        mineru_version="3.2.3",
+        mineru_vl_utils_version="1.0.4",
+        vlm_model={"local_path": tmp_path / "models" / "vlm", "model_name": "vlm"},
+    )
+
+    document = build_canonical({}, {}, args)
+
+    marker_config = document["metadata"]["mineru"]["auxiliary_ocr"]["qwen_marker_locator"]
+    assert marker_config["artifact_dir"] == "canonical_qwen_marker_locator"
+    assert marker_config["timing_log"] == "canonical_qwen_marker_locator/qwen_marker_timing.jsonl"
+    assert marker_config["evidence_path"] == "canonical_qwen_marker_locator/qwen_marker_evidence.json"
+    assert (
+        document["metadata"]["source_files"]["qwen_marker_evidence"]
+        == "canonical_qwen_marker_locator/qwen_marker_evidence.json"
+    )
+    assert document["metadata"]["mineru"]["vlm_model"]["local_path"] == "../models/vlm"
+    assert all(not Path(path).is_absolute() for path in document["metadata"]["source_files"].values())
+
+
+def test_generated_marker_locator_evidence_is_not_listed_as_source_file(tmp_path) -> None:
+    from argparse import Namespace
+
+    import fitz  # type: ignore
+
+    from inkline.parsers.mineru.normalize.core import build_canonical
+
+    source_pdf = tmp_path / "source.pdf"
+    doc = fitz.open()
+    doc.new_page(width=100, height=100)
+    doc.save(source_pdf)
+    doc.close()
+    output = tmp_path / "nested" / "canonical.json"
+    artifact_dir = tmp_path / "nested" / "canonical_qwen_marker_locator"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "qwen_marker_evidence.json").write_text("[]", encoding="utf-8")
+    args = Namespace(
+        content_list_v2=tmp_path / "content_list_v2.json",
+        content_list=None,
+        middle=tmp_path / "middle.json",
+        model=None,
+        md=None,
+        source_pdf=source_pdf,
+        output=output,
+        doc_id="sample",
+        title="Sample",
+        language="zh-CN",
+        allow_missing_pdf_text=True,
+        marker_locator_repair=True,
+        marker_locator_model=DEFAULT_QWEN_MODEL,
+        marker_locator_keep_alive="5m",
+        marker_locator_page_dpi=150,
+        marker_locator_block_dpi=200,
+        marker_locator_artifact_dir=artifact_dir,
+        marker_locator_timing_log=None,
+        marker_locator_reuse_evidence=False,
+        marker_locator_body_mode="page_then_block",
+        marker_locator_dpi=None,
+        note_trace_log=None,
+        note_recovery_mode="qwen",
+        mineru_version="3.2.3",
+        mineru_vl_utils_version="1.0.4",
+        vlm_model=None,
+    )
+
+    document = build_canonical({}, {}, args)
+
+    assert "qwen_marker_evidence" not in document["metadata"]["source_files"]
+
+
+def test_qwen_marker_evidence_image_paths_are_relative(tmp_path) -> None:
+    output = tmp_path / "nested" / "canonical.json"
+    artifact_dir = tmp_path / "nested" / "canonical_qwen_marker_locator"
+    artifact_dir.mkdir(parents=True)
+    full_page_image = artifact_dir / "page_0001_150dpi_qwen_full_page.png"
+    crop_image = artifact_dir / "page_0001_b000001_200dpi_qwen_body_block.png"
+    document = {
+        "blocks": [
+            {
+                "attrs": {
+                    "qwen_marker_evidence_image": str(full_page_image),
+                    "inline_runs": [
+                        {
+                            "evidence": {"qwen_crop_image": str(crop_image)},
+                        }
+                    ],
+                },
+            }
+        ]
+    }
+
+    from inkline.parsers.mineru.normalize.core import _normalize_qwen_evidence_paths
+
+    _normalize_qwen_evidence_paths(document, output.parent)
+    block = document["blocks"][0]
+
+    assert (
+        block["attrs"]["qwen_marker_evidence_image"]
+        == "canonical_qwen_marker_locator/page_0001_150dpi_qwen_full_page.png"
+    )
+    evidence = block["attrs"]["inline_runs"][0]["evidence"]
+    assert (
+        evidence["qwen_crop_image"]
+        == "canonical_qwen_marker_locator/page_0001_b000001_200dpi_qwen_body_block.png"
+    )
+
+
+def test_build_canonical_normalizes_qwen_marker_evidence_image_paths(tmp_path) -> None:
+    from argparse import Namespace
+
+    from inkline.parsers.mineru.normalize.core import build_canonical
+    from inkline.parsers.mineru.schema.models import RawBlock
+
+    output = tmp_path / "nested" / "canonical.json"
+    artifact_dir = tmp_path / "nested" / "canonical_qwen_marker_locator"
+    artifact_dir.mkdir(parents=True)
+    crop_image = artifact_dir / "page_0001_b000001_200dpi_qwen_body_block.png"
+    args = Namespace(
+        content_list_v2=tmp_path / "content_list_v2.json",
+        content_list=None,
+        middle=tmp_path / "middle.json",
+        model=None,
+        md=None,
+        source_pdf=None,
+        output=output,
+        doc_id="sample",
+        title="Sample",
+        language="zh-CN",
+        allow_missing_pdf_text=True,
+        marker_locator_repair=False,
+        marker_locator_model=DEFAULT_QWEN_MODEL,
+        marker_locator_keep_alive="5m",
+        marker_locator_page_dpi=150,
+        marker_locator_block_dpi=200,
+        marker_locator_artifact_dir=artifact_dir,
+        marker_locator_timing_log=None,
+        marker_locator_reuse_evidence=False,
+        marker_locator_body_mode="page_then_block",
+        marker_locator_dpi=None,
+        note_trace_log=None,
+        note_recovery_mode="qwen",
+        mineru_version="3.2.3",
+        mineru_vl_utils_version="1.0.4",
+        vlm_model=None,
+    )
+    pages = {
+        1: [
+            RawBlock(
+                page=1,
+                index=0,
+                raw_type="paragraph",
+                text="Body1",
+                bbox=[0, 0, 100, 100],
+                raw={},
+                inline_runs=[
+                    {"type": "text", "text": "Body"},
+                    {
+                        "type": "note_ref",
+                        "text": "1",
+                        "marker": "1",
+                        "evidence": {"qwen_crop_image": str(crop_image)},
+                    },
+                ],
+            )
+        ]
+    }
+
+    document = build_canonical(pages, {1: (100, 100)}, args)
+    block = document["blocks"][0]
+
+    evidence = block["attrs"]["inline_runs"][1]["evidence"]
+    assert (
+        evidence["qwen_crop_image"]
+        == "canonical_qwen_marker_locator/page_0001_b000001_200dpi_qwen_body_block.png"
+    )
 
 
 def test_table_first_full_colspan_row_marked_center_aligned(tmp_path) -> None:

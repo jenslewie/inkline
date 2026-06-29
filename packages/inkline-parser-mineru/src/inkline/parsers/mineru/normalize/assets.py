@@ -74,7 +74,7 @@ def materialize_page_snapshot_assets(
                 canonical,
                 {
                     "image_id": image_id,
-                    "path": _path_relative_to_output(image_path, output_dir),
+                    "path": _asset_path_relative_to_output_dir(image_path, output_dir),
                     "media_type": "image/png",
                     "role": role,
                     "snapshot_role": snapshot.get("role"),
@@ -194,7 +194,7 @@ def materialize_full_page_image_assets(
                 canonical,
                 {
                     "image_id": image_id,
-                    "path": _path_relative_to_output(image_path, output_dir),
+                    "path": _asset_path_relative_to_output_dir(image_path, output_dir),
                     "media_type": "image/png",
                     "role": "figure",
                     "source": {"page": page},
@@ -274,7 +274,7 @@ def materialize_repaired_figure_image_assets(
                 canonical,
                 {
                     "image_id": image_id,
-                    "path": _path_relative_to_output(image_path, output_dir),
+                    "path": _asset_path_relative_to_output_dir(image_path, output_dir),
                     "media_type": "image/png",
                     "role": "figure",
                     "source": {"page": page, "bbox": attrs.get("image_render_bbox")},
@@ -344,7 +344,7 @@ def materialize_figure_path_assets(canonical: Dict[str, Any], output_dir: Path) 
             canonical,
             {
                 "image_id": image_id,
-                "path": _path_relative_to_output(resolved, output_dir),
+                "path": _asset_path_relative_to_output_dir(resolved, output_dir),
                 "role": "figure",
                 "related_block_ids": [block_id],
             },
@@ -364,11 +364,16 @@ def _source_search_dirs(canonical: Dict[str, Any], output_dir: Path) -> List[Pat
     return dirs
 
 
-def _path_relative_to_output(path: Path, output_dir: Path) -> str:
+def _asset_path_relative_to_output_dir(path: str | Path, output_dir: Path) -> str:
     base = output_dir.expanduser().resolve()
-    target = path.expanduser()
+    target = Path(path).expanduser()
     if not target.is_absolute():
-        target = target.resolve()
+        candidate_from_cwd = target.resolve()
+        try:
+            candidate_from_cwd.relative_to(base)
+            target = candidate_from_cwd
+        except ValueError:
+            target = (base / target).resolve()
     return Path(os.path.relpath(target, base)).as_posix()
 
 

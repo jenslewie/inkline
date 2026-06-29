@@ -178,10 +178,19 @@ def build_canonical(
 
     output_dir = Path(getattr(args, "output", "canonical.json")).parent
     source_files = {}
-    for k in ["content_list_v2", "content_list", "middle", "model", "md", "source_pdf"]:
+    for k in ["content_list_v2", "content_list", "middle", "source_pdf"]:
         v = getattr(args, k, None)
         if v:
-            source_files[k] = _path_relative_to_output(v, output_dir)
+            source_files[k] = _input_path_relative_to_output_dir(v, output_dir)
+    qwen_marker_evidence_path = _qwen_marker_locator_artifact_dir(args) / "qwen_marker_evidence.json"
+    if (
+        marker_locator_enabled
+        and bool(getattr(args, "marker_locator_reuse_evidence", False))
+        and qwen_marker_evidence_path.exists()
+    ):
+        source_files["qwen_marker_evidence"] = _input_path_relative_to_output_dir(
+            qwen_marker_evidence_path, output_dir
+        )
 
     source_file = (
         getattr(args, "source_pdf", None)
@@ -219,14 +228,18 @@ def build_canonical(
             "title": args.title,
             "author": author,
             "language": args.language,
-            "source_file": _path_relative_to_output(source_file, output_dir) if source_file else "",
+            "source_file": _input_path_relative_to_output_dir(source_file, output_dir)
+            if source_file
+            else "",
             "source_files": source_files,
             "parser_name": "mineru",
             "parser_mode": str(getattr(args, "parser_mode", "vlm")),
             "mineru": {
                 "version": getattr(args, "mineru_version", None),
                 "vlm_utils_version": getattr(args, "mineru_vl_utils_version", None),
-                "vlm_model": getattr(args, "vlm_model", None),
+                "vlm_model": _normalize_vlm_model_metadata(
+                    getattr(args, "vlm_model", None), output_dir
+                ),
                 "normalizer": "mineru_to_canonical.py",
                 "normalizer_version": "0.3.0",
                 "layout_stats": {
@@ -251,10 +264,19 @@ def build_canonical(
                             {"page": item.page, "kind": item.kind}
                             for item in marker_locator_evidence
                         ],
-                        "artifact_dir": str(_qwen_marker_locator_artifact_dir(args))
+                        "artifact_dir": _input_path_relative_to_output_dir(
+                            _qwen_marker_locator_artifact_dir(args), output_dir
+                        )
                         if marker_locator_enabled
                         else None,
-                        "timing_log": str(_qwen_marker_locator_timing_log_path(args))
+                        "evidence_path": _input_path_relative_to_output_dir(
+                            qwen_marker_evidence_path, output_dir
+                        )
+                        if marker_locator_enabled
+                        else None,
+                        "timing_log": _input_path_relative_to_output_dir(
+                            _qwen_marker_locator_timing_log_path(args), output_dir
+                        )
                         if marker_locator_enabled
                         else None,
                     }
@@ -283,6 +305,7 @@ def build_canonical(
         ],
     }
     canonical["toc"] = build_toc_from_blocks(blocks)
+    _normalize_qwen_evidence_paths(canonical, output_dir)
     return canonical
 
 
@@ -325,12 +348,57 @@ def _recover_and_resolve_note_refs(
     resolve_note_links(blocks)
 
 
-def _path_relative_to_output(value: Any, output_dir: Path) -> str:
+def _input_path_relative_to_output_dir(value: Any, output_dir: Path) -> str:
     path = Path(value).expanduser()
     if not path.is_absolute():
         path = path.resolve()
     base = output_dir.expanduser().resolve()
     return Path(os.path.relpath(path, base)).as_posix()
+
+
+def _normalize_vlm_model_metadata(value: Any, output_dir: Path) -> Any:
+    if not isinstance(value, dict):
+        return value
+    normalized = dict(value)
+    local_path = normalized.get("local_path")
+    if local_path:
+        normalized["local_path"] = _input_path_relative_to_output_dir(local_path, output_dir)
+    return normalized
+
+
+def _normalize_qwen_evidence_paths(canonical: Dict[str, Any], output_dir: Path) -> None:
+    for block in canonical.get("blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        attrs = block.get("attrs")
+        if not isinstance(attrs, dict):
+            continue
+        evidence_image = attrs.get("qwen_marker_evidence_image")
+        if evidence_image:
+            attrs["qwen_marker_evidence_image"] = _qwen_path_relative_to_output_dir(
+                evidence_image, output_dir
+            )
+        inline_runs = attrs.get("inline_runs")
+        if not isinstance(inline_runs, list):
+            continue
+        for run in inline_runs:
+            if not isinstance(run, dict):
+                continue
+            evidence = run.get("evidence")
+            if not isinstance(evidence, dict):
+                continue
+            crop_image = evidence.get("qwen_crop_image")
+            if crop_image:
+                evidence["qwen_crop_image"] = _qwen_path_relative_to_output_dir(
+                    crop_image, output_dir
+                )
+
+
+def _qwen_path_relative_to_output_dir(value: Any, output_dir: Path) -> str:
+    path = Path(value)
+    if path.is_absolute():
+        return _input_path_relative_to_output_dir(path, output_dir)
+    return path.as_posix()
 
 
 def _missing_body_ref_pages(blocks: List[Dict[str, Any]]) -> List[int]:
