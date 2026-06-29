@@ -21,6 +21,7 @@ dev = [
   "pyright>=1.1",
   "bandit[toml]>=1.8",
   "pip-audit>=2.9",
+  "pylint>=3.2",
 ]
 
 [project.scripts]
@@ -69,8 +70,16 @@ src = [
 extend-exclude = [".venv", ".ruff_cache", "build", "dist", "data", "outputs"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "C4", "SIM", "RUF"]
+select = ["E", "F", "I", "B", "C4", "SIM", "RUF", "PLR0912", "PLR0914", "PLR0915"]
 ignore = ["E501", "RUF001", "RUF002", "RUF003"]
+
+# Preview rules (unstable) - enable explicitly
+preview = true
+explicit-preview-rules = true
+
+[tool.ruff.lint.pylint]
+max-branches = 12
+max-statements = 50
 
 [tool.ruff.lint.isort]
 known-first-party = ["inkline"]
@@ -102,3 +111,12 @@ extraPaths = [
 [tool.bandit]
 targets = ["packages"]
 exclude_dirs = ["tests", ".venv", "build", "dist", "data", "outputs"]
+
+[tool.pylint]
+# Only enable C0302 (too-many-lines) - all other checks handled by Ruff
+disable = "all"
+enable = "C0302"
+max-module-lines = 1000
+
+[tool.pylint.format]
+max-module-lines = 1000
