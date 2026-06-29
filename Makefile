@@ -1,4 +1,4 @@
-.PHONY: format lint format-check typecheck security deps-audit test test-cov check
+.PHONY: format lint lint-pylint format-check typecheck security deps-audit test test-cov check
 
 format:
 	uv run ruff format .
@@ -6,6 +6,9 @@ format:
 
 lint:
 	uv run ruff check .
+
+lint-pylint:
+	uv run pylint --disable=all --enable=C0302 packages/inkline-*/src
 
 format-check:
 	uv run ruff format --check .
@@ -26,4 +29,4 @@ test:
 test-cov:
 	uv run pytest -q --cov=packages --cov-report=term-missing
 
-check: lint format-check test
+check: lint lint-pylint format-check test

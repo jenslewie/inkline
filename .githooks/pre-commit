@@ -1,0 +1,17 @@
+#!/bin/sh
+# Pre-commit hook: run lint checks and tests
+# Installed via `git config core.hooksPath .githooks`
+
+set -e
+
+echo "=== ruff lint ==="
+uv run ruff check .
+
+echo "=== pylint (C0302: too-many-lines) ==="
+uv run pylint --disable=all --enable=C0302 packages/inkline-*/src
+
+echo "=== ruff format check ==="
+uv run ruff format --check .
+
+echo "=== tests ==="
+uv run pytest -q
