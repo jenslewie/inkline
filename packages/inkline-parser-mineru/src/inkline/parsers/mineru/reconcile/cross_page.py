@@ -590,9 +590,7 @@ def _cross_page_candidate_at(
     right_page = _block_page(right)
     if right_page is None:
         return None
-    starts_after_float = _starts_after_next_page_float(
-        right, interruptions, context.page_heights
-    )
+    starts_after_float = _starts_after_next_page_float(right, interruptions, context.page_heights)
     if not _is_near_page_top(right, context.page_heights) and not starts_after_float:
         return None
     return _CrossPageCandidate(
@@ -641,9 +639,7 @@ def _valid_cross_page_right(
     return right_page <= left_page + 1 or bool(interruptions)
 
 
-def _display_gate_blocks_merge(
-    candidate: _CrossPageCandidate, context: _CrossPageContext
-) -> bool:
+def _display_gate_blocks_merge(candidate: _CrossPageCandidate, context: _CrossPageContext) -> bool:
     if not candidate.display_like or candidate.right.get("type") != PARAGRAPH:
         return False
     if context.layout is None:
@@ -666,8 +662,8 @@ def _cross_page_merge_decision(
     blocks: List[Dict[str, Any]],
     candidate: _CrossPageCandidate,
     context: _CrossPageContext,
+    left_terminal: bool,
 ) -> _MergeDecision:
-    left_terminal = _ends_with_terminal(candidate.left.get("text", ""))
     evidence: Dict[str, Any] = {"left_ends_with_terminal_punctuation": left_terminal}
     if candidate.starts_after_float:
         evidence["right_starts_after_next_page_float"] = True
@@ -691,9 +687,7 @@ def _terminal_merge_decision(
     context: _CrossPageContext,
     evidence: Dict[str, Any],
 ) -> _MergeDecision:
-    next_para = _next_same_page_text_block(
-        blocks, candidate.right_idx + 1, candidate.right_page
-    )
+    next_para = _next_same_page_text_block(blocks, candidate.right_idx + 1, candidate.right_page)
     indent_ok, indent_ev = _indent_says_continuation(
         candidate.right, next_para, context.line_extractor
     )
@@ -715,9 +709,7 @@ def _terminal_merge_decision(
             True, "cross_page_paragraph_continuation_after_terminal_across_float", evidence
         )
     if _terminal_footnote_interruption_allows_merge(candidate, evidence):
-        evidence["terminal_continuation_exception"] = (
-            "left_note_ref_matches_interrupted_footnote"
-        )
+        evidence["terminal_continuation_exception"] = "left_note_ref_matches_interrupted_footnote"
         return _MergeDecision(
             True,
             "cross_page_paragraph_continuation_after_terminal_across_referenced_footnote",
@@ -799,7 +791,8 @@ def merge_cross_page_paragraphs(
             if _display_gate_blocks_merge(candidate, context):
                 i += 1
                 continue
-            decision = _cross_page_merge_decision(blocks, candidate, context)
+            left_terminal = _ends_with_terminal(candidate.left.get("text", ""))
+            decision = _cross_page_merge_decision(blocks, candidate, context, left_terminal)
             if not decision.should_merge:
                 i += 1
                 continue
