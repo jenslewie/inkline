@@ -10,6 +10,9 @@ new code; import them directly from their real modules instead:
 
 from __future__ import annotations
 
+from .markers import recover_missing_note_refs
+from .resolver import resolve_note_links
+
 __all__ = [
     "recover_missing_note_refs",
     "resolve_note_links",
@@ -17,10 +20,6 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    if name == "resolve_note_links":
-        from .resolver import resolve_note_links
-
-        return resolve_note_links
     if name == "_PageFootnoteStrategy":
         from .resolver import _PageFootnoteStrategy
 
@@ -33,8 +32,4 @@ def __getattr__(name: str):
         from .scopes import _NoteContext
 
         return _NoteContext
-    if name == "recover_missing_note_refs":
-        from .markers import recover_missing_note_refs
-
-        return recover_missing_note_refs
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
