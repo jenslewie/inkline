@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
@@ -22,6 +23,20 @@ from ..layout_helpers import (
 from ..notes.keys import note_ref_key as _note_ref_key
 
 
+@dataclass(frozen=True)
+class _OverflowTailText:
+    display_text: str
+    tail_text: str
+
+
+@dataclass(frozen=True)
+class _OverflowTailInline:
+    display_runs: List[Dict[str, Any]]
+    tail_runs: List[Dict[str, Any]]
+    display_refs: List[Dict[str, Any]] | None
+    tail_refs: List[Dict[str, Any]] | None
+
+
 def reconcile_page_bottom_overflow_tail_from_display_block(
     blocks: List[Dict[str, Any]], layout: LayoutStats
 ) -> None:
@@ -31,69 +46,19 @@ def reconcile_page_bottom_overflow_tail_from_display_block(
     while i + 1 < len(blocks):
         b = blocks[i]
         nxt = blocks[i + 1]
-        if b.get("type") != DISPLAY_BLOCK or nxt.get("type") != PARAGRAPH:
+        if not _is_page_bottom_overflow_pair(b, nxt, page_heights):
             i += 1
             continue
-        bp = max(_block_pages(b) or [_block_page(b) or -1])
-        np = _block_page(nxt)
-        if bp is None or np is None or np != bp + 1:
-            i += 1
-            continue
-        if not (_is_near_page_bottom(b, page_heights) and _is_near_page_top(nxt, page_heights)):
-            i += 1
-            continue
-        text = str(b.get("text", ""))
-        if "\n" not in text:
-            i += 1
-            continue
-        kept_display_block_text, tail = text.rsplit("\n", 1)
-        kept_display_block_text = kept_display_block_text.rstrip()
-        tail = tail.lstrip()
-        if not kept_display_block_text or not tail:
+        split = _split_overflow_tail_text(str(b.get("text", "")))
+        if split is None:
             i += 1
             continue
         if not _has_overflow_tail_geometry(b, nxt, layout, page_widths):
             i += 1
             continue
-        display_block_runs, tail_runs = _split_inline_runs_at_last_newline(
-            (b.get("attrs") or {}).get("inline_runs")
-        )
-        display_block_refs, tail_refs = _split_note_refs_by_runs(
-            (b.get("attrs") or {}).get("note_refs"), display_block_runs, tail_runs
-        )
-        b["text"] = kept_display_block_text
-        _refresh_display_block_attrs(b, prev_text=_prev_text_non_float(blocks, i))
-        attrs = b.setdefault("attrs", {})
-        if display_block_runs:
-            attrs["inline_runs"] = display_block_runs
-        if display_block_refs is not None:
-            attrs["note_refs"] = display_block_refs
-        ev = attrs.setdefault("classification_evidence", [])
-        if "split_page_bottom_overflow_tail_from_display_block" not in ev:
-            ev.append("split_page_bottom_overflow_tail_from_display_block")
-
-        new_para = copy.deepcopy(b)
-        new_para["block_id"] = f"{b.get('block_id')}_tail"
-        new_para["type"] = PARAGRAPH
-        new_para["text"] = tail
-        new_para.pop("level", None)
-        nattrs = new_para.setdefault("attrs", {})
-        for k in [
-            "role",
-            "content_form",
-            "content_form_confidence",
-            "content_form_scores",
-            "classification_evidence",
-            "quote_text",
-            "attribution",
-        ]:
-            nattrs.pop(k, None)
-        nattrs["split_from_display_block_id"] = b.get("block_id")
-        if tail_runs:
-            nattrs["inline_runs"] = tail_runs
-        if tail_refs is not None:
-            nattrs["note_refs"] = tail_refs
-        new_para["block_id"] = nxt.get("block_id", new_para["block_id"])
+        inline = _overflow_tail_inline_parts(b.get("attrs") or {})
+        _apply_overflow_display_head(b, split, inline, blocks, i)
+        new_para = _overflow_tail_paragraph(b, nxt, split, inline)
         _merge_block_pair(
             new_para,
             nxt,
@@ -104,6 +69,93 @@ def reconcile_page_bottom_overflow_tail_from_display_block(
         del blocks[i + 1]
         blocks.insert(i + 1, new_para)
         i += 2
+
+
+def _is_page_bottom_overflow_pair(
+    block: Dict[str, Any], next_block: Dict[str, Any], page_heights: Dict[int, float]
+) -> bool:
+    if block.get("type") != DISPLAY_BLOCK or next_block.get("type") != PARAGRAPH:
+        return False
+    block_page = max(_block_pages(block) or [_block_page(block) or -1])
+    next_page = _block_page(next_block)
+    return (
+        next_page is not None
+        and next_page == block_page + 1
+        and _is_near_page_bottom(block, page_heights)
+        and _is_near_page_top(next_block, page_heights)
+    )
+
+
+def _split_overflow_tail_text(text: str) -> _OverflowTailText | None:
+    if "\n" not in text:
+        return None
+    display_text, tail_text = text.rsplit("\n", 1)
+    display_text = display_text.rstrip()
+    tail_text = tail_text.lstrip()
+    if not display_text or not tail_text:
+        return None
+    return _OverflowTailText(display_text, tail_text)
+
+
+def _overflow_tail_inline_parts(attrs: Dict[str, Any]) -> _OverflowTailInline:
+    display_runs, tail_runs = _split_inline_runs_at_last_newline(attrs.get("inline_runs"))
+    display_refs, tail_refs = _split_note_refs_by_runs(
+        attrs.get("note_refs"), display_runs, tail_runs
+    )
+    return _OverflowTailInline(display_runs, tail_runs, display_refs, tail_refs)
+
+
+def _apply_overflow_display_head(
+    block: Dict[str, Any],
+    split: _OverflowTailText,
+    inline: _OverflowTailInline,
+    blocks: List[Dict[str, Any]],
+    index: int,
+) -> None:
+    block["text"] = split.display_text
+    _refresh_display_block_attrs(block, prev_text=_prev_text_non_float(blocks, index))
+    attrs = block.setdefault("attrs", {})
+    if inline.display_runs:
+        attrs["inline_runs"] = inline.display_runs
+    if inline.display_refs is not None:
+        attrs["note_refs"] = inline.display_refs
+    evidence = attrs.setdefault("classification_evidence", [])
+    if "split_page_bottom_overflow_tail_from_display_block" not in evidence:
+        evidence.append("split_page_bottom_overflow_tail_from_display_block")
+
+
+def _overflow_tail_paragraph(
+    block: Dict[str, Any],
+    next_block: Dict[str, Any],
+    split: _OverflowTailText,
+    inline: _OverflowTailInline,
+) -> Dict[str, Any]:
+    new_para = copy.deepcopy(block)
+    new_para["block_id"] = next_block.get("block_id", f"{block.get('block_id')}_tail")
+    new_para["type"] = PARAGRAPH
+    new_para["text"] = split.tail_text
+    new_para.pop("level", None)
+    attrs = new_para.setdefault("attrs", {})
+    _remove_display_attrs(attrs)
+    attrs["split_from_display_block_id"] = block.get("block_id")
+    if inline.tail_runs:
+        attrs["inline_runs"] = inline.tail_runs
+    if inline.tail_refs is not None:
+        attrs["note_refs"] = inline.tail_refs
+    return new_para
+
+
+def _remove_display_attrs(attrs: Dict[str, Any]) -> None:
+    for key in [
+        "role",
+        "content_form",
+        "content_form_confidence",
+        "content_form_scores",
+        "classification_evidence",
+        "quote_text",
+        "attribution",
+    ]:
+        attrs.pop(key, None)
 
 
 def _has_overflow_tail_geometry(
