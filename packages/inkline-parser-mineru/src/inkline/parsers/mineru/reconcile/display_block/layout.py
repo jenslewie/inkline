@@ -35,8 +35,17 @@ def reconcile_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) 
     """
     page_heights = _page_coord_heights(blocks)
     page_widths = _page_coord_widths(blocks)
+    _promote_page_local_set_off_display_paragraphs(blocks, layout, page_widths, page_heights)
+    _merge_cross_page_display_continuations(blocks, layout, page_widths, page_heights)
+    _merge_same_page_display_continuations(blocks, layout, page_widths)
 
-    # 1) Promote page-local set-off display paragraphs using geometry only.
+
+def _promote_page_local_set_off_display_paragraphs(
+    blocks: List[Dict[str, Any]],
+    layout: LayoutStats,
+    page_widths: Dict[int, float],
+    page_heights: Dict[int, float],
+) -> None:
     for idx, b in enumerate(blocks):
         if b.get("type") != PARAGRAPH:
             continue
@@ -60,8 +69,13 @@ def reconcile_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) 
                 ev.append("promoted_by_page_local_indented_display_layout")
             _refresh_display_block_attrs(b, prev_text=prev_text)
 
-    # 2) If a page-bottom paragraph is immediately followed by a page-top
-    #    display block, the first paragraph belongs to the same display run.
+
+def _merge_cross_page_display_continuations(
+    blocks: List[Dict[str, Any]],
+    layout: LayoutStats,
+    page_widths: Dict[int, float],
+    page_heights: Dict[int, float],
+) -> None:
     i = 0
     while i + 1 < len(blocks):
         left = blocks[i]
@@ -90,7 +104,12 @@ def reconcile_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) 
                 continue
         i += 1
 
-    # 3) Absorb aligned same-page continuation paragraphs after a display block.
+
+def _merge_same_page_display_continuations(
+    blocks: List[Dict[str, Any]],
+    layout: LayoutStats,
+    page_widths: Dict[int, float],
+) -> None:
     i = 0
     while i < len(blocks):
         cur = blocks[i]
@@ -166,10 +185,20 @@ def _is_vertical_context_paragraph_after_display(
     if not fbb:
         return False
     coord_width = page_widths.get(page) if page_widths else None
+    return _has_vertical_context_spacing(cbb, nbb, fbb, layout, coord_width)
+
+
+def _has_vertical_context_spacing(
+    display_bbox: List[Any],
+    paragraph_bbox: List[Any],
+    following_bbox: List[Any],
+    layout: LayoutStats,
+    coord_width: float | None,
+) -> bool:
     _body_left, _body_right, body_width = _scaled_body_metrics(layout, coord_width)
-    height = max(1.0, float(nbb[3]) - float(nbb[1]))
-    gap_from_display = float(nbb[1]) - float(cbb[3])
-    gap_to_following = float(fbb[1]) - float(nbb[3])
+    height = max(1.0, float(paragraph_bbox[3]) - float(paragraph_bbox[1]))
+    gap_from_display = float(paragraph_bbox[1]) - float(display_bbox[3])
+    gap_to_following = float(following_bbox[1]) - float(paragraph_bbox[3])
     far_from_display = gap_from_display >= max(24.0, height * 1.5, body_width * 0.03)
     close_to_following = 0 <= gap_to_following <= max(18.0, height * 1.1, body_width * 0.025)
     return far_from_display and close_to_following
@@ -288,19 +317,15 @@ def _has_indented_display_geometry(
     cur = blocks[idx]
     if cur.get("type") != PARAGRAPH:
         return False
-    text = str(cur.get("text") or "").strip()
-    if not text:
+    if not str(cur.get("text") or "").strip():
         return False
     bb = _bbox(cur)
     if not bb:
         return False
     page = _block_page(cur)
-    source_pages = _block_pages(cur)
-    spans_multiple_pages = len(source_pages) >= 2
+    spans_multiple_pages = len(_block_pages(cur)) >= 2
     coord_width = page_widths.get(page) if page is not None and page_widths else None
-    _scaled_body_left, _scaled_body_right, scaled_body_width = _scaled_body_metrics(
-        layout, coord_width
-    )
+    scaled_body_width = _scaled_body_metrics(layout, coord_width)[2]
     body_left = _page_body_left(blocks, cur, layout, page_widths)
     if body_left is None:
         return False
@@ -309,21 +334,16 @@ def _has_indented_display_geometry(
     page_top_after_prior_page_footnote = _is_page_top_set_off_after_prior_page_footnote(
         blocks, idx, layout, page_heights
     )
-    x0 = float(bb[0])
-    width = max(0.0, float(bb[2]) - x0)
-    indent_threshold = (
-        max(28.0, scaled_body_width * 0.04)
-        if page_top_after_prior_page_footnote
-        else max(34.0, scaled_body_width * 0.045)
-    )
-    indented = x0 >= body_left + indent_threshold
-    long_enough = width >= scaled_body_width * 0.45
-    max_width_ratio = 1.15 if spans_multiple_pages or page_top_after_prior_page_footnote else 0.98
-    not_full_body_lane = width <= scaled_body_width * max_width_ratio and (
-        not _is_body_paragraph_layout(cur, layout, coord_width)
-        or x0 >= body_left + indent_threshold
-    )
-    if not (indented and long_enough and not_full_body_lane):
+    if not _has_indented_width_geometry(
+        cur,
+        bb,
+        layout,
+        coord_width,
+        body_left,
+        scaled_body_width,
+        spans_multiple_pages,
+        page_top_after_prior_page_footnote,
+    ):
         return False
     if not spans_multiple_pages and (
         _has_tight_body_flow_from_previous_paragraph(
@@ -336,6 +356,35 @@ def _has_indented_display_geometry(
         return False
     return not _is_vertical_context_paragraph_after_previous_display(
         blocks, idx, layout, page_widths
+    )
+
+
+def _has_indented_width_geometry(
+    block: Dict[str, Any],
+    bbox: List[Any],
+    layout: LayoutStats,
+    coord_width: float | None,
+    body_left: float,
+    scaled_body_width: float,
+    spans_multiple_pages: bool,
+    page_top_after_prior_page_footnote: bool,
+) -> bool:
+    x0 = float(bbox[0])
+    width = max(0.0, float(bbox[2]) - x0)
+    indent_threshold = (
+        max(28.0, scaled_body_width * 0.04)
+        if page_top_after_prior_page_footnote
+        else max(34.0, scaled_body_width * 0.045)
+    )
+    max_width_ratio = 1.15 if spans_multiple_pages or page_top_after_prior_page_footnote else 0.98
+    not_full_body_lane = width <= scaled_body_width * max_width_ratio and (
+        not _is_body_paragraph_layout(block, layout, coord_width)
+        or x0 >= body_left + indent_threshold
+    )
+    return (
+        x0 >= body_left + indent_threshold
+        and width >= scaled_body_width * 0.45
+        and not_full_body_lane
     )
 
 
@@ -568,18 +617,16 @@ def _is_set_off_after_narrow_bridge_before_body(
     before_bb = _bbox(before_prev)
     if not cur_bb or not prev_bb or not before_bb:
         return False
-    coord_width = page_widths.get(page) if page_widths else None
-    _scaled_body_left, _scaled_body_right, scaled_body_width = _scaled_body_metrics(
-        layout, coord_width
+    scaled_body_width = _scaled_body_metrics(
+        layout, page_widths.get(page) if page_widths else None
+    )[2]
+    aligned_left = _aligned_left_with_neighbors(cur_bb, prev_bb, before_bb, scaled_body_width)
+    wider_than_bridge = _bbox_width(cur_bb) >= max(
+        _bbox_width(prev_bb) * 1.35, scaled_body_width * 0.45
     )
-    cur_width = _bbox_width(cur_bb)
-    prev_width = _bbox_width(prev_bb)
-    before_width = _bbox_width(before_bb)
-    aligned_left = abs(float(cur_bb[0]) - float(prev_bb[0])) <= max(
-        32.0, scaled_body_width * 0.05
-    ) and abs(float(cur_bb[0]) - float(before_bb[0])) <= max(32.0, scaled_body_width * 0.05)
-    wider_than_bridge = cur_width >= max(prev_width * 1.35, scaled_body_width * 0.45)
-    follows_display_width = before_width >= max(prev_width * 1.35, scaled_body_width * 0.45)
+    follows_display_width = _bbox_width(before_bb) >= max(
+        _bbox_width(prev_bb) * 1.35, scaled_body_width * 0.45
+    )
     gap_from_bridge = float(cur_bb[1]) - float(prev_bb[3])
     gap_to_body = float((_bbox(nxt) or [0, 0, 0, 0])[1]) - float(cur_bb[3])
     gap_limit = max(58.0, scaled_body_width * 0.08)
@@ -621,19 +668,14 @@ def _is_narrow_bridge_between_display_blocks(
     next_bb = _bbox(nxt)
     if not cur_bb or not prev_bb or not next_bb:
         return False
-    coord_width = page_widths.get(page) if page_widths else None
-    _scaled_body_left, _scaled_body_right, scaled_body_width = _scaled_body_metrics(
-        layout, coord_width
-    )
+    scaled_body_width = _scaled_body_metrics(
+        layout, page_widths.get(page) if page_widths else None
+    )[2]
     bridge_width = _bbox_width(cur_bb)
-    prev_width = _bbox_width(prev_bb)
-    next_width = _bbox_width(next_bb)
-    aligned_left = abs(float(cur_bb[0]) - float(prev_bb[0])) <= max(
-        32.0, scaled_body_width * 0.05
-    ) and abs(float(cur_bb[0]) - float(next_bb[0])) <= max(32.0, scaled_body_width * 0.05)
-    wide_neighbors = prev_width >= max(
+    aligned_left = _aligned_left_with_neighbors(cur_bb, prev_bb, next_bb, scaled_body_width)
+    wide_neighbors = _bbox_width(prev_bb) >= max(
         bridge_width * 1.35, scaled_body_width * 0.45
-    ) and next_width >= max(bridge_width * 1.35, scaled_body_width * 0.45)
+    ) and _bbox_width(next_bb) >= max(bridge_width * 1.35, scaled_body_width * 0.45)
     prev_gap = float(cur_bb[1]) - float(prev_bb[3])
     next_gap = float(next_bb[1]) - float(cur_bb[3])
     gap_limit = max(58.0, scaled_body_width * 0.08)
@@ -642,6 +684,19 @@ def _is_narrow_bridge_between_display_blocks(
         and wide_neighbors
         and 0 <= prev_gap <= gap_limit
         and 0 <= next_gap <= gap_limit
+    )
+
+
+def _aligned_left_with_neighbors(
+    bbox: List[Any],
+    previous_bbox: List[Any],
+    next_bbox: List[Any],
+    scaled_body_width: float,
+) -> bool:
+    tolerance = max(32.0, scaled_body_width * 0.05)
+    return (
+        abs(float(bbox[0]) - float(previous_bbox[0])) <= tolerance
+        and abs(float(bbox[0]) - float(next_bbox[0])) <= tolerance
     )
 
 
@@ -948,20 +1003,14 @@ def _is_long_body_lane_paragraph(
     cur = blocks[idx]
     if cur.get("type") != PARAGRAPH:
         return False
-    text = str(cur.get("text") or "").strip()
-    if len(text) < 50:
+    if len(str(cur.get("text") or "").strip()) < 50:
         return False
     bb = _bbox(cur)
     page = _block_page(cur)
     if not bb or page is None:
         return False
-    pages = _block_pages(cur)
-    if len(pages) >= 2:
-        page_height = _page_coord_heights(blocks).get(page, layout.page_height)
-        height = max(0.0, float(bb[3]) - float(bb[1]))
-        page_top_large_block = float(bb[1]) <= page_height * 0.25 and height >= page_height * 0.45
-        if page_top_large_block:
-            return False
+    if len(_block_pages(cur)) >= 2 and _is_page_top_large_block(blocks, cur, bb, page, layout):
+        return False
     coord_width = page_widths.get(page) if page_widths else None
     _scaled_body_left, _scaled_body_right, scaled_body_width = _scaled_body_metrics(
         layout, coord_width
@@ -974,3 +1023,11 @@ def _is_long_body_lane_paragraph(
     near_body_left = x0 <= body_left + max(55.0, scaled_body_width * 0.07)
     body_width = width >= scaled_body_width * 0.90
     return near_body_left and body_width
+
+
+def _is_page_top_large_block(
+    blocks: List[Dict[str, Any]], block: Dict[str, Any], bbox: List[Any], page: int, layout: LayoutStats
+) -> bool:
+    page_height = _page_coord_heights(blocks).get(page, layout.page_height)
+    height = max(0.0, float(bbox[3]) - float(bbox[1]))
+    return float(bbox[1]) <= page_height * 0.25 and height >= page_height * 0.45
