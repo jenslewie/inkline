@@ -32,6 +32,24 @@ class TextStyleMetrics:
         return self.font_size if self.font_size is not None else self.visual_size
 
 
+@dataclass(frozen=True)
+class _ScaledRegion:
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    margin_x: float
+    margin_y: float
+
+
+@dataclass(frozen=True)
+class _TextLayerSummary:
+    sizes: List[float]
+    line_heights: List[float]
+    fonts: List[str]
+    selected_lines: int
+
+
 class TextStyleAnalyzer:
     """Estimate font/style metrics for canonical blocks.
 
@@ -160,41 +178,19 @@ class TextStyleAnalyzer:
         bb = _bbox(block)
         if page is None or not bb:
             return None
-        x0, y0, x1, y1 = self._cache.scale_bbox(page, bb)
-        margin_y = max(2.0, (y1 - y0) * 0.08)
-        margin_x = max(2.0, (x1 - x0) * 0.04)
-        text_items = self._cache.page_text_items(page)
-        sizes: List[float] = []
-        line_heights: List[float] = []
-        fonts: List[str] = []
-        selected_lines = 0
-        for line in text_items:
-            lx0, ly0, lx1, ly1 = line["bbox"]
-            cy = (ly0 + ly1) / 2.0
-            overlap_x = max(0.0, min(x1 + margin_x, lx1) - max(x0 - margin_x, lx0))
-            if not (y0 - margin_y <= cy <= y1 + margin_y and overlap_x > 1.0):
-                continue
-            selected_lines += 1
-            line_heights.append(max(1.0, ly1 - ly0))
-            for span in line["spans"]:
-                txt = str(span.get("text", "")).strip()
-                if not txt:
-                    continue
-                size = span.get("size")
-                if isinstance(size, (int, float)) and size > 0:
-                    sizes.append(float(size))
-                font = span.get("font")
-                if isinstance(font, str) and font and font not in fonts:
-                    fonts.append(font)
-        if not sizes and not line_heights:
+        region = _scaled_region(self._cache.scale_bbox(page, bb))
+        summary = _collect_text_layer_summary(self._cache.page_text_items(page), region)
+        if not summary.sizes and not summary.line_heights:
             return None
         return TextStyleMetrics(
             source="pdf_text",
-            line_count=selected_lines,
-            font_size=round(median(sizes), 3) if sizes else None,
-            line_height=round(median(line_heights), 3) if line_heights else None,
-            fonts=tuple(fonts),
-            confidence="high" if sizes else "medium",
+            line_count=summary.selected_lines,
+            font_size=round(median(summary.sizes), 3) if summary.sizes else None,
+            line_height=round(median(summary.line_heights), 3)
+            if summary.line_heights
+            else None,
+            fonts=tuple(summary.fonts),
+            confidence="high" if summary.sizes else "medium",
         )
 
     def _image_metrics(self, block: Dict[str, Any]) -> Optional[TextStyleMetrics]:
@@ -203,33 +199,12 @@ class TextStyleAnalyzer:
         image = self._cache.page_image(page) if page is not None else None
         if page is None or not bb or image is None:
             return None
-        x0, y0, x1, y1 = self._cache.scale_bbox(page, bb)
-        zoom = self._cache.render_zoom
-        px0 = max(0, int((x0 - 2.0) * zoom))
-        py0 = max(0, int((y0 - 2.0) * zoom))
-        px1 = min(image.width, int((x1 + 2.0) * zoom))
-        py1 = min(image.height, int((y1 + 2.0) * zoom))
-        if px1 <= px0 or py1 <= py0:
+        crop_box = _image_crop_box(self._cache.scale_bbox(page, bb), image.size, self._cache.render_zoom)
+        if crop_box is None:
             return None
-        crop = image.crop((px0, py0, px1, py1))
-        width, height = crop.size
-        data = list(crop.getdata())
-        threshold = 225
-        row_counts = [
-            sum(1 for val in data[y * width : (y + 1) * width] if val < threshold)
-            for y in range(height)
-        ]
-        bands = line_bands(row_counts, max(2, int(width * 0.004)))
-        line_heights: List[float] = []
-        visual_sizes: List[float] = []
-        for start, end in bands:
-            band_height = (end - start) / zoom
-            if band_height < 2.0:
-                continue
-            line_heights.append(band_height)
-            active_rows = [row_counts[y] for y in range(start, end) if row_counts[y] > 0]
-            if active_rows:
-                visual_sizes.append(band_height)
+        visual_sizes, line_heights = _visual_line_metrics(
+            image.crop(crop_box), self._cache.render_zoom
+        )
         if not visual_sizes:
             return None
         return TextStyleMetrics(
@@ -239,6 +214,94 @@ class TextStyleAnalyzer:
             line_height=round(median(line_heights), 3) if line_heights else None,
             confidence="medium",
         )
+
+
+def _scaled_region(scaled_bbox: Tuple[float, float, float, float]) -> _ScaledRegion:
+    x0, y0, x1, y1 = scaled_bbox
+    return _ScaledRegion(
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        margin_x=max(2.0, (x1 - x0) * 0.04),
+        margin_y=max(2.0, (y1 - y0) * 0.08),
+    )
+
+
+def _collect_text_layer_summary(
+    text_items: Sequence[Dict[str, Any]], region: _ScaledRegion
+) -> _TextLayerSummary:
+    sizes: List[float] = []
+    line_heights: List[float] = []
+    fonts: List[str] = []
+    selected_lines = 0
+    for line in text_items:
+        if not _line_overlaps_region(line, region):
+            continue
+        selected_lines += 1
+        line_heights.append(_line_height(line))
+        _collect_span_style_metrics(line.get("spans") or [], sizes, fonts)
+    return _TextLayerSummary(sizes, line_heights, fonts, selected_lines)
+
+
+def _line_overlaps_region(line: Dict[str, Any], region: _ScaledRegion) -> bool:
+    lx0, ly0, lx1, ly1 = line["bbox"]
+    cy = (ly0 + ly1) / 2.0
+    overlap_x = max(0.0, min(region.x1 + region.margin_x, lx1) - max(region.x0 - region.margin_x, lx0))
+    return region.y0 - region.margin_y <= cy <= region.y1 + region.margin_y and overlap_x > 1.0
+
+
+def _line_height(line: Dict[str, Any]) -> float:
+    _lx0, ly0, _lx1, ly1 = line["bbox"]
+    return max(1.0, ly1 - ly0)
+
+
+def _collect_span_style_metrics(
+    spans: Sequence[Dict[str, Any]], sizes: List[float], fonts: List[str]
+) -> None:
+    for span in spans:
+        txt = str(span.get("text", "")).strip()
+        if not txt:
+            continue
+        size = span.get("size")
+        if isinstance(size, (int, float)) and size > 0:
+            sizes.append(float(size))
+        font = span.get("font")
+        if isinstance(font, str) and font and font not in fonts:
+            fonts.append(font)
+
+
+def _image_crop_box(
+    scaled_bbox: Tuple[float, float, float, float], image_size: Tuple[int, int], zoom: float
+) -> Tuple[int, int, int, int] | None:
+    x0, y0, x1, y1 = scaled_bbox
+    width, height = image_size
+    px0 = max(0, int((x0 - 2.0) * zoom))
+    py0 = max(0, int((y0 - 2.0) * zoom))
+    px1 = min(width, int((x1 + 2.0) * zoom))
+    py1 = min(height, int((y1 + 2.0) * zoom))
+    if px1 <= px0 or py1 <= py0:
+        return None
+    return px0, py0, px1, py1
+
+
+def _visual_line_metrics(crop: Any, zoom: float) -> Tuple[List[float], List[float]]:
+    width, height = crop.size
+    data = list(crop.getdata())
+    row_counts = [
+        sum(1 for val in data[y * width : (y + 1) * width] if val < 225)
+        for y in range(height)
+    ]
+    visual_sizes: List[float] = []
+    line_heights: List[float] = []
+    for start, end in line_bands(row_counts, max(2, int(width * 0.004))):
+        band_height = (end - start) / zoom
+        if band_height < 2.0:
+            continue
+        line_heights.append(band_height)
+        if any(row_counts[y] > 0 for y in range(start, end)):
+            visual_sizes.append(band_height)
+    return visual_sizes, line_heights
 
 
 def _raw_block_as_canonical(block: Any) -> Dict[str, Any]:
