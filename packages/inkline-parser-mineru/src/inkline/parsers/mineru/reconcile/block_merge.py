@@ -22,80 +22,133 @@ def _merge_block_pair(
 ) -> None:
     original_left_text = left.get("text", "") or ""
     original_right_text = right.get("text", "") or ""
-    if joiner == "newline" and original_left_text.strip() and original_right_text.strip():
-        left["text"] = original_left_text.rstrip() + "\n" + original_right_text.lstrip()
-    else:
-        left["text"] = _join_text(original_left_text, original_right_text)
-    left_was_display = left.get("type") in DISPLAY_BLOCK_TYPES
-    right_was_display = right.get("type") in DISPLAY_BLOCK_TYPES
-    if right_was_display and not left_was_display:
-        left["type"] = DISPLAY_BLOCK
-        for k, v in (right.get("attrs") or {}).items():
-            if k in {
-                "layout_role",
-                "layout_form",
-                "line_count",
-                "has_attribution_line",
-                "line_layouts",
-                "raw_types",
-            }:
-                left.setdefault("attrs", {})[k] = v
-    lsrc = left.setdefault("source", {})
-    rsrc = right.get("source", {})
-    lpages = set(lsrc.get("pages") or ([lsrc.get("page")] if lsrc.get("page") is not None else []))
-    for p in rsrc.get("pages") or ([rsrc.get("page")] if rsrc.get("page") is not None else []):
-        if p is not None:
-            lpages.add(p)
-    if lpages:
-        lsrc["pages"] = sorted(lpages)
-    spans = lsrc.setdefault("spans", [])
+    left["text"] = _merged_pair_text(original_left_text, original_right_text, joiner)
+    _promote_display_attrs(left, right)
+    _merge_pair_source(left, right, original_left_text, original_right_text, interruptions)
+    attrs = _merge_pair_attrs(left, right, reason, evidence, interruptions)
+    _merge_right_note_refs(attrs, right)
+    _merge_inline_runs(left, right, original_left_text, original_right_text)
+    if left.get("type") == DISPLAY_BLOCK:
+        _refresh_display_block_attrs(left)
+
+
+def _merged_pair_text(left_text: str, right_text: str, joiner: Optional[str]) -> str:
+    if joiner == "newline" and left_text.strip() and right_text.strip():
+        return left_text.rstrip() + "\n" + right_text.lstrip()
+    return _join_text(left_text, right_text)
+
+
+def _promote_display_attrs(left: Dict[str, Any], right: Dict[str, Any]) -> None:
+    if right.get("type") not in DISPLAY_BLOCK_TYPES or left.get("type") in DISPLAY_BLOCK_TYPES:
+        return
+    left["type"] = DISPLAY_BLOCK
+    left_attrs = left.setdefault("attrs", {})
+    for key, value in (right.get("attrs") or {}).items():
+        if key in _DISPLAY_ATTRS_TO_PROMOTE:
+            left_attrs[key] = value
+
+
+_DISPLAY_ATTRS_TO_PROMOTE = {
+    "layout_role",
+    "layout_form",
+    "line_count",
+    "has_attribution_line",
+    "line_layouts",
+    "raw_types",
+}
+
+
+def _merge_pair_source(
+    left: Dict[str, Any],
+    right: Dict[str, Any],
+    original_left_text: str,
+    original_right_text: str,
+    interruptions: List[Dict[str, Any]],
+) -> None:
+    left_source = left.setdefault("source", {})
+    right_source = right.get("source", {})
+    _merge_source_pages(left_source, right_source)
+    _merge_source_spans(left, right, left_source, right_source, original_left_text, original_right_text)
+    if interruptions:
+        left_source.setdefault("interruption_spans", []).extend(interruptions)
+    left_source["bbox"] = union_bbox([left_source.get("bbox"), right_source.get("bbox")])
+
+
+def _merge_source_pages(left_source: Dict[str, Any], right_source: Dict[str, Any]) -> None:
+    pages = set(_source_pages(left_source))
+    pages.update(_source_pages(right_source))
+    if pages:
+        left_source["pages"] = sorted(pages)
+
+
+def _source_pages(source: Dict[str, Any]) -> List[Any]:
+    pages = source.get("pages")
+    if pages:
+        return [page for page in pages if page is not None]
+    page = source.get("page")
+    return [page] if page is not None else []
+
+
+def _merge_source_spans(
+    left: Dict[str, Any],
+    right: Dict[str, Any],
+    left_source: Dict[str, Any],
+    right_source: Dict[str, Any],
+    original_left_text: str,
+    original_right_text: str,
+) -> None:
+    spans = left_source.setdefault("spans", [])
     if not spans:
-        spans.append(
-            {
-                "page": lsrc.get("page"),
-                "bbox": lsrc.get("bbox"),
-                "block_id": left.get("block_id"),
-                "text": original_left_text,
-            }
-        )
-    right_spans = [span for span in rsrc.get("spans") or [] if isinstance(span, dict)]
+        spans.append(_source_span(left, left_source, original_left_text))
+    right_spans = [span for span in right_source.get("spans") or [] if isinstance(span, dict)]
     if right_spans:
         spans.extend(dict(span) for span in right_spans)
-    else:
-        spans.append(
-            {
-                "page": rsrc.get("page"),
-                "bbox": rsrc.get("bbox"),
-                "block_id": right.get("block_id"),
-                "text": original_right_text,
-            }
-        )
-    if interruptions:
-        ints = lsrc.setdefault("interruption_spans", [])
-        ints.extend(interruptions)
-    lsrc["bbox"] = union_bbox([lsrc.get("bbox"), rsrc.get("bbox")])
+        return
+    spans.append(_source_span(right, right_source, original_right_text))
+
+
+def _source_span(block: Dict[str, Any], source: Dict[str, Any], text: str) -> Dict[str, Any]:
+    return {
+        "page": source.get("page"),
+        "bbox": source.get("bbox"),
+        "block_id": block.get("block_id"),
+        "text": text,
+    }
+
+
+def _merge_pair_attrs(
+    left: Dict[str, Any],
+    right: Dict[str, Any],
+    reason: str,
+    evidence: Dict[str, Any],
+    interruptions: List[Dict[str, Any]],
+) -> Dict[str, Any]:
     attrs = left.setdefault("attrs", {})
     merged = attrs.setdefault("merged_from", [])
-    if left.get("block_id") not in merged:
-        merged.append(left.get("block_id"))
+    _append_unique(merged, left.get("block_id"))
     right_merged = (right.get("attrs") or {}).get("merged_from") or []
-    for rb in [right.get("block_id"), *list(right_merged)]:
-        if rb is not None and rb not in merged:
-            merged.append(rb)
+    for block_id in [right.get("block_id"), *list(right_merged)]:
+        _append_unique(merged, block_id)
     attrs["merge_reason"] = reason
     if evidence:
         attrs["merge_evidence"] = evidence
     if interruptions:
-        attrs["interrupted_by"] = [x.get("block_id") for x in interruptions]
-    right_legacy_refs = (right.get("attrs") or {}).get("note_refs")
-    if isinstance(right_legacy_refs, list) and right_legacy_refs:
-        refs = attrs.setdefault("note_refs", [])
-        for ref in right_legacy_refs:
-            if ref not in refs:
-                refs.append(ref)
-    _merge_inline_runs(left, right, original_left_text, original_right_text)
-    if left.get("type") == DISPLAY_BLOCK:
-        _refresh_display_block_attrs(left)
+        attrs["interrupted_by"] = [item.get("block_id") for item in interruptions]
+    return attrs
+
+
+def _append_unique(values: List[Any], value: Any) -> None:
+    if value is not None and value not in values:
+        values.append(value)
+
+
+def _merge_right_note_refs(attrs: Dict[str, Any], right: Dict[str, Any]) -> None:
+    right_refs = (right.get("attrs") or {}).get("note_refs")
+    if not isinstance(right_refs, list) or not right_refs:
+        return
+    refs = attrs.setdefault("note_refs", [])
+    for ref in right_refs:
+        _append_unique(refs, ref)
 
 
 def _merge_inline_runs(
