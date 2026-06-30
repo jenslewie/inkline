@@ -27,48 +27,7 @@ def _qwen_marker_offset_in_text(
         return None
     candidates: List[int] = []
     if after:
-        start = 0
-        while True:
-            index = text.find(after, start)
-            if index < 0:
-                break
-            visible_offset = _qwen_visible_marker_offset_before_after(text, marker, before, index)
-            if visible_offset is not None:
-                candidates.append(visible_offset)
-                start = index + 1
-                continue
-            if not before or _qwen_prefix_matches_before(text[:index], before):
-                candidates.append(
-                    _qwen_adjusted_offset_between_before_after(
-                        text, marker, before, after, quote, index
-                    )
-                )
-            elif before:
-                omitted_punctuation_offset = _qwen_offset_before_omitted_boundary_punctuation(
-                    text, marker, before, after, quote, index
-                )
-                if omitted_punctuation_offset is not None:
-                    candidates.append(omitted_punctuation_offset)
-                    start = index + 1
-                    continue
-                omitted_terminal_offset = _qwen_offset_after_omitted_terminal_phrase(
-                    text, before, index
-                )
-                if omitted_terminal_offset is not None:
-                    candidates.append(omitted_terminal_offset)
-                    start = index + 1
-                    continue
-                omitted_fragment_offset = _qwen_offset_after_short_omitted_fragment(
-                    text, marker, before, quote, index
-                )
-                if omitted_fragment_offset is not None:
-                    candidates.append(omitted_fragment_offset)
-                    start = index + 1
-                    continue
-                punct_offset = _qwen_offset_around_punctuation(text, marker, before, index)
-                if punct_offset is not None:
-                    candidates.append(punct_offset)
-            start = index + 1
+        candidates.extend(_qwen_offsets_using_after_context(text, marker, before, after, quote))
         if not candidates and before:
             candidates.extend(
                 _qwen_filter_before_only_offsets(
@@ -82,6 +41,56 @@ def _qwen_marker_offset_in_text(
     if candidates:
         return None
     return _qwen_marker_offset_in_normalized_text(text, marker, before, after, quote)
+
+
+def _qwen_offsets_using_after_context(
+    text: str, marker: str, before: str, after: str, quote: str
+) -> List[int]:
+    candidates: List[int] = []
+    start = 0
+    while True:
+        index = text.find(after, start)
+        if index < 0:
+            break
+        offset = _qwen_offset_for_after_match(text, marker, before, after, quote, index)
+        if offset is not None:
+            candidates.append(offset)
+        start = index + 1
+    return candidates
+
+
+def _qwen_offset_for_after_match(
+    text: str, marker: str, before: str, after: str, quote: str, after_index: int
+) -> Optional[int]:
+    visible_offset = _qwen_visible_marker_offset_before_after(text, marker, before, after_index)
+    if visible_offset is not None:
+        return visible_offset
+    if not before or _qwen_prefix_matches_before(text[:after_index], before):
+        return _qwen_adjusted_offset_between_before_after(
+            text, marker, before, after, quote, after_index
+        )
+    return _qwen_offset_for_after_match_with_omitted_before(
+        text, marker, before, after, quote, after_index
+    )
+
+
+def _qwen_offset_for_after_match_with_omitted_before(
+    text: str, marker: str, before: str, after: str, quote: str, after_index: int
+) -> Optional[int]:
+    omitted_punctuation_offset = _qwen_offset_before_omitted_boundary_punctuation(
+        text, marker, before, after, quote, after_index
+    )
+    if omitted_punctuation_offset is not None:
+        return omitted_punctuation_offset
+    omitted_terminal_offset = _qwen_offset_after_omitted_terminal_phrase(text, before, after_index)
+    if omitted_terminal_offset is not None:
+        return omitted_terminal_offset
+    omitted_fragment_offset = _qwen_offset_after_short_omitted_fragment(
+        text, marker, before, quote, after_index
+    )
+    if omitted_fragment_offset is not None:
+        return omitted_fragment_offset
+    return _qwen_offset_around_punctuation(text, marker, before, after_index)
 
 
 def _qwen_visible_marker_offsets_with_context(
@@ -124,49 +133,11 @@ def _qwen_marker_offset_in_normalized_text(
     compact, offsets = _normalized_text_with_start_offsets(text)
     candidates: List[int] = []
     if after:
-        start = 0
-        while True:
-            index = compact.find(after, start)
-            if index < 0:
-                break
-            visible_offset = _qwen_visible_marker_offset_before_after(
-                compact, marker, before, index
+        candidates.extend(
+            _qwen_offsets_using_normalized_after_context(
+                text, compact, offsets, marker, before, after, quote
             )
-            if visible_offset is not None and 0 <= visible_offset < len(offsets):
-                candidates.append(offsets[visible_offset])
-                start = index + 1
-                continue
-            if not before or _qwen_prefix_matches_before(compact[:index], before):
-                adjusted_index = _qwen_adjusted_offset_between_before_after(
-                    compact, marker, before, after, quote, index
-                )
-                if 0 <= adjusted_index < len(offsets):
-                    candidates.append(offsets[adjusted_index])
-                elif adjusted_index == len(offsets):
-                    candidates.append(len(text))
-            elif before:
-                omitted_punctuation_offset = _qwen_offset_before_omitted_boundary_punctuation(
-                    compact, marker, before, after, quote, index
-                )
-                if omitted_punctuation_offset is not None and 0 <= omitted_punctuation_offset < len(
-                    offsets
-                ):
-                    candidates.append(offsets[omitted_punctuation_offset])
-                    start = index + 1
-                    continue
-                omitted_fragment_offset = _qwen_offset_after_short_omitted_fragment(
-                    compact, marker, before, quote, index
-                )
-                if omitted_fragment_offset is not None and 0 <= omitted_fragment_offset < len(
-                    offsets
-                ):
-                    candidates.append(offsets[omitted_fragment_offset])
-                    start = index + 1
-                    continue
-                punct_offset = _qwen_offset_around_punctuation(compact, marker, before, index)
-                if punct_offset is not None and 0 <= punct_offset < len(offsets):
-                    candidates.append(offsets[punct_offset])
-            start = index + 1
+        )
         if not candidates and before:
             candidates.extend(
                 _qwen_filter_before_only_offsets(
@@ -182,6 +153,90 @@ def _qwen_marker_offset_in_normalized_text(
             _qwen_offsets_after_before_in_normalized_text(text, compact, offsets, before)
         )
     return candidates[0] if len(candidates) == 1 else None
+
+
+def _qwen_offsets_using_normalized_after_context(
+    text: str,
+    compact: str,
+    offsets: List[int],
+    marker: str,
+    before: str,
+    after: str,
+    quote: str,
+) -> List[int]:
+    candidates: List[int] = []
+    start = 0
+    while True:
+        index = compact.find(after, start)
+        if index < 0:
+            break
+        offset = _qwen_normalized_offset_for_after_match(
+            text, compact, offsets, marker, before, after, quote, index
+        )
+        if offset is not None:
+            candidates.append(offset)
+        start = index + 1
+    return candidates
+
+
+def _qwen_normalized_offset_for_after_match(
+    text: str,
+    compact: str,
+    offsets: List[int],
+    marker: str,
+    before: str,
+    after: str,
+    quote: str,
+    after_index: int,
+) -> Optional[int]:
+    visible_offset = _qwen_visible_marker_offset_before_after(
+        compact, marker, before, after_index
+    )
+    if visible_offset is not None:
+        return _raw_offset_from_normalized_index(text, offsets, visible_offset)
+    if not before or _qwen_prefix_matches_before(compact[:after_index], before):
+        adjusted_index = _qwen_adjusted_offset_between_before_after(
+            compact, marker, before, after, quote, after_index
+        )
+        return _raw_offset_from_normalized_index(text, offsets, adjusted_index)
+    return _qwen_normalized_offset_for_omitted_before(
+        text, compact, offsets, marker, before, after, quote, after_index
+    )
+
+
+def _qwen_normalized_offset_for_omitted_before(
+    text: str,
+    compact: str,
+    offsets: List[int],
+    marker: str,
+    before: str,
+    after: str,
+    quote: str,
+    after_index: int,
+) -> Optional[int]:
+    for offset in (
+        _qwen_offset_before_omitted_boundary_punctuation(
+            compact, marker, before, after, quote, after_index
+        ),
+        _qwen_offset_after_short_omitted_fragment(compact, marker, before, quote, after_index),
+        _qwen_offset_around_punctuation(compact, marker, before, after_index),
+    ):
+        raw_offset = _raw_offset_from_normalized_index(text, offsets, offset)
+        if raw_offset is not None:
+            return raw_offset
+    return None
+
+
+def _raw_offset_from_normalized_index(
+    text: str, offsets: List[int], compact_index: Optional[int]
+) -> Optional[int]:
+    if compact_index is None:
+        return None
+    if 0 <= compact_index < len(offsets):
+        return offsets[compact_index]
+    if compact_index == len(offsets):
+        return len(text)
+    return None
 
 
 def _qwen_offsets_after_before(text: str, before: str) -> List[int]:

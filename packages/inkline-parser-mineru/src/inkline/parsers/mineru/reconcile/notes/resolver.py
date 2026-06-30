@@ -90,29 +90,56 @@ def resolve_note_links(blocks: List[Dict[str, Any]]) -> None:
     _filter_invalid_note_refs(typed_blocks)
     _annotate_note_definitions(candidates, by_id)
     _suppress_lower_confidence_duplicate_page_footnote_refs(typed_blocks, by_id)
+    resolved_candidate_by_note = _resolve_note_refs_for_blocks(
+        typed_blocks, strategies, candidates, context, by_id
+    )
+
+    _suppress_lower_confidence_duplicate_page_footnote_refs(typed_blocks, by_id)
+    resolved_by_note, resolved_markers_by_note = _resolved_note_indexes(typed_blocks, by_id)
+    _apply_resolved_note_definition_attrs(
+        candidates, by_id, resolved_candidate_by_note, resolved_by_note, resolved_markers_by_note
+    )
+
+
+def _resolve_note_refs_for_blocks(
+    blocks: List[CanonicalBlock],
+    strategies: List[_NoteResolutionStrategy],
+    candidates: List[_NoteCandidate],
+    context: _NoteContext,
+    by_id: Dict[str, CanonicalBlock],
+) -> Dict[str, _NoteCandidate]:
     resolved_candidate_by_note: Dict[str, _NoteCandidate] = {}
-    for block in typed_blocks:
-        refs = _note_refs(block)
-        if not refs:
-            continue
-        for ref in refs:
-            if not isinstance(ref, dict):
-                continue
-            existing_target = ref.get("target_block_id")
-            if isinstance(existing_target, str) and existing_target in by_id:
+    for block in blocks:
+        for ref in _note_refs(block):
+            if not isinstance(ref, dict) or _ref_has_existing_target(ref, by_id):
                 continue
             match = _first_resolution(strategies, block, ref, candidates, context)
             if not match:
                 continue
-            ref["target_block_id"] = match.block_id
-            ref["target_note_id"] = match.note_id
-            ref["note_strategy"] = match.strategy
-            ref["resolution_confidence"] = match.confidence
+            _write_note_ref_resolution(ref, match)
             resolved_candidate_by_note.setdefault(match.block_id, match)
+    return resolved_candidate_by_note
 
-    _suppress_lower_confidence_duplicate_page_footnote_refs(typed_blocks, by_id)
-    resolved_by_note, resolved_markers_by_note = _resolved_note_indexes(typed_blocks, by_id)
 
+def _ref_has_existing_target(ref: Dict[str, Any], by_id: Dict[str, CanonicalBlock]) -> bool:
+    existing_target = ref.get("target_block_id")
+    return isinstance(existing_target, str) and existing_target in by_id
+
+
+def _write_note_ref_resolution(ref: Dict[str, Any], match: _NoteCandidate) -> None:
+    ref["target_block_id"] = match.block_id
+    ref["target_note_id"] = match.note_id
+    ref["note_strategy"] = match.strategy
+    ref["resolution_confidence"] = match.confidence
+
+
+def _apply_resolved_note_definition_attrs(
+    candidates: List[_NoteCandidate],
+    by_id: Dict[str, CanonicalBlock],
+    resolved_candidate_by_note: Dict[str, _NoteCandidate],
+    resolved_by_note: Dict[str, List[str]],
+    resolved_markers_by_note: Dict[str, set[str]],
+) -> None:
     for candidate in candidates:
         if candidate.block_id not in resolved_by_note:
             continue
@@ -122,27 +149,45 @@ def resolve_note_links(blocks: List[Dict[str, Any]]) -> None:
         note_block = by_id.get(candidate.block_id)
         if not note_block:
             continue
-        attrs = note_block.setdefault("attrs", {})
-        attrs.setdefault("note_id", candidate.note_id)
-        if candidate.marker:
-            attrs.setdefault("note_marker", candidate.marker)
-        elif not attrs.get("note_marker"):
-            inferred_marker = _single_resolved_marker_for_note(
-                candidate.block_id, resolved_markers_by_note
-            )
-            if (
-                inferred_marker
-                and note_block.get("type") == FOOTNOTE
-                and attrs.get("role") == "page_footnote"
-            ):
-                attrs["note_marker"] = inferred_marker
-                attrs.setdefault("note_marker_source", "resolved_body_ref")
-        attrs.setdefault("note_strategy", candidate.strategy)
-        if candidate.scope_key:
-            attrs.setdefault("note_scope", candidate.scope_key)
-        refs = sorted({x for x in resolved_by_note.get(candidate.block_id, []) if x})
-        if refs:
-            attrs["referenced_by"] = refs
+        _write_note_definition_attrs(
+            note_block, candidate, resolved_by_note, resolved_markers_by_note
+        )
+
+
+def _write_note_definition_attrs(
+    note_block: CanonicalBlock,
+    candidate: _NoteCandidate,
+    resolved_by_note: Dict[str, List[str]],
+    resolved_markers_by_note: Dict[str, set[str]],
+) -> None:
+    attrs = note_block.setdefault("attrs", {})
+    attrs.setdefault("note_id", candidate.note_id)
+    if candidate.marker:
+        attrs.setdefault("note_marker", candidate.marker)
+    elif not attrs.get("note_marker"):
+        _write_inferred_page_footnote_marker(note_block, candidate, resolved_markers_by_note)
+    attrs.setdefault("note_strategy", candidate.strategy)
+    if candidate.scope_key:
+        attrs.setdefault("note_scope", candidate.scope_key)
+    refs = sorted({x for x in resolved_by_note.get(candidate.block_id, []) if x})
+    if refs:
+        attrs["referenced_by"] = refs
+
+
+def _write_inferred_page_footnote_marker(
+    note_block: CanonicalBlock,
+    candidate: _NoteCandidate,
+    resolved_markers_by_note: Dict[str, set[str]],
+) -> None:
+    attrs = note_block.setdefault("attrs", {})
+    inferred_marker = _single_resolved_marker_for_note(candidate.block_id, resolved_markers_by_note)
+    if (
+        inferred_marker
+        and note_block.get("type") == FOOTNOTE
+        and attrs.get("role") == "page_footnote"
+    ):
+        attrs["note_marker"] = inferred_marker
+        attrs.setdefault("note_marker_source", "resolved_body_ref")
 
 
 def _resolved_note_indexes(

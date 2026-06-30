@@ -89,54 +89,76 @@ def _insert_inline_note_run(block: CanonicalBlock, ref: Dict[str, Any], char_ind
         return
     attrs = block.setdefault("attrs", {})
     runs = attrs.get("inline_runs")
-    run_char_index = char_index
-    if isinstance(runs, list):
-        reconstructed = _inline_runs_text(runs)
-        if reconstructed != text:
-            run_char_index = _raw_index_for_normalized_text(reconstructed, text, char_index)
+    run_char_index = _run_char_index_for_insert(runs, text, char_index)
+    if (
+        isinstance(runs, list)
+        and run_char_index is None
+        and _preserve_mismatched_inline_runs(attrs, runs, ref)
+    ):
+        return
     if not isinstance(runs, list) or run_char_index is None:
-        if (
-            isinstance(runs, list)
-            and run_char_index is None
-            and any(
-                isinstance(run, dict)
-                and run.get("type") == "note_ref"
-                and not _same_inline_note_ref(run, ref)
-                for run in runs
-            )
-        ):
-            note_run = _inline_note_run_from_ref(ref)
-            out = []
-            replaced = False
-            for run in runs:
-                if not isinstance(run, dict):
-                    continue
-                if run.get("type") == "note_ref" and _same_inline_note_ref(run, ref):
-                    out.append(note_run)
-                    replaced = True
-                else:
-                    out.append(dict(run))
-            if not replaced:
-                out.append(note_run)
-            attrs["inline_runs"] = _coalesce_text_runs(out)
-            return
         runs = [{"type": "text", "text": text}]
         run_char_index = char_index
     assert isinstance(runs, list)
-    runs = [
+    note_run = _inline_note_run_from_ref(ref)
+    clean_runs = _runs_without_same_note_ref(runs, ref)
+    attrs["inline_runs"] = _coalesce_text_runs(
+        _insert_note_run_at_char_index(clean_runs, note_run, run_char_index)
+    )
+
+
+def _run_char_index_for_insert(runs: Any, text: str, char_index: int) -> Optional[int]:
+    if not isinstance(runs, list):
+        return char_index
+    reconstructed = _inline_runs_text(runs)
+    if reconstructed == text:
+        return char_index
+    return _raw_index_for_normalized_text(reconstructed, text, char_index)
+
+
+def _preserve_mismatched_inline_runs(
+    attrs: Dict[str, Any], runs: List[Any], ref: Dict[str, Any]
+) -> bool:
+    if not any(
+        isinstance(run, dict)
+        and run.get("type") == "note_ref"
+        and not _same_inline_note_ref(run, ref)
+        for run in runs
+    ):
+        return False
+    note_run = _inline_note_run_from_ref(ref)
+    out = []
+    replaced = False
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        if run.get("type") == "note_ref" and _same_inline_note_ref(run, ref):
+            out.append(note_run)
+            replaced = True
+        else:
+            out.append(dict(run))
+    if not replaced:
+        out.append(note_run)
+    attrs["inline_runs"] = _coalesce_text_runs(out)
+    return True
+
+
+def _runs_without_same_note_ref(runs: List[Any], ref: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [
         dict(run)
         for run in runs
         if isinstance(run, dict)
         and not (run.get("type") == "note_ref" and _same_inline_note_ref(run, ref))
     ]
-    note_run = _inline_note_run_from_ref(ref)
 
+
+def _insert_note_run_at_char_index(
+    runs: List[Dict[str, Any]], note_run: Dict[str, Any], run_char_index: int
+) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     consumed = 0
     inserted = False
     for run in runs:
-        if not isinstance(run, dict):
-            continue
         if run.get("type") != "text":
             out.append(dict(run))
             continue
@@ -159,7 +181,7 @@ def _insert_inline_note_run(block: CanonicalBlock, ref: Dict[str, Any], char_ind
         consumed = next_consumed
     if not inserted:
         out.append(note_run)
-    attrs["inline_runs"] = _coalesce_text_runs(out)
+    return out
 
 
 def _same_inline_note_ref(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
