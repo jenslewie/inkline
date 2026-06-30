@@ -4,6 +4,7 @@ with alignment="right"."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
@@ -19,6 +20,18 @@ from ..layout_helpers import (
     _page_coord_widths,
     _scaled_body_metrics,
 )
+
+
+@dataclass(frozen=True)
+class _RightAlignMetrics:
+    bbox: List[Any]
+    page: int
+    body_left: float
+    body_right: float
+    body_width: float
+    x0: float
+    x2: float
+    width: float
 
 
 def reconcile_right_aligned_terminal_blocks(
@@ -67,82 +80,108 @@ def _is_right_aligned_terminal_candidate(
     page_heights: Dict[int, float],
     page_widths: Dict[int, float] | None = None,
 ) -> bool:
-    text = str(b.get("text", "")).strip()
+    if not _has_short_terminal_text(b):
+        return False
+    metrics = _right_align_metrics(b, layout, page_widths)
+    if metrics is None:
+        return False
+    if not _is_right_aligned_compact(metrics):
+        return False
+    if not _has_terminal_position(b, blocks, idx, metrics, page_heights):
+        return False
+    return not _has_close_following_body_prose(blocks, idx, metrics)
+
+
+def _has_short_terminal_text(block: Dict[str, Any]) -> bool:
+    text = str(block.get("text", "")).strip()
     if not text:
         return False
-    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-    if not lines:
-        return False
-    # Must be short: few lines, short line lengths
-    if len(lines) > 3:
-        return False
-    if max(len(ln) for ln in lines) > 60:
-        return False
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    return bool(lines) and len(lines) <= 3 and max(len(line) for line in lines) <= 60
 
-    bb = _bbox(b)
-    if not bb:
-        return False
-    x0 = float(bb[0])
-    x2 = float(bb[2])
-    width = max(0.0, x2 - x0)
 
-    page = _block_page(b)
-    if page is None:
-        return False
+def _right_align_metrics(
+    block: Dict[str, Any],
+    layout: LayoutStats,
+    page_widths: Dict[int, float] | None,
+) -> _RightAlignMetrics | None:
+    bbox = _bbox(block)
+    page = _block_page(block)
+    if not bbox or page is None:
+        return None
     body_left, body_right, body_width = _scaled_body_metrics(
         layout, page_widths.get(page) if page_widths else None
     )
+    x0 = float(bbox[0])
+    x2 = float(bbox[2])
+    return _RightAlignMetrics(
+        bbox=bbox,
+        page=page,
+        body_left=body_left,
+        body_right=body_right,
+        body_width=body_width,
+        x0=x0,
+        x2=x2,
+        width=max(0.0, x2 - x0),
+    )
 
-    # Must be right-aligned: right edge near body_right
-    right_near_edge = x2 >= body_right - max(80.0, body_width * 0.08)
-    if not right_near_edge:
-        return False
 
-    # Left edge must be past body center (not just mildly indented)
-    body_center = (body_left + body_right) / 2.0
-    past_center = x0 >= body_center - max(40.0, body_width * 0.05)
-    # Width must be compact (not a full-width block at right margin)
-    compact = width <= body_width * 0.55
-    if not past_center or not compact:
-        return False
+def _is_right_aligned_compact(metrics: _RightAlignMetrics) -> bool:
+    right_near_edge = metrics.x2 >= metrics.body_right - max(80.0, metrics.body_width * 0.08)
+    body_center = (metrics.body_left + metrics.body_right) / 2.0
+    past_center = metrics.x0 >= body_center - max(40.0, metrics.body_width * 0.05)
+    compact = metrics.width <= metrics.body_width * 0.55
+    return right_near_edge and past_center and compact
 
-    # Position: near bottom of page OR significant gap from previous block
-    at_page_end = _is_near_page_bottom(b, page_heights)
 
-    # Gap from previous non-float block
-    gap_from_prev = False
+def _has_terminal_position(
+    block: Dict[str, Any],
+    blocks: List[Dict[str, Any]],
+    idx: int,
+    metrics: _RightAlignMetrics,
+    page_heights: Dict[int, float],
+) -> bool:
+    return _is_near_page_bottom(block, page_heights) or _has_gap_from_previous_text(
+        blocks, idx, metrics
+    )
+
+
+def _has_gap_from_previous_text(
+    blocks: List[Dict[str, Any]], idx: int, metrics: _RightAlignMetrics
+) -> bool:
     for j in range(idx - 1, -1, -1):
         prev = blocks[j]
         if prev.get("type") in FLOAT_LIKE_TYPES:
             continue
-        if _block_page(prev) != page:
-            break
-        pbb = _bbox(prev)
-        if pbb:
-            gap = float(bb[1]) - float(pbb[3])
-            prev_height = float(pbb[3]) - float(pbb[1])
-            min_gap = max(30.0, prev_height * 1.5)
-            gap_from_prev = gap >= min_gap
-        break
+        if _block_page(prev) != metrics.page:
+            return False
+        return _has_terminal_gap(metrics.bbox, _bbox(prev))
+    return False
 
-    if not (at_page_end or gap_from_prev):
+
+def _has_terminal_gap(bbox: List[Any], previous_bbox: List[Any] | None) -> bool:
+    if not previous_bbox:
         return False
+    gap = float(bbox[1]) - float(previous_bbox[3])
+    prev_height = float(previous_bbox[3]) - float(previous_bbox[1])
+    return gap >= max(30.0, prev_height * 1.5)
 
-    # Check following block: if same-page, neighbouring body prose should not
-    # be too close
-    nxt = blocks[idx + 1] if idx + 1 < len(blocks) else None
-    if nxt is not None:
-        nxt_page = _block_page(nxt)
-        if nxt_page == page:
-            nbb = _bbox(nxt)
-            if nbb:
-                nxt_at_left = float(nbb[0]) <= body_left + max(48.0, body_width * 0.06)
-                nxt_width = max(0.0, float(nbb[2]) - float(nbb[0]))
-                nxt_full_width = nxt_width >= body_width * 0.88
-                if nxt_at_left and nxt_full_width:
-                    gap = float(nbb[1]) - float(bb[3])
-                    block_height = float(bb[3]) - float(bb[1])
-                    if gap < max(20.0, block_height * 0.5):
-                        return False
 
-    return True
+def _has_close_following_body_prose(
+    blocks: List[Dict[str, Any]], idx: int, metrics: _RightAlignMetrics
+) -> bool:
+    next_block = blocks[idx + 1] if idx + 1 < len(blocks) else None
+    if next_block is None or _block_page(next_block) != metrics.page:
+        return False
+    next_bbox = _bbox(next_block)
+    if not next_bbox or not _is_body_width_neighbor(next_bbox, metrics):
+        return False
+    gap = float(next_bbox[1]) - float(metrics.bbox[3])
+    block_height = float(metrics.bbox[3]) - float(metrics.bbox[1])
+    return gap < max(20.0, block_height * 0.5)
+
+
+def _is_body_width_neighbor(bbox: List[Any], metrics: _RightAlignMetrics) -> bool:
+    at_left = float(bbox[0]) <= metrics.body_left + max(48.0, metrics.body_width * 0.06)
+    width = max(0.0, float(bbox[2]) - float(bbox[0]))
+    return at_left and width >= metrics.body_width * 0.88
