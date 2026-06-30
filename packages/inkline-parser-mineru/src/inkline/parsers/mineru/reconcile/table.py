@@ -91,6 +91,19 @@ class _TableContinuationMatch:
 
 
 @dataclass(frozen=True)
+class _TableMergeContext:
+    left: Dict[str, Any]
+    right: Dict[str, Any]
+    left_page: int
+    right_page: int
+    left_bbox: List[Any]
+    right_bbox: List[Any]
+    left_attrs: Dict[str, Any]
+    right_attrs: Dict[str, Any]
+    match: _TableContinuationMatch
+
+
+@dataclass(frozen=True)
 class _TableContinuationDetector:
     """Detect adjacent-page table continuations using layout and printer labels."""
 
@@ -182,71 +195,127 @@ def reconcile_table_continuations(blocks: List[Dict[str, Any]]) -> None:
     detector = _TableContinuationDetector(page_heights=_page_coord_heights(blocks))
     i = 0
     while i < len(blocks):
-        left = blocks[i]
-        left_page = _block_page(left)
-        left_bbox = _bbox(left)
         match = detector.match(blocks, i)
-        if not match or left_page is None or not left_bbox:
+        context = _table_merge_context(blocks, i, match)
+        if context is None:
             i += 1
             continue
-        right_idx = match.right_idx
-        marker_idxs = match.marker_idxs
-        right = blocks[right_idx]
-        right_page = _block_page(right)
-        right_bbox = _bbox(right)
-        if right_page is None or not right_bbox:
-            i += 1
-            continue
-
-        left_attrs = left.setdefault("attrs", {})
-        right_attrs = right.get("attrs") or {}
-        if left.get("text") and not _is_table_continuation_marker(str(left.get("text", ""))):
-            left_attrs["table_header"] = left.get("text")
-            left_attrs["html"] = _prepend_table_header_row(
-                str(left_attrs.get("html") or ""), str(left.get("text"))
-            )
-            left["text"] = ""
-        left_attrs["html"] = _merge_table_html(
-            str(left_attrs.get("html") or ""), str(right_attrs.get("html") or "")
-        )
-        cell_alignments = _table_title_cell_alignments(str(left_attrs.get("html") or ""))
-        if cell_alignments:
-            left_attrs["cell_alignments"] = cell_alignments
-        footnotes = list(left_attrs.get("footnotes") or [])
-        for footnote in right_attrs.get("footnotes") or []:
-            if footnote and footnote not in footnotes:
-                footnotes.append(footnote)
-        left_attrs["footnotes"] = footnotes
-        # Build table_notes from both sides, excluding continuation markers.
-        # This is the structural field the EPUB renderer should prefer for
-        # source/note display — it never contains "(接上页)" etc.
-        all_notes = list(left_attrs.get("table_notes") or left_attrs.get("footnotes") or [])
-        right_notes = right_attrs.get("table_notes") or right_attrs.get("footnotes") or []
-        for note in right_notes:
-            if note and note not in all_notes and not _is_table_continuation_marker(note):
-                all_notes.append(note)
-        left_attrs["table_notes"] = [
-            n for n in all_notes if not _is_table_continuation_marker(n)
-        ]
-        left_attrs["continued"] = True
-        left_attrs["continuation_block_ids"] = [right.get("block_id")]
-        left_attrs["continuation_marker_block_ids"] = [
-            blocks[idx].get("block_id") for idx in marker_idxs if blocks[idx].get("block_id")
-        ]
-        if right_attrs.get("image_path"):
-            left_attrs["continuation_image_paths"] = [right_attrs["image_path"]]
-
-        source = left.setdefault("source", {})
-        pages = source.setdefault("pages", [source.get("page")])
-        if right_page not in pages:
-            pages.append(right_page)
-        source["bbox"] = union_bbox([_bbox(left), _bbox(right)])
-        spans = source.setdefault("spans", [])
-        if not spans:
-            spans.append({"page": left_page, "bbox": left_bbox, "block_id": left.get("block_id")})
-        spans.append({"page": right_page, "bbox": right_bbox, "block_id": right.get("block_id")})
-
-        remove_idxs = sorted([right_idx, *marker_idxs], reverse=True)
-        for idx in remove_idxs:
-            del blocks[idx]
+        _merge_table_attrs(blocks, context)
+        _merge_table_source(context)
+        _delete_merged_table_blocks(blocks, context.match)
         i += 1
+
+
+def _table_merge_context(
+    blocks: List[Dict[str, Any]],
+    left_idx: int,
+    match: Optional[_TableContinuationMatch],
+) -> Optional[_TableMergeContext]:
+    if match is None:
+        return None
+    left = blocks[left_idx]
+    right = blocks[match.right_idx]
+    left_page = _block_page(left)
+    right_page = _block_page(right)
+    left_bbox = _bbox(left)
+    right_bbox = _bbox(right)
+    if left_page is None or right_page is None or not left_bbox or not right_bbox:
+        return None
+    return _TableMergeContext(
+        left=left,
+        right=right,
+        left_page=left_page,
+        right_page=right_page,
+        left_bbox=left_bbox,
+        right_bbox=right_bbox,
+        left_attrs=left.setdefault("attrs", {}),
+        right_attrs=right.get("attrs") or {},
+        match=match,
+    )
+
+
+def _merge_table_attrs(blocks: List[Dict[str, Any]], context: _TableMergeContext) -> None:
+    _promote_left_table_header(context)
+    context.left_attrs["html"] = _merge_table_html(
+        str(context.left_attrs.get("html") or ""), str(context.right_attrs.get("html") or "")
+    )
+    _refresh_table_cell_alignments(context.left_attrs)
+    context.left_attrs["footnotes"] = _merged_table_footnotes(context)
+    context.left_attrs["table_notes"] = _merged_table_notes(context)
+    context.left_attrs["continued"] = True
+    context.left_attrs["continuation_block_ids"] = [context.right.get("block_id")]
+    context.left_attrs["continuation_marker_block_ids"] = _marker_block_ids(
+        blocks, context.match.marker_idxs
+    )
+    if context.right_attrs.get("image_path"):
+        context.left_attrs["continuation_image_paths"] = [context.right_attrs["image_path"]]
+
+
+def _promote_left_table_header(context: _TableMergeContext) -> None:
+    text = context.left.get("text")
+    if not text or _is_table_continuation_marker(str(text)):
+        return
+    context.left_attrs["table_header"] = text
+    context.left_attrs["html"] = _prepend_table_header_row(
+        str(context.left_attrs.get("html") or ""), str(text)
+    )
+    context.left["text"] = ""
+
+
+def _refresh_table_cell_alignments(attrs: Dict[str, Any]) -> None:
+    cell_alignments = _table_title_cell_alignments(str(attrs.get("html") or ""))
+    if cell_alignments:
+        attrs["cell_alignments"] = cell_alignments
+
+
+def _merged_table_footnotes(context: _TableMergeContext) -> List[Any]:
+    footnotes = list(context.left_attrs.get("footnotes") or [])
+    for footnote in context.right_attrs.get("footnotes") or []:
+        if footnote and footnote not in footnotes:
+            footnotes.append(footnote)
+    return footnotes
+
+
+def _merged_table_notes(context: _TableMergeContext) -> List[Any]:
+    all_notes = list(context.left_attrs.get("table_notes") or context.left_attrs.get("footnotes") or [])
+    right_notes = context.right_attrs.get("table_notes") or context.right_attrs.get("footnotes") or []
+    for note in right_notes:
+        if note and note not in all_notes and not _is_table_continuation_marker(note):
+            all_notes.append(note)
+    return [note for note in all_notes if not _is_table_continuation_marker(note)]
+
+
+def _marker_block_ids(blocks: List[Dict[str, Any]], marker_idxs: List[int]) -> List[Any]:
+    return [blocks[idx].get("block_id") for idx in marker_idxs if blocks[idx].get("block_id")]
+
+
+def _merge_table_source(context: _TableMergeContext) -> None:
+    source = context.left.setdefault("source", {})
+    pages = source.setdefault("pages", [source.get("page")])
+    if context.right_page not in pages:
+        pages.append(context.right_page)
+    source["bbox"] = union_bbox([_bbox(context.left), _bbox(context.right)])
+    spans = source.setdefault("spans", [])
+    if not spans:
+        spans.append(
+            {
+                "page": context.left_page,
+                "bbox": context.left_bbox,
+                "block_id": context.left.get("block_id"),
+            }
+        )
+    spans.append(
+        {
+            "page": context.right_page,
+            "bbox": context.right_bbox,
+            "block_id": context.right.get("block_id"),
+        }
+    )
+
+
+def _delete_merged_table_blocks(
+    blocks: List[Dict[str, Any]], match: _TableContinuationMatch
+) -> None:
+    remove_idxs = sorted([match.right_idx, *match.marker_idxs], reverse=True)
+    for idx in remove_idxs:
+        del blocks[idx]
