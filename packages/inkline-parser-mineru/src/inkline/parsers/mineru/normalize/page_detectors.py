@@ -138,39 +138,64 @@ class _LayoutSnapshotPageDetector:
     ) -> bool:
         if body_width_long_text:
             return False
-        page_width, page_height = coord_page_size(meaningful, self.layout)
         if len(text_like) < 4:
             return False
-        text_lengths = [len(block_text(b)) for b in text_like]
-        short_count = sum(1 for length in text_lengths if length <= 40)
-        if short_count < max(4, int(len(text_like) * 0.8)):
+        if not _has_short_visual_labels(text_like):
             return False
-        if any(length > 60 for length in text_lengths):
+        geometry = _visual_label_geometry(meaningful, text_like, self.layout)
+        if geometry is None:
             return False
-        page_bbox = union_bbox([b.bbox for b in meaningful if b.bbox])
-        if not page_bbox:
-            return False
-        x0, y0, x1, y1 = page_bbox
-        coverage_width = (x1 - x0) / max(1.0, page_width)
-        coverage_height = (y1 - y0) / max(1.0, page_height)
-        text_centers_x = [((b.x0 + b.x1) / 2.0) for b in text_like if b.bbox]
-        text_centers_y = [((b.y0 + b.y1) / 2.0) for b in text_like if b.bbox]
-        if not text_centers_x or not text_centers_y:
-            return False
-        x_spread = (max(text_centers_x) - min(text_centers_x)) / max(1.0, page_width)
-        y_spread = (max(text_centers_y) - min(text_centers_y)) / max(1.0, page_height)
 
         has_media = bool(media_like)
         media_or_dense_labels = has_media or len(text_like) >= 10
         if not media_or_dense_labels:
             return False
-        if coverage_width < 0.55 or coverage_height < 0.45:
+        if geometry.coverage_width < 0.55 or geometry.coverage_height < 0.45:
             return False
-        if x_spread < 0.35 or y_spread < 0.25:
+        if geometry.x_spread < 0.35 or geometry.y_spread < 0.25:
             return False
         return has_media or (
-            len(text_like) >= 12 and coverage_width >= 0.65 and coverage_height >= 0.55
+            len(text_like) >= 12
+            and geometry.coverage_width >= 0.65
+            and geometry.coverage_height >= 0.55
         )
+
+
+@dataclass(frozen=True)
+class _VisualLabelGeometry:
+    coverage_width: float
+    coverage_height: float
+    x_spread: float
+    y_spread: float
+
+
+def _has_short_visual_labels(text_like: Sequence[RawBlock]) -> bool:
+    text_lengths = [len(block_text(block)) for block in text_like]
+    short_count = sum(1 for length in text_lengths if length <= 40)
+    return bool(
+        short_count >= max(4, int(len(text_like) * 0.8))
+        and not any(length > 60 for length in text_lengths)
+    )
+
+
+def _visual_label_geometry(
+    meaningful: Sequence[RawBlock], text_like: Sequence[RawBlock], layout: LayoutStats
+) -> _VisualLabelGeometry | None:
+    page_width, page_height = coord_page_size(meaningful, layout)
+    page_bbox = union_bbox([block.bbox for block in meaningful if block.bbox])
+    if not page_bbox:
+        return None
+    text_centers_x = [((block.x0 + block.x1) / 2.0) for block in text_like if block.bbox]
+    text_centers_y = [((block.y0 + block.y1) / 2.0) for block in text_like if block.bbox]
+    if not text_centers_x or not text_centers_y:
+        return None
+    x0, y0, x1, y1 = page_bbox
+    return _VisualLabelGeometry(
+        coverage_width=(x1 - x0) / max(1.0, page_width),
+        coverage_height=(y1 - y0) / max(1.0, page_height),
+        x_spread=(max(text_centers_x) - min(text_centers_x)) / max(1.0, page_width),
+        y_spread=(max(text_centers_y) - min(text_centers_y)) / max(1.0, page_height),
+    )
 
 
 def should_snapshot_layout_page(
