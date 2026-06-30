@@ -305,7 +305,11 @@ def build_canonical(
         ],
     }
     canonical["toc"] = build_toc_from_blocks(blocks)
-    _normalize_qwen_evidence_paths(canonical, output_dir)
+    _normalize_qwen_evidence_paths(
+        canonical,
+        output_dir,
+        artifact_dir=_qwen_marker_locator_artifact_dir(args),
+    )
     return canonical
 
 
@@ -366,7 +370,11 @@ def _normalize_vlm_model_metadata(value: Any, output_dir: Path) -> Any:
     return normalized
 
 
-def _normalize_qwen_evidence_paths(canonical: Dict[str, Any], output_dir: Path) -> None:
+def _normalize_qwen_evidence_paths(
+    canonical: Dict[str, Any],
+    output_dir: Path,
+    artifact_dir: Path | None = None,
+) -> None:
     for block in canonical.get("blocks") or []:
         if not isinstance(block, dict):
             continue
@@ -376,7 +384,7 @@ def _normalize_qwen_evidence_paths(canonical: Dict[str, Any], output_dir: Path) 
         evidence_image = attrs.get("qwen_marker_evidence_image")
         if evidence_image:
             attrs["qwen_marker_evidence_image"] = _qwen_path_relative_to_output_dir(
-                evidence_image, output_dir
+                evidence_image, output_dir, artifact_dir
             )
         inline_runs = attrs.get("inline_runs")
         if not isinstance(inline_runs, list):
@@ -390,14 +398,18 @@ def _normalize_qwen_evidence_paths(canonical: Dict[str, Any], output_dir: Path) 
             crop_image = evidence.get("qwen_crop_image")
             if crop_image:
                 evidence["qwen_crop_image"] = _qwen_path_relative_to_output_dir(
-                    crop_image, output_dir
+                    crop_image, output_dir, artifact_dir
                 )
 
 
-def _qwen_path_relative_to_output_dir(value: Any, output_dir: Path) -> str:
+def _qwen_path_relative_to_output_dir(
+    value: Any, output_dir: Path, artifact_dir: Path | None = None
+) -> str:
     path = Path(value)
     if path.is_absolute():
         return _input_path_relative_to_output_dir(path, output_dir)
+    if artifact_dir is not None and path.name:
+        return _input_path_relative_to_output_dir(Path(artifact_dir) / path.name, output_dir)
     return path.as_posix()
 
 

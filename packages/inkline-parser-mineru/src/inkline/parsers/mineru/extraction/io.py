@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from statistics import median
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from ..schema.models import NoteRef, RawBlock
@@ -10,6 +11,9 @@ from ..schema.patterns import NOTE_MARKER_RE
 from .text import extract_text_notes_and_runs, normalize_note_marker, normalize_ws
 
 _CONTENT_COORD_SIZE = 1000.0
+_COORD_SPACE_TOLERANCE = 0.15
+_RENDERED_WIDTH_THRESHOLD = 650.0
+_RENDERED_HEIGHT_THRESHOLD = 750.0
 
 
 def load_json(path: Optional[str]) -> Any:
@@ -39,14 +43,32 @@ def load_inputs(args: Any) -> tuple[Dict[int, List[RawBlock]], Dict[int, Tuple[f
         if not isinstance(content_list_v2, list):
             raise ValueError("content_list_v2 must be a list of page item lists")
         pages = flatten_content_list_v2(content_list_v2)
-        return replace_footnote_sources_from_middle(pages, middle, page_sizes), page_sizes
+        content_page_sizes = infer_content_page_sizes(pages, page_sizes)
+        return (
+            replace_footnote_sources_from_middle(
+                pages,
+                middle,
+                page_sizes,
+                content_page_sizes=content_page_sizes,
+            ),
+            content_page_sizes,
+        )
 
     content_list = load_json(getattr(args, "content_list", None))
     if content_list is not None:
         if not isinstance(content_list, list):
             raise ValueError("content_list must be a list")
         pages = flatten_content_list_legacy(content_list)
-        return replace_footnote_sources_from_middle(pages, middle, page_sizes), page_sizes
+        content_page_sizes = infer_content_page_sizes(pages, page_sizes)
+        return (
+            replace_footnote_sources_from_middle(
+                pages,
+                middle,
+                page_sizes,
+                content_page_sizes=content_page_sizes,
+            ),
+            content_page_sizes,
+        )
 
     raise ValueError("Either content_list_v2 or content_list is required")
 
@@ -115,13 +137,18 @@ def replace_footnote_sources_from_middle(
     pages: Dict[int, List[RawBlock]],
     middle: Any,
     page_sizes: Dict[int, Tuple[float, float]],
+    content_page_sizes: Optional[Dict[int, Tuple[float, float]]] = None,
 ) -> Dict[int, List[RawBlock]]:
     """Use middle.json as the authoritative source for page-footnote blocks."""
 
     if not isinstance(middle, dict) or not isinstance(middle.get("pdf_info"), list):
         return pages
 
-    middle_footnotes = footnote_blocks_from_middle(middle, page_sizes)
+    middle_footnotes = footnote_blocks_from_middle(
+        middle,
+        page_sizes,
+        content_page_sizes=content_page_sizes,
+    )
     out: Dict[int, List[RawBlock]] = {}
     all_pages = set(pages) | set(middle_footnotes)
     for page in sorted(all_pages):
@@ -137,6 +164,7 @@ def replace_footnote_sources_from_middle(
 def footnote_blocks_from_middle(
     middle: Any,
     page_sizes: Dict[int, Tuple[float, float]],
+    content_page_sizes: Optional[Dict[int, Tuple[float, float]]] = None,
 ) -> Dict[int, List[RawBlock]]:
     """Collect discarded page_footnote and para ref_text blocks from middle.json."""
 
@@ -150,6 +178,7 @@ def footnote_blocks_from_middle(
         raw_page_idx = page_info.get("page_idx")
         page = int(raw_page_idx) + 1 if isinstance(raw_page_idx, int) else fallback_page
         page_size = page_sizes.get(page)
+        content_page_size = (content_page_sizes or {}).get(page)
         page_markers = inline_note_markers_from_middle_page(page_info)
         definitions: List[Dict[str, Any]] = []
 
@@ -185,7 +214,11 @@ def footnote_blocks_from_middle(
                     index=index,
                     raw_type=str(block.get("type") or "page_footnote"),
                     text=text,
-                    bbox=_middle_bbox_to_content_bbox(block.get("bbox"), page_size),
+                    bbox=_middle_bbox_to_content_bbox(
+                        block.get("bbox"),
+                        page_size,
+                        content_page_size=content_page_size,
+                    ),
                     raw=raw,
                 )
             )
@@ -242,19 +275,91 @@ def _middle_block_text(block: Dict[str, Any]) -> str:
 def _middle_bbox_to_content_bbox(
     bbox: Any,
     page_size: Optional[Tuple[float, float]],
+    content_page_size: Optional[Tuple[float, float]] = None,
 ) -> Optional[List[float]]:
     if not isinstance(bbox, list) or len(bbox) < 4:
         return None
     if not page_size or page_size[0] <= 0 or page_size[1] <= 0:
         return [float(value) for value in bbox[:4]]
-    x_scale = _CONTENT_COORD_SIZE / page_size[0]
-    y_scale = _CONTENT_COORD_SIZE / page_size[1]
+    content_width, content_height = content_page_size or (_CONTENT_COORD_SIZE, _CONTENT_COORD_SIZE)
+    x_scale = content_width / page_size[0]
+    y_scale = content_height / page_size[1]
     return [
         round(float(bbox[0]) * x_scale, 3),
         round(float(bbox[1]) * y_scale, 3),
         round(float(bbox[2]) * x_scale, 3),
         round(float(bbox[3]) * y_scale, 3),
     ]
+
+
+def infer_content_page_sizes(
+    pages: Dict[int, List[RawBlock]],
+    pdf_page_sizes: Dict[int, Tuple[float, float]],
+) -> Dict[int, Tuple[float, float]]:
+    """Return page sizes in the same coordinate space as content-list bboxes."""
+
+    if not pages:
+        return dict(pdf_page_sizes)
+    all_pages = set(pages) | set(pdf_page_sizes)
+    if _looks_like_normalized_content_space(pages, pdf_page_sizes):
+        return dict.fromkeys(sorted(all_pages), (_CONTENT_COORD_SIZE, _CONTENT_COORD_SIZE))
+    return {
+        page: pdf_page_sizes.get(page) or _page_size_from_content_blocks(pages.get(page, []))
+        for page in sorted(all_pages)
+    }
+
+
+def _looks_like_normalized_content_space(
+    pages: Dict[int, List[RawBlock]],
+    pdf_page_sizes: Dict[int, Tuple[float, float]],
+) -> bool:
+    samples: List[Tuple[float, float, float, float]] = []
+    for page, blocks in pages.items():
+        pdf_size = pdf_page_sizes.get(page)
+        if not pdf_size:
+            continue
+        max_x, max_y = _page_content_maxima(blocks)
+        if max_x <= 0 or max_y <= 0:
+            continue
+        samples.append((max_x, max_y, pdf_size[0], pdf_size[1]))
+    if not samples:
+        return False
+
+    max_x = median([sample[0] for sample in samples])
+    max_y = median([sample[1] for sample in samples])
+    pdf_width = median([sample[2] for sample in samples])
+    pdf_height = median([sample[3] for sample in samples])
+    content_fits_rendered_space = (
+        max_x <= _CONTENT_COORD_SIZE * (1.0 + _COORD_SPACE_TOLERANCE)
+        and max_y <= _CONTENT_COORD_SIZE * (1.0 + _COORD_SPACE_TOLERANCE)
+    )
+    content_uses_rendered_scale = (
+        max_x >= _RENDERED_WIDTH_THRESHOLD or max_y >= _RENDERED_HEIGHT_THRESHOLD
+    )
+    content_exceeds_pdf_space = (
+        max_x > pdf_width * (1.0 + _COORD_SPACE_TOLERANCE)
+        or max_y > pdf_height * (1.0 + _COORD_SPACE_TOLERANCE)
+    )
+    pdf_larger_than_rendered_space = (
+        pdf_width > _CONTENT_COORD_SIZE * (1.0 + _COORD_SPACE_TOLERANCE)
+        or pdf_height > _CONTENT_COORD_SIZE * (1.0 + _COORD_SPACE_TOLERANCE)
+    )
+    return content_fits_rendered_space and content_uses_rendered_scale and (
+        content_exceeds_pdf_space or pdf_larger_than_rendered_space
+    )
+
+
+def _page_size_from_content_blocks(blocks: List[RawBlock]) -> Tuple[float, float]:
+    max_x, max_y = _page_content_maxima(blocks)
+    if max_x > _RENDERED_WIDTH_THRESHOLD or max_y > _RENDERED_HEIGHT_THRESHOLD:
+        return (_CONTENT_COORD_SIZE, _CONTENT_COORD_SIZE)
+    return (max(max_x, 1.0), max(max_y, 1.0))
+
+
+def _page_content_maxima(blocks: List[RawBlock]) -> Tuple[float, float]:
+    max_x = max((float(block.x1) for block in blocks if block.bbox), default=0.0)
+    max_y = max((float(block.y1) for block in blocks if block.bbox), default=0.0)
+    return max_x, max_y
 
 
 def _is_content_list_footnote_source(block: RawBlock) -> bool:

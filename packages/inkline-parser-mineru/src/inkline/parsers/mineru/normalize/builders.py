@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from html import unescape
 from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -206,7 +207,7 @@ def make_flush_right_terminal_block(ids: IdFactory, blocks: Sequence[RawBlock]) 
         "raw_types": [b.raw_type for b in blocks],
         "style_hints": {"text_align": "right"},
     }
-    return canonical_block(
+    block = canonical_block(
         ids.next(),
         DISPLAY_BLOCK,
         text,
@@ -215,6 +216,10 @@ def make_flush_right_terminal_block(ids: IdFactory, blocks: Sequence[RawBlock]) 
         attrs=attrs,
         source_pages=_unique_pages(blocks),
     )
+    source_spans = _source_spans_for_blocks(blocks)
+    if len(source_spans) > 1:
+        block["source"]["spans"] = source_spans
+    return block
 
 
 def make_heading(
@@ -277,7 +282,7 @@ def make_figure(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
     attrs = {
         "image_path": image_path,
         "sub_type": b.raw.get("sub_type"),
-        "ocr_text_in_image": normalize_ws(ocr_text or ""),
+        "ocr_text_in_image": _clean_ocr_text_in_image(ocr_text or ""),
         "captions": captions,
         "footnotes": footnotes,
     }
@@ -307,7 +312,7 @@ def make_page_snapshot_figure(
     attrs = {
         "image_path": None,
         "sub_type": "page_snapshot",
-        "ocr_text_in_image": normalize_ws("\n".join(visual_texts)),
+        "ocr_text_in_image": _clean_ocr_text_in_image("\n".join(visual_texts)),
         "captions": [],
         "footnotes": [],
         "layout_role": "full_page_image",
@@ -339,6 +344,34 @@ def _visual_snapshot_text(block: RawBlock) -> str:
         if isinstance(content, dict):
             return normalize_ws(str(content.get("content") or ""))
     return ""
+
+
+_NO_VISIBLE_TEXT_RE = re.compile(
+    r"\b("
+    r"no visible text"
+    r"|no text (?:or|and) symbols"
+    r"|no visible .*symbols"
+    r"|no .*symbols visible"
+    r"|no text .*visible"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _clean_ocr_text_in_image(value: str) -> str:
+    """Keep OCR-like labels, drop generic English visual descriptions."""
+    lines = []
+    for line in str(value or "").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        ascii_letters = sum(1 for char in text if char.isascii() and char.isalpha())
+        non_ascii = sum(1 for char in text if not char.isascii())
+        looks_like_english_description = ascii_letters >= 12 and ascii_letters > non_ascii * 2
+        if looks_like_english_description and _NO_VISIBLE_TEXT_RE.search(text):
+            continue
+        lines.append(text)
+    return normalize_ws("\n".join(lines))
 
 
 def make_table(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:

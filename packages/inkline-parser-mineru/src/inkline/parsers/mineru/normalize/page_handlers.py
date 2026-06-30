@@ -429,12 +429,22 @@ def _try_process_full_page_image(
     if not is_full_page_image_page(content_blocks, layout):
         return None
     image = next(b for b in content_blocks if b.raw_type == "image")
+    if _image_has_materialized_source(image):
+        return None
     absorbed = [
         b
         for b in content_blocks
         if b is not image and b.raw_type in {"paragraph", "title"} and block_text(b)
     ]
     return _PageResult([make_full_page_figure(ids, image, absorbed)], "full_page_image", in_toc)
+
+
+def _image_has_materialized_source(image: RawBlock) -> bool:
+    content = image.raw.get("content")
+    if not isinstance(content, dict):
+        return False
+    source = content.get("image_source")
+    return isinstance(source, dict) and bool(source.get("path"))
 
 
 def _try_process_plate_page(

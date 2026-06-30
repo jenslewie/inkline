@@ -117,6 +117,257 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     assert report["summary"]["missing_body_ref_notes"] == 0
 
 
+def test_small_pdf_page_size_uses_content_coordinate_layout(tmp_path) -> None:
+    content_list_v2 = tmp_path / "imjin_style_content_list_v2.json"
+    middle = tmp_path / "imjin_style_middle.json"
+    output = tmp_path / "canonical.json"
+    body_text = "1543年9月23日，一艘大型中国帆船出现在种子岛海岸附近。" * 4
+    page_20 = [
+        _text_item("title", "1", [508, 120, 531, 139]),
+        _text_item("title", "日本：从战国时代到世界强权", [265, 163, 778, 192]),
+        _text_item("paragraph", body_text, [148, 327, 891, 430]),
+        _text_item("paragraph", "这群外来者的首领，是一个叫五峰的中国人。" * 5, [148, 438, 891, 597]),
+        _text_item("paragraph", "随后，长者告诉他们，岛上最大的城镇是赤荻。" * 4, [148, 717, 891, 791]),
+    ]
+    content_list_v2.write_text(json.dumps([[] for _ in range(19)] + [page_20]), encoding="utf-8")
+    middle.write_text(
+        json.dumps({"pdf_info": [{"page_size": [425, 680]} for _ in range(20)]}),
+        encoding="utf-8",
+    )
+
+    document = normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        doc_id="imjin-style",
+        title="壬辰战争",
+        language="zh-CN",
+    )
+
+    layout_stats = document["metadata"]["mineru"]["layout_stats"]
+    assert layout_stats["page_width"] == 1000.0
+    assert layout_stats["page_height"] == 1000.0
+    assert layout_stats["body_right"] <= layout_stats["page_width"]
+    page_blocks = [
+        block for block in document["blocks"] if (block.get("source") or {}).get("page") == 20
+    ]
+    assert [block["type"] for block in page_blocks] == [
+        "heading",
+        "paragraph",
+        "paragraph",
+        "paragraph",
+    ]
+
+
+def test_large_pdf_page_size_uses_content_coordinate_layout_without_silk_regression(
+    tmp_path,
+) -> None:
+    content_list_v2 = tmp_path / "silk_style_content_list_v2.json"
+    middle = tmp_path / "silk_style_middle.json"
+    output = tmp_path / "canonical.json"
+    page_20 = [
+        _text_item("paragraph", "近的烽燧报警，这样一直传到最近的可以发兵的军营。" * 5, [113, 104, 887, 212]),
+        _text_item("paragraph", "出土了最大量丝路早期文献的悬泉就是这样一个军营。" * 5, [113, 221, 887, 388]),
+        _text_item("paragraph", "悬泉还出土了35000多件废弃的文书。" * 6, [114, 396, 886, 475]),
+    ]
+    content_list_v2.write_text(json.dumps([[] for _ in range(19)] + [page_20]), encoding="utf-8")
+    middle.write_text(
+        json.dumps({"pdf_info": [{"page_size": [1418, 2092]} for _ in range(20)]}),
+        encoding="utf-8",
+    )
+
+    document = normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        doc_id="silk-style",
+        title="丝绸之路新史",
+        language="zh-CN",
+    )
+
+    layout_stats = document["metadata"]["mineru"]["layout_stats"]
+    assert layout_stats["page_width"] == 1000.0
+    assert layout_stats["page_height"] == 1000.0
+    assert 100.0 <= layout_stats["body_left"] <= 130.0
+    assert 870.0 <= layout_stats["body_right"] <= 900.0
+    page_blocks = [
+        block for block in document["blocks"] if (block.get("source") or {}).get("page") == 20
+    ]
+    assert [block["type"] for block in page_blocks] == ["paragraph", "paragraph", "paragraph"]
+
+
+def test_materialized_image_page_keeps_crop_and_stable_absorbed_ids(tmp_path) -> None:
+    content_list_v2 = tmp_path / "image_page_content_list_v2.json"
+    middle = tmp_path / "image_page_middle.json"
+    output = tmp_path / "canonical.json"
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    _image_item([112, 114, 998, 679]),
+                    _text_item("title", "欧亚大陆主要交通线", [146, 687, 480, 715]),
+                    _text_item("paragraph", "---- 丝绸之路", [147, 725, 330, 748]),
+                    _text_item("paragraph", "□ 古代遗址", [164, 752, 330, 774]),
+                ]
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(json.dumps({"pdf_info": [{"page_size": [1000, 1000]}]}), encoding="utf-8")
+
+    document = normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        doc_id="image-page",
+        title="Image Page",
+        language="zh-CN",
+    )
+
+    figure = document["blocks"][0]
+    attrs = figure["attrs"]
+    assert figure["block_id"] == "b000001"
+    assert attrs["image_path"] == "images/sample.jpg"
+    assert attrs.get("layout_role") != "full_page_image"
+    assert attrs["absorbed_block_ids"] == ["b000002", "b000003", "b000004"]
+
+
+def test_flush_right_terminal_display_block_keeps_source_spans(tmp_path) -> None:
+    content_list_v2 = tmp_path / "terminal_content_list_v2.json"
+    middle = tmp_path / "terminal_middle.json"
+    output = tmp_path / "canonical.json"
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    _text_item("paragraph", "正文内容到此结束。", [110, 700, 880, 760]),
+                    _text_item("paragraph", "二〇一五年九月", [650, 820, 880, 845]),
+                    _text_item("paragraph", "北京", [780, 850, 880, 875]),
+                ]
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(json.dumps({"pdf_info": [{"page_size": [1000, 1000]}]}), encoding="utf-8")
+
+    document = normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        doc_id="terminal",
+        title="Terminal",
+        language="zh-CN",
+    )
+
+    display = next(block for block in document["blocks"] if block["type"] == "display_block")
+    assert display["text"] == "二〇一五年九月\n北京"
+    assert display["source"]["spans"] == [
+        {
+            "page": 1,
+            "bbox": [650, 820, 880, 845],
+            "block_id": "raw:1:1",
+            "text": "二〇一五年九月",
+        },
+        {
+            "page": 1,
+            "bbox": [780, 850, 880, 875],
+            "block_id": "raw:1:2",
+            "text": "北京",
+        },
+    ]
+
+
+def test_image_ocr_text_drops_generic_english_visual_descriptions(tmp_path) -> None:
+    content_list_v2 = tmp_path / "image_ocr_content_list_v2.json"
+    middle = tmp_path / "image_ocr_middle.json"
+    output = tmp_path / "canonical.json"
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    {
+                        "type": "image",
+                        "content": {
+                            "image_source": {"path": "images/artifact.jpg"},
+                            "content": (
+                                "Y. 009. g\n"
+                                "Statue of a seated figure with raised arm "
+                                "(no visible text or symbols)\n"
+                                "约特干出土陶猴"
+                            ),
+                        },
+                        "bbox": [151, 146, 855, 904],
+                    }
+                ]
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(json.dumps({"pdf_info": [{"page_size": [1000, 1000]}]}), encoding="utf-8")
+
+    document = normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        doc_id="image-ocr",
+        title="Image OCR",
+        language="zh-CN",
+    )
+
+    figure = document["blocks"][0]
+    ocr_text = figure["attrs"]["ocr_text_in_image"]
+    assert "Y. 009. g" in ocr_text
+    assert "约特干出土陶猴" in ocr_text
+    assert "Statue of a seated figure" not in ocr_text
+
+
+def test_small_pdf_page_size_keeps_pdf_coordinate_layout(tmp_path) -> None:
+    content_list_v2 = tmp_path / "letter_style_content_list_v2.json"
+    middle = tmp_path / "letter_style_middle.json"
+    output = tmp_path / "canonical.json"
+    page_20 = [
+        _text_item(
+            "paragraph",
+            "This page already uses ordinary PDF user-space coordinates." * 4,
+            [72, 72, 540, 760],
+        )
+    ]
+    content_list_v2.write_text(json.dumps([[] for _ in range(19)] + [page_20]), encoding="utf-8")
+    middle.write_text(
+        json.dumps({"pdf_info": [{"page_size": [612, 792]} for _ in range(20)]}),
+        encoding="utf-8",
+    )
+
+    document = normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        doc_id="letter-style",
+        title="Letter Style",
+        language="en",
+    )
+
+    layout_stats = document["metadata"]["mineru"]["layout_stats"]
+    assert layout_stats["page_width"] == 612.0
+    assert layout_stats["page_height"] == 792.0
+    assert layout_stats["body_right"] <= layout_stats["page_width"]
+
+
 def test_input_relative_path_resolves_from_cwd_to_output_dir(tmp_path, monkeypatch) -> None:
     from inkline.parsers.mineru.normalize.core import _input_path_relative_to_output_dir
 
@@ -278,6 +529,48 @@ def test_qwen_marker_evidence_image_paths_are_relative(tmp_path) -> None:
     assert (
         evidence["qwen_crop_image"]
         == "canonical_qwen_marker_locator/page_0001_b000001_200dpi_qwen_body_block.png"
+    )
+
+
+def test_qwen_marker_evidence_image_paths_rewrite_reused_relative_prefix(tmp_path) -> None:
+    output = tmp_path / "canonical-after.json"
+    artifact_dir = tmp_path / "canonical-after_qwen_marker_locator"
+    document = {
+        "blocks": [
+            {
+                "attrs": {
+                    "qwen_marker_evidence_image": (
+                        "丝绸之路新史/canonical_qwen_marker_locator/"
+                        "page_0001_150dpi_qwen_full_page.png"
+                    ),
+                    "inline_runs": [
+                        {
+                            "evidence": {
+                                "qwen_crop_image": (
+                                    "丝绸之路新史/canonical_qwen_marker_locator/"
+                                    "page_0001_b000001_200dpi_qwen_body_block.png"
+                                )
+                            },
+                        }
+                    ],
+                },
+            }
+        ]
+    }
+
+    from inkline.parsers.mineru.normalize.core import _normalize_qwen_evidence_paths
+
+    _normalize_qwen_evidence_paths(document, output.parent, artifact_dir=artifact_dir)
+    block = document["blocks"][0]
+
+    assert (
+        block["attrs"]["qwen_marker_evidence_image"]
+        == "canonical-after_qwen_marker_locator/page_0001_150dpi_qwen_full_page.png"
+    )
+    evidence = block["attrs"]["inline_runs"][0]["evidence"]
+    assert (
+        evidence["qwen_crop_image"]
+        == "canonical-after_qwen_marker_locator/page_0001_b000001_200dpi_qwen_body_block.png"
     )
 
 

@@ -13,7 +13,11 @@ from ..analysis.note_gap_report import write_note_ref_gap_report
 from ..bridge import find_mineru_run_version_info, get_mineru_version_info
 from ..extraction.io import load_inputs
 from ..normalize.assets import materialize_image_assets
-from ..normalize.core import build_canonical
+from ..normalize.core import (
+    _normalize_qwen_evidence_paths,
+    _qwen_marker_locator_artifact_dir,
+    build_canonical,
+)
 from ..reconcile import resolve_source_pdf_path
 
 
@@ -141,6 +145,11 @@ def main() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     canonical = build_canonical(pages, page_sizes, args)
     materialize_image_assets(canonical, args.source_pdf, out.parent)
+    _normalize_qwen_evidence_paths(
+        canonical,
+        out.parent,
+        artifact_dir=_qwen_marker_locator_artifact_dir(args),
+    )
     validate_document(canonical)
     with open(out, "w", encoding="utf-8") as f:
         json.dump(canonical, f, ensure_ascii=False, indent=2)
