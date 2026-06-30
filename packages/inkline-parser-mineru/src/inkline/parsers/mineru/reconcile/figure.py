@@ -30,6 +30,61 @@ FIGURE_EMBEDDED_TEXT_TYPES = {HEADING, PARAGRAPH}
 FIGURE_FOLLOWING_CAPTION_TYPES = {HEADING, PARAGRAPH, CAPTION}
 
 
+@dataclass(frozen=True)
+class _FigureCaptionContext:
+    figure: Dict[str, Any]
+    page: int
+    page_width: float
+    page_height: float
+    bbox: BBox
+
+
+@dataclass(frozen=True)
+class _ImageOverlapContext:
+    figure: Dict[str, Any]
+    page: int
+    page_width: float
+    attrs: Dict[str, Any]
+    stable_bbox: BBox
+    ocr_text: str
+
+
+@dataclass(frozen=True)
+class _LegendStripContext:
+    page: int
+    page_height: float
+    figure_height: float
+    anchor_left: float
+    anchor_right: float
+    anchor_width: float
+    max_gap: float
+    max_strip_bottom: float
+
+
+@dataclass(frozen=True)
+class _LegendStripState:
+    out: List[int]
+    current_bottom: float
+    has_visual_fragment: bool = False
+    has_text_fragment: bool = False
+    total_text_chars: int = 0
+    rejected: bool = False
+
+
+@dataclass(frozen=True)
+class _FigurePairGeometry:
+    page_width: float
+    page_height: float
+    left_width: float
+    left_height: float
+    right_width: float
+    right_height: float
+    vertical_overlap: float
+    horizontal_overlap: float
+    horizontal_gap: float
+    vertical_gap: float
+
+
 class _TextStyleProvider(Protocol):
     def block_style_size(self, block: Dict[str, Any]) -> Optional[float]: ...
 
@@ -85,75 +140,88 @@ class _FigureCaptionDetector:
     text_style: Optional[_TextStyleProvider] = None
 
     def collect_indices(self, figure_idx: int) -> List[int]:
-        figure = self.blocks[figure_idx]
-        page = _block_page(figure)
-        if page is None:
+        context = _figure_caption_context(self.blocks, figure_idx)
+        if context is None:
             return []
-        page_width = _page_coord_widths(self.blocks).get(page, _DEFAULT_PAGE_HEIGHT)
-        page_height = _page_coord_heights(self.blocks).get(page, _DEFAULT_PAGE_HEIGHT)
-        fbb = _bbox(figure)
         out: List[int] = []
         j = figure_idx + 1
         saw_text = False
         while j < len(self.blocks):
             candidate = self.blocks[j]
-            if _block_page(candidate) != page:
+            if _block_page(candidate) != context.page:
                 break
-            cbb = _bbox(candidate)
-            # Body text guard: if block looks like body content and is past the figure,
-            # don't even try to match as caption. A heading that was already
-            # accepted as a caption title may be followed by a body-width
-            # caption paragraph, so let that geometric continuation be tested.
-            if fbb and cbb:
-                cw = float(cbb[2]) - float(cbb[0])
-                gap = float(cbb[1]) - float(fbb[3])
-                body_layout = float(cbb[0]) < page_width * 0.12 and cw > page_width * 0.50
-                heading_continuation = (
-                    bool(out)
-                    and self.blocks[out[-1]].get("type") == HEADING
-                    and _is_caption_continuation(self.blocks[out[-1]], candidate)
-                )
-                if body_layout and gap > 0 and not heading_continuation:
-                    break
+            if self._body_flow_resumed(candidate, context, out):
+                break
             if self._is_flow_boundary(candidate):
                 break
-            if self._accept_heading(candidate, figure, out, saw_text):
+            if self._accept_heading(candidate, context.figure, out, saw_text):
                 out.append(j)
                 saw_text = True
                 j += 1
                 continue
-            if self._accept_paragraph(candidate, figure, out, saw_text):
+            if self._accept_paragraph(candidate, context.figure, out, saw_text):
                 out.append(j)
                 saw_text = True
                 j += 1
                 continue
             break
-        # Post-check: reject any accepted candidate that has returned to body text
-        if out and fbb:
-            last = self.blocks[out[-1]]
-            last_cbb = _bbox(last)
-            if last_cbb:
-                last_cw = float(last_cbb[2]) - float(last_cbb[0])
-                last_gap = float(last_cbb[1]) - float(fbb[3])
-                heading_continuation = (
-                    len(out) > 1
-                    and self.blocks[out[-2]].get("type") == HEADING
-                    and _is_caption_continuation(self.blocks[out[-2]], last)
-                )
-                if (
-                    not heading_continuation
-                    and (float(last_cbb[0]) < page_width * 0.12 and last_cw > page_width * 0.50)
-                ) or (
-                    not heading_continuation
-                    and last_gap > page_height * 0.10
-                    and last_cw > page_width * 0.50
-                ):
-                    return out[:-1] if len(out) > 1 else []
+        out = self._trim_body_text_tail(out, context)
         return out if any(self.blocks[k].get("type") in CAPTION_TEXT_TYPES for k in out) else []
 
     @staticmethod
     def _is_flow_boundary(candidate: Dict[str, Any]) -> bool:
         return candidate.get("type") in FIGURE_FLOW_BOUNDARY_TYPES
+
+    def _body_flow_resumed(
+        self,
+        candidate: Dict[str, Any],
+        context: _FigureCaptionContext,
+        caption_idxs: List[int],
+    ) -> bool:
+        cbb = _bbox(candidate)
+        if not cbb:
+            return False
+        width = float(cbb[2]) - float(cbb[0])
+        gap = float(cbb[1]) - float(context.bbox[3])
+        body_layout = float(cbb[0]) < context.page_width * 0.12 and width > context.page_width * 0.50
+        heading_continuation = (
+            bool(caption_idxs)
+            and self.blocks[caption_idxs[-1]].get("type") == HEADING
+            and _is_caption_continuation(self.blocks[caption_idxs[-1]], candidate)
+        )
+        return body_layout and gap > 0 and not heading_continuation
+
+    def _trim_body_text_tail(
+        self, caption_idxs: List[int], context: _FigureCaptionContext
+    ) -> List[int]:
+        if not caption_idxs:
+            return caption_idxs
+        last = self.blocks[caption_idxs[-1]]
+        last_cbb = _bbox(last)
+        if not last_cbb:
+            return caption_idxs
+        if not self._is_body_text_tail(caption_idxs, last, last_cbb, context):
+            return caption_idxs
+        return caption_idxs[:-1] if len(caption_idxs) > 1 else []
+
+    def _is_body_text_tail(
+        self,
+        caption_idxs: List[int],
+        last: Dict[str, Any],
+        last_bbox: BBox,
+        context: _FigureCaptionContext,
+    ) -> bool:
+        width = float(last_bbox[2]) - float(last_bbox[0])
+        gap = float(last_bbox[1]) - float(context.bbox[3])
+        heading_continuation = (
+            len(caption_idxs) > 1
+            and self.blocks[caption_idxs[-2]].get("type") == HEADING
+            and _is_caption_continuation(self.blocks[caption_idxs[-2]], last)
+        )
+        body_width = width > context.page_width * 0.50
+        body_left = float(last_bbox[0]) < context.page_width * 0.12
+        far_from_figure = gap > context.page_height * 0.10
+        return not heading_continuation and body_width and (body_left or far_from_figure)
 
     def _accept_heading(
         self,
@@ -212,6 +280,23 @@ def _attach_captions(figure: Dict[str, Any], caption_blocks: List[Dict[str, Any]
     source["bbox"] = union_bbox([original_bbox, caption_bbox])
 
 
+def _figure_caption_context(
+    blocks: List[Dict[str, Any]], figure_idx: int
+) -> Optional[_FigureCaptionContext]:
+    figure = blocks[figure_idx]
+    page = _block_page(figure)
+    bbox = _bbox(figure)
+    if page is None or not bbox:
+        return None
+    return _FigureCaptionContext(
+        figure=figure,
+        page=page,
+        page_width=_page_coord_widths(blocks).get(page, _DEFAULT_PAGE_HEIGHT),
+        page_height=_page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT),
+        bbox=bbox,
+    )
+
+
 def _caption_raw_type(block: Dict[str, Any]) -> Any:
     attrs = block.get("attrs") or {}
     raw_type = attrs.get("raw_type")
@@ -237,104 +322,122 @@ def _absorb_image_overlapping_text(blocks: List[Dict[str, Any]]) -> None:
         return
 
     page_widths = _page_coord_widths(blocks)
-
-    # Safe text types that can be absorbed; flow boundaries are excluded
-    _SAFE_ABSORB_TYPES = {PARAGRAPH, CAPTION, HEADING}
-
     i = 0
     while i < len(blocks):
-        figure = blocks[i]
-        if figure.get("type") != FIGURE:
+        context = _image_overlap_context(blocks[i], page_widths)
+        if context is None:
             i += 1
             continue
-
-        page = _block_page(figure)
-        if page is None:
-            i += 1
-            continue
-
-        page_width = page_widths.get(page, _DEFAULT_PAGE_HEIGHT)
-
-        # Capture the original image bbox before any absorption — used as
-        # the stable geometric reference so the region never snowballs.
-        # Only persisted to attrs when absorption actually occurs.
-        attrs = figure.setdefault("attrs", {})
-        stable_bbox = list(attrs.get("image_bbox") or _bbox(figure) or [])
-        if not stable_bbox:
-            i += 1
-            continue
-
-        ocr_text = str(attrs.get("ocr_text_in_image", "")).strip()
-
-        j = i + 1
-        while j < len(blocks):
-            candidate = blocks[j]
-            # Only absorb safe text types; stop on flow boundaries and any
-            # other content-bearing type not explicitly whitelisted.
-            cand_type = candidate.get("type")
-            if cand_type in FIGURE_FLOW_BOUNDARY_TYPES or cand_type not in _SAFE_ABSORB_TYPES:
-                break
-            if _block_page(candidate) != page:
-                break
-
-            cbb = _bbox(candidate)
-            if not cbb:
-                j += 1
-                continue
-
-            # Body text guard: full-width block near body left margin means
-            # body flow has resumed — stop scanning, not just skip this block.
-            cw = float(cbb[2]) - float(cbb[0])
-            if float(cbb[0]) < page_width * 0.12 and cw > page_width * 0.50:
-                break
-
-            # Criterion 1: center containment (using stable original bbox)
-            center_x = (float(cbb[0]) + float(cbb[2])) / 2.0
-            center_y = (float(cbb[1]) + float(cbb[3])) / 2.0
-            center_contained = (
-                float(stable_bbox[0]) - 5.0 <= center_x <= float(stable_bbox[2]) + 5.0
-                and float(stable_bbox[1]) - 5.0 <= center_y <= float(stable_bbox[3]) + 5.0
-            )
-
-            # Criterion 2: area overlap (using stable original bbox)
-            ix0 = max(float(cbb[0]), float(stable_bbox[0]))
-            iy0 = max(float(cbb[1]), float(stable_bbox[1]))
-            ix1 = min(float(cbb[2]), float(stable_bbox[2]))
-            iy1 = min(float(cbb[3]), float(stable_bbox[3]))
-            area_overlap = 0.0
-            text_area = max(1.0, (float(cbb[2]) - float(cbb[0])) * (float(cbb[3]) - float(cbb[1])))
-            if ix0 < ix1 and iy0 < iy1:
-                intersection_area = (ix1 - ix0) * (iy1 - iy0)
-                area_overlap = intersection_area / text_area
-
-            # Criterion 3: OCR mechanical match (using stable original bbox)
-            ocr_match = False
-            candidate_text = str(candidate.get("text", "")).strip()
-            if ocr_text and candidate_text:
-                near_edge = (
-                    abs(center_x - float(stable_bbox[0])) <= 10.0
-                    or abs(center_x - float(stable_bbox[2])) <= 10.0
-                    or abs(center_y - float(stable_bbox[1])) <= 10.0
-                    or abs(center_y - float(stable_bbox[3])) <= 10.0
-                )
-                if near_edge and candidate_text in ocr_text:
-                    ocr_match = True
-
-            if not (center_contained or area_overlap >= 0.50 or ocr_match):
-                j += 1
-                continue
-
-            # Persist the original bbox now that we're actually absorbing
-            if not attrs.get("image_bbox"):
-                attrs["image_bbox"] = list(stable_bbox)
-
-            _absorb_text_blocks_into_figure(figure, [candidate], reason="image_overlapping_text")
-            del blocks[j]
-            # Do NOT re-check the same figure — stable_bbox is immutable
-            # so no snowballing. Just continue scanning remaining candidates.
-            continue
-
+        _absorb_overlapping_text_after_figure(blocks, i + 1, context)
         i += 1
+
+
+def _image_overlap_context(
+    figure: Dict[str, Any], page_widths: Dict[int, float]
+) -> Optional[_ImageOverlapContext]:
+    if figure.get("type") != FIGURE:
+        return None
+    page = _block_page(figure)
+    if page is None:
+        return None
+    attrs = figure.setdefault("attrs", {})
+    stable_bbox = list(attrs.get("image_bbox") or _bbox(figure) or [])
+    if not stable_bbox:
+        return None
+    return _ImageOverlapContext(
+        figure=figure,
+        page=page,
+        page_width=page_widths.get(page, _DEFAULT_PAGE_HEIGHT),
+        attrs=attrs,
+        stable_bbox=stable_bbox,
+        ocr_text=str(attrs.get("ocr_text_in_image", "")).strip(),
+    )
+
+
+def _absorb_overlapping_text_after_figure(
+    blocks: List[Dict[str, Any]], start_idx: int, context: _ImageOverlapContext
+) -> None:
+    safe_absorb_types = {PARAGRAPH, CAPTION, HEADING}
+    j = start_idx
+    while j < len(blocks):
+        candidate = blocks[j]
+        candidate_type = candidate.get("type")
+        if candidate_type in FIGURE_FLOW_BOUNDARY_TYPES or candidate_type not in safe_absorb_types:
+            break
+        if _block_page(candidate) != context.page:
+            break
+        candidate_bbox = _bbox(candidate)
+        if not candidate_bbox:
+            j += 1
+            continue
+        if _is_body_width_text(candidate_bbox, context.page_width):
+            break
+        if not _overlaps_stable_image_region(candidate, candidate_bbox, context):
+            j += 1
+            continue
+        if not context.attrs.get("image_bbox"):
+            context.attrs["image_bbox"] = list(context.stable_bbox)
+        _absorb_text_blocks_into_figure(
+            context.figure, [candidate], reason="image_overlapping_text"
+        )
+        del blocks[j]
+
+
+def _is_body_width_text(bbox: BBox, page_width: float) -> bool:
+    width = float(bbox[2]) - float(bbox[0])
+    return float(bbox[0]) < page_width * 0.12 and width > page_width * 0.50
+
+
+def _overlaps_stable_image_region(
+    candidate: Dict[str, Any], candidate_bbox: BBox, context: _ImageOverlapContext
+) -> bool:
+    center_x = (float(candidate_bbox[0]) + float(candidate_bbox[2])) / 2.0
+    center_y = (float(candidate_bbox[1]) + float(candidate_bbox[3])) / 2.0
+    return (
+        _center_inside_bbox(center_x, center_y, context.stable_bbox)
+        or _area_overlap_ratio(candidate_bbox, context.stable_bbox) >= 0.50
+        or _ocr_edge_match(candidate, center_x, center_y, context)
+    )
+
+
+def _center_inside_bbox(center_x: float, center_y: float, bbox: BBox) -> bool:
+    return (
+        float(bbox[0]) - 5.0 <= center_x <= float(bbox[2]) + 5.0
+        and float(bbox[1]) - 5.0 <= center_y <= float(bbox[3]) + 5.0
+    )
+
+
+def _area_overlap_ratio(candidate_bbox: BBox, image_bbox: BBox) -> float:
+    ix0 = max(float(candidate_bbox[0]), float(image_bbox[0]))
+    iy0 = max(float(candidate_bbox[1]), float(image_bbox[1]))
+    ix1 = min(float(candidate_bbox[2]), float(image_bbox[2]))
+    iy1 = min(float(candidate_bbox[3]), float(image_bbox[3]))
+    if ix0 >= ix1 or iy0 >= iy1:
+        return 0.0
+    text_area = max(
+        1.0,
+        (float(candidate_bbox[2]) - float(candidate_bbox[0]))
+        * (float(candidate_bbox[3]) - float(candidate_bbox[1])),
+    )
+    return ((ix1 - ix0) * (iy1 - iy0)) / text_area
+
+
+def _ocr_edge_match(
+    candidate: Dict[str, Any],
+    center_x: float,
+    center_y: float,
+    context: _ImageOverlapContext,
+) -> bool:
+    candidate_text = str(candidate.get("text", "")).strip()
+    if not context.ocr_text or not candidate_text:
+        return False
+    near_edge = (
+        abs(center_x - float(context.stable_bbox[0])) <= 10.0
+        or abs(center_x - float(context.stable_bbox[2])) <= 10.0
+        or abs(center_y - float(context.stable_bbox[1])) <= 10.0
+        or abs(center_y - float(context.stable_bbox[3])) <= 10.0
+    )
+    return near_edge and candidate_text in context.ocr_text
 
 
 def _absorb_following_visual_legend_strips(blocks: List[Dict[str, Any]]) -> None:
@@ -374,74 +477,132 @@ def _absorb_following_visual_legend_strips(blocks: List[Dict[str, Any]]) -> None
 def _following_visual_legend_strip_indices(
     blocks: List[Dict[str, Any]], figure_idx: int
 ) -> List[int]:
-    figure = blocks[figure_idx]
-    page = _block_page(figure)
-    fbb = _bbox(figure)
-    if page is None or not fbb:
+    context = _legend_strip_context(blocks, figure_idx)
+    if context is None:
         return []
-    page_height = _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
-    anchor_left = float(fbb[0])
-    anchor_right = float(fbb[2])
-    anchor_width = max(1.0, anchor_right - anchor_left)
-    current_bottom = float(fbb[3])
-    max_gap = page_height * 0.08
-    max_strip_bottom = float(fbb[3]) + page_height * 0.14
-    out: List[int] = []
-    has_visual_fragment = False
-    has_text_fragment = False
-    total_text_chars = 0
-
+    state = _LegendStripState(out=[], current_bottom=context.max_strip_bottom - context.page_height * 0.14)
     j = figure_idx + 1
     while j < len(blocks):
         candidate = blocks[j]
-        if _block_page(candidate) != page:
+        updated = _next_legend_strip_state(candidate, j, context, state)
+        if updated is None:
             break
-        candidate_type = candidate.get("type")
-        if candidate_type in FIGURE_FLOW_BOUNDARY_TYPES and candidate_type != FIGURE:
-            break
-        if candidate_type not in FIGURE_FOLLOWING_CAPTION_TYPES | {FIGURE}:
-            break
-        cbb = _bbox(candidate)
-        if not cbb:
-            break
-        gap = float(cbb[1]) - current_bottom
-        if not -40.0 <= gap <= max_gap:
-            break
-        if float(cbb[3]) > max_strip_bottom:
-            break
-        candidate_left = float(cbb[0])
-        candidate_right = float(cbb[2])
-        candidate_width = max(1.0, candidate_right - candidate_left)
-        center_x = (candidate_left + candidate_right) / 2.0
-        overlap = min(anchor_right, candidate_right) - max(anchor_left, candidate_left)
-        horizontally_attached = (
-            anchor_left - anchor_width * 0.08 <= center_x <= anchor_right + anchor_width * 0.08
-            or overlap >= min(anchor_width, candidate_width) * 0.35
-        )
-        if not horizontally_attached:
-            break
-        if candidate_type == FIGURE:
-            figure_height = max(1.0, float(fbb[3]) - float(fbb[1]))
-            candidate_height = max(1.0, float(cbb[3]) - float(cbb[1]))
-            if candidate_height > figure_height * 0.18:
-                break
-            has_visual_fragment = True
-        else:
-            if not _is_compact_visual_legend_text(candidate, cbb, anchor_width, page_height):
-                return []
-            has_text_fragment = True
-            total_text_chars += len(str(candidate.get("text", "")).strip())
-            if total_text_chars > 160:
-                return []
-        out.append(j)
-        current_bottom = max(current_bottom, float(cbb[3]))
+        if updated.rejected:
+            return []
+        state = updated
         j += 1
+    return _accepted_legend_strip_indices(state)
 
-    if len(out) < 2 or not has_text_fragment:
+
+def _legend_strip_context(
+    blocks: List[Dict[str, Any]], figure_idx: int
+) -> Optional[_LegendStripContext]:
+    figure = blocks[figure_idx]
+    page = _block_page(figure)
+    bbox = _bbox(figure)
+    if page is None or not bbox:
+        return None
+    page_height = _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+    anchor_left = float(bbox[0])
+    anchor_right = float(bbox[2])
+    return _LegendStripContext(
+        page=page,
+        page_height=page_height,
+        figure_height=max(1.0, float(bbox[3]) - float(bbox[1])),
+        anchor_left=anchor_left,
+        anchor_right=anchor_right,
+        anchor_width=max(1.0, anchor_right - anchor_left),
+        max_gap=page_height * 0.08,
+        max_strip_bottom=float(bbox[3]) + page_height * 0.14,
+    )
+
+
+def _next_legend_strip_state(
+    candidate: Dict[str, Any],
+    idx: int,
+    context: _LegendStripContext,
+    state: _LegendStripState,
+) -> Optional[_LegendStripState]:
+    if _block_page(candidate) != context.page:
+        return None
+    candidate_type = candidate.get("type")
+    if candidate_type in FIGURE_FLOW_BOUNDARY_TYPES and candidate_type != FIGURE:
+        return None
+    if candidate_type not in FIGURE_FOLLOWING_CAPTION_TYPES | {FIGURE}:
+        return None
+    bbox = _bbox(candidate)
+    if not bbox or not _legend_strip_bbox_attached(bbox, context, state.current_bottom):
+        return None
+    if candidate_type == FIGURE:
+        return _with_visual_legend_fragment(idx, bbox, context, state)
+    return _with_text_legend_fragment(candidate, idx, bbox, context, state)
+
+
+def _legend_strip_bbox_attached(
+    bbox: BBox, context: _LegendStripContext, current_bottom: float
+) -> bool:
+    gap = float(bbox[1]) - current_bottom
+    if not -40.0 <= gap <= context.max_gap:
+        return False
+    if float(bbox[3]) > context.max_strip_bottom:
+        return False
+    candidate_left = float(bbox[0])
+    candidate_right = float(bbox[2])
+    candidate_width = max(1.0, candidate_right - candidate_left)
+    center_x = (candidate_left + candidate_right) / 2.0
+    overlap = min(context.anchor_right, candidate_right) - max(context.anchor_left, candidate_left)
+    return (
+        context.anchor_left - context.anchor_width * 0.08
+        <= center_x
+        <= context.anchor_right + context.anchor_width * 0.08
+        or overlap >= min(context.anchor_width, candidate_width) * 0.35
+    )
+
+
+def _with_visual_legend_fragment(
+    idx: int, bbox: BBox, context: _LegendStripContext, state: _LegendStripState
+) -> Optional[_LegendStripState]:
+    candidate_height = max(1.0, float(bbox[3]) - float(bbox[1]))
+    if candidate_height > context.figure_height * 0.18:
+        return None
+    return _LegendStripState(
+        out=[*state.out, idx],
+        current_bottom=max(state.current_bottom, float(bbox[3])),
+        has_visual_fragment=True,
+        has_text_fragment=state.has_text_fragment,
+    total_text_chars=state.total_text_chars,
+        rejected=state.rejected,
+    )
+
+
+def _with_text_legend_fragment(
+    candidate: Dict[str, Any],
+    idx: int,
+    bbox: BBox,
+    context: _LegendStripContext,
+    state: _LegendStripState,
+) -> Optional[_LegendStripState]:
+    if not _is_compact_visual_legend_text(candidate, bbox, context.anchor_width, context.page_height):
+        return _LegendStripState(out=[], current_bottom=state.current_bottom, rejected=True)
+    text_chars = state.total_text_chars + len(str(candidate.get("text", "")).strip())
+    if text_chars > 160:
+        return _LegendStripState(out=[], current_bottom=state.current_bottom, rejected=True)
+    return _LegendStripState(
+        out=[*state.out, idx],
+        current_bottom=max(state.current_bottom, float(bbox[3])),
+        has_visual_fragment=state.has_visual_fragment,
+        has_text_fragment=True,
+        total_text_chars=text_chars,
+        rejected=state.rejected,
+    )
+
+
+def _accepted_legend_strip_indices(state: _LegendStripState) -> List[int]:
+    if len(state.out) < 2 or not state.has_text_fragment:
         return []
-    if not has_visual_fragment and len(out) < 3:
+    if not state.has_visual_fragment and len(state.out) < 3:
         return []
-    return out
+    return state.out
 
 
 def _is_compact_visual_legend_text(
@@ -551,50 +712,67 @@ def _is_same_visual_figure_fragment(blocks: List[Dict[str, Any]], left_idx: int)
     rbb = _bbox(right)
     if not lbb or not rbb:
         return False
-    page = _block_page(left)
-    page_width = (
-        _page_coord_widths(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
-        if page is not None
-        else _DEFAULT_PAGE_HEIGHT
-    )
-    page_height = (
-        _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
-        if page is not None
-        else _DEFAULT_PAGE_HEIGHT
-    )
-    lw = max(1.0, float(lbb[2]) - float(lbb[0]))
-    lh = max(1.0, float(lbb[3]) - float(lbb[1]))
-    rw = max(1.0, float(rbb[2]) - float(rbb[0]))
-    rh = max(1.0, float(rbb[3]) - float(rbb[1]))
-    vertical_overlap = min(float(lbb[3]), float(rbb[3])) - max(float(lbb[1]), float(rbb[1]))
-    horizontal_gap = float(rbb[0]) - float(lbb[2])
+    geometry = _figure_pair_geometry(blocks, left, lbb, rbb)
     union = union_bbox([lbb, rbb])
-    side_by_side_layout = (
-        vertical_overlap >= min(lh, rh) * 0.40
-        and -25.0 <= horizontal_gap <= page_width * 0.08
-        and abs(float(lbb[1]) - float(rbb[1])) <= page_height * 0.10
-        and abs(float(lbb[3]) - float(rbb[3])) <= page_height * 0.12
-    )
     side_by_side = (
-        side_by_side_layout
+        _is_side_by_side_fragment(lbb, rbb, geometry)
         and bool(union)
         and _has_following_caption_for_figure_pair(blocks, left_idx, union)
     )
-    horizontal_overlap = min(float(lbb[2]), float(rbb[2])) - max(float(lbb[0]), float(rbb[0]))
-    vertical_gap = float(rbb[1]) - float(lbb[3])
     left_attrs = left.get("attrs") or {}
-    # Below-fragment: the lower block must be small relative to the left
-    # figure (≤35% of left height) so only legend/sub-map fragments merge,
-    # not independent full-size stacked figures. The page-height cap is kept
-    # for uncaptioned left figures as an additional small-fragment signal.
-    left_has_caption = bool(left_attrs.get("captions"))
-    small_relative_to_left = rh <= lh * 0.35
-    below_fragment = (
-        horizontal_overlap >= min(lw, rw) * 0.40
-        and -15.0 <= vertical_gap <= page_height * 0.12
-        and (rh <= page_height * 0.08 or (left_has_caption and small_relative_to_left))
-    )
+    below_fragment = _is_below_figure_fragment(geometry, bool(left_attrs.get("captions")))
     return side_by_side or below_fragment
+
+
+def _figure_pair_geometry(
+    blocks: List[Dict[str, Any]], left: Dict[str, Any], left_bbox: BBox, right_bbox: BBox
+) -> _FigurePairGeometry:
+    page = _block_page(left)
+    page_width = _page_coord_widths(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+    page_height = _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+    left_width = max(1.0, float(left_bbox[2]) - float(left_bbox[0]))
+    left_height = max(1.0, float(left_bbox[3]) - float(left_bbox[1]))
+    right_width = max(1.0, float(right_bbox[2]) - float(right_bbox[0]))
+    right_height = max(1.0, float(right_bbox[3]) - float(right_bbox[1]))
+    return _FigurePairGeometry(
+        page_width=page_width,
+        page_height=page_height,
+        left_width=left_width,
+        left_height=left_height,
+        right_width=right_width,
+        right_height=right_height,
+        vertical_overlap=min(float(left_bbox[3]), float(right_bbox[3]))
+        - max(float(left_bbox[1]), float(right_bbox[1])),
+        horizontal_overlap=min(float(left_bbox[2]), float(right_bbox[2]))
+        - max(float(left_bbox[0]), float(right_bbox[0])),
+        horizontal_gap=float(right_bbox[0]) - float(left_bbox[2]),
+        vertical_gap=float(right_bbox[1]) - float(left_bbox[3]),
+    )
+
+
+def _is_side_by_side_fragment(
+    left_bbox: BBox, right_bbox: BBox, geometry: _FigurePairGeometry
+) -> bool:
+    return (
+        geometry.vertical_overlap >= min(geometry.left_height, geometry.right_height) * 0.40
+        and -25.0 <= geometry.horizontal_gap <= geometry.page_width * 0.08
+        and abs(float(left_bbox[1]) - float(right_bbox[1])) <= geometry.page_height * 0.10
+        and abs(float(left_bbox[3]) - float(right_bbox[3])) <= geometry.page_height * 0.12
+    )
+
+
+def _is_below_figure_fragment(
+    geometry: _FigurePairGeometry, left_has_caption: bool
+) -> bool:
+    small_relative_to_left = geometry.right_height <= geometry.left_height * 0.35
+    return (
+        geometry.horizontal_overlap >= min(geometry.left_width, geometry.right_width) * 0.40
+        and -15.0 <= geometry.vertical_gap <= geometry.page_height * 0.12
+        and (
+            geometry.right_height <= geometry.page_height * 0.08
+            or (left_has_caption and small_relative_to_left)
+        )
+    )
 
 
 def _has_following_caption_for_figure_pair(
