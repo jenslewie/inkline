@@ -212,4 +212,7 @@ def _refresh_display_block_attrs(
         attrs["note_refs"] = existing_note_refs
     if existing_raw_types is not None:
         attrs["raw_types"] = existing_raw_types
+    if attrs.get("merge_reason") == "cross_page_paragraph_continuation_across_footnote":
+        attrs["merge_reason"] = "display_block_continuation_across_footnotes"
+        attrs["merge_evidence"] = {"footnote_interrupted_display_block": True}
     b["type"] = DISPLAY_BLOCK

@@ -42,12 +42,15 @@ def reconcile_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) 
             continue
         prev_text = _prev_text_non_float_or_footnote(blocks, idx)
         if (b.get("attrs") or {}).get("display_boundary_after_float_body_resume"):
-            b["type"] = DISPLAY_BLOCK
-            _refresh_display_block_attrs(b, prev_text=prev_text)
-            attrs = b.setdefault("attrs", {})
-            ev = attrs.setdefault("classification_evidence", [])
-            if "promoted_after_float_body_resume_boundary" not in ev:
-                ev.append("promoted_after_float_body_resume_boundary")
+            if _has_indented_display_geometry(blocks, idx, layout, page_widths, page_heights):
+                b["type"] = DISPLAY_BLOCK
+                _refresh_display_block_attrs(b, prev_text=prev_text)
+                attrs = b.setdefault("attrs", {})
+                ev = attrs.setdefault("classification_evidence", [])
+                if "promoted_after_float_body_resume_boundary" not in ev:
+                    ev.append("promoted_after_float_body_resume_boundary")
+            else:
+                _discard_float_resume_boundary_candidate(b)
             continue
         if _is_indented_display_paragraph(blocks, idx, layout, page_widths, page_heights):
             b["type"] = DISPLAY_BLOCK
@@ -213,7 +216,69 @@ def _next_same_page_text_block(
     return None
 
 
+def _discard_float_resume_boundary_candidate(block: Dict[str, Any]) -> None:
+    attrs = block.setdefault("attrs", {})
+    attrs.pop("display_boundary_after_float_body_resume", None)
+    evidence = attrs.get("classification_evidence")
+    if isinstance(evidence, list):
+        attrs["classification_evidence"] = [
+            item for item in evidence if item != "set_off_display_before_float_body_resume"
+        ]
+        if not attrs["classification_evidence"]:
+            attrs.pop("classification_evidence", None)
+
+
 def _is_indented_display_paragraph(
+    blocks: List[Dict[str, Any]],
+    idx: int,
+    layout: LayoutStats,
+    page_widths: Dict[int, float] | None = None,
+    page_heights: Dict[int, float] | None = None,
+) -> bool:
+    cur = blocks[idx]
+    source_pages = _block_pages(cur)
+    spans_multiple_pages = len(source_pages) >= 2
+    page_top_after_prior_page_footnote = _is_page_top_set_off_after_prior_page_footnote(
+        blocks, idx, layout, page_heights
+    )
+    if spans_multiple_pages and _has_cross_page_body_flow_spans(blocks, cur, layout, page_widths):
+        return False
+    if not _has_indented_display_geometry(blocks, idx, layout, page_widths, page_heights):
+        return False
+
+    before_footnote = _is_page_end_set_off_before_footnote(blocks, idx, layout, page_widths)
+    bounded_group = _is_bounded_set_off_group_member(blocks, idx, layout, page_widths)
+    page_top_before_body = _is_page_top_set_off_before_body(
+        blocks, idx, layout, page_widths, page_heights
+    )
+    between_body_boundaries = _is_single_set_off_between_body_boundaries(
+        blocks, idx, layout, page_widths
+    )
+    after_narrow_bridge = _is_set_off_after_narrow_bridge_before_body(
+        blocks, idx, layout, page_widths
+    )
+    has_set_off_boundary = (
+        before_footnote
+        or bounded_group
+        or page_top_before_body
+        or page_top_after_prior_page_footnote
+        or between_body_boundaries
+        or after_narrow_bridge
+    )
+    if _is_long_body_lane_paragraph(blocks, idx, layout, page_widths) and not has_set_off_boundary:
+        return False
+    return (
+        spans_multiple_pages
+        or before_footnote
+        or bounded_group
+        or page_top_before_body
+        or page_top_after_prior_page_footnote
+        or between_body_boundaries
+        or after_narrow_bridge
+    )
+
+
+def _has_indented_display_geometry(
     blocks: List[Dict[str, Any]],
     idx: int,
     layout: LayoutStats,
@@ -260,42 +325,17 @@ def _is_indented_display_paragraph(
     )
     if not (indented and long_enough and not_full_body_lane):
         return False
-    if not spans_multiple_pages and _has_tight_body_flow_from_previous_paragraph(
-        blocks, idx, layout, page_widths, page_heights
+    if not spans_multiple_pages and (
+        _has_tight_body_flow_from_previous_paragraph(
+            blocks, idx, layout, page_widths, page_heights
+        )
+        or _has_tight_body_flow_from_previous_body_span(
+            blocks, idx, layout, page_widths, page_heights
+        )
     ):
         return False
-    if _is_vertical_context_paragraph_after_previous_display(blocks, idx, layout, page_widths):
-        return False
-
-    before_footnote = _is_page_end_set_off_before_footnote(blocks, idx, layout, page_widths)
-    bounded_group = _is_bounded_set_off_group_member(blocks, idx, layout, page_widths)
-    page_top_before_body = _is_page_top_set_off_before_body(
-        blocks, idx, layout, page_widths, page_heights
-    )
-    between_body_boundaries = _is_single_set_off_between_body_boundaries(
+    return not _is_vertical_context_paragraph_after_previous_display(
         blocks, idx, layout, page_widths
-    )
-    after_narrow_bridge = _is_set_off_after_narrow_bridge_before_body(
-        blocks, idx, layout, page_widths
-    )
-    has_set_off_boundary = (
-        before_footnote
-        or bounded_group
-        or page_top_before_body
-        or page_top_after_prior_page_footnote
-        or between_body_boundaries
-        or after_narrow_bridge
-    )
-    if _is_long_body_lane_paragraph(blocks, idx, layout, page_widths) and not has_set_off_boundary:
-        return False
-    return (
-        spans_multiple_pages
-        or before_footnote
-        or bounded_group
-        or page_top_before_body
-        or page_top_after_prior_page_footnote
-        or between_body_boundaries
-        or after_narrow_bridge
     )
 
 
@@ -389,6 +429,62 @@ def _has_tight_body_flow_from_previous_paragraph(
         return False
     tight_gap_limit = max(18.0, coord_height * 0.018)
     return vertical_gap <= tight_gap_limit
+
+
+def _has_tight_body_flow_from_previous_body_span(
+    blocks: List[Dict[str, Any]],
+    idx: int,
+    layout: LayoutStats,
+    page_widths: Dict[int, float] | None = None,
+    page_heights: Dict[int, float] | None = None,
+) -> bool:
+    cur = blocks[idx]
+    page = _block_page(cur)
+    cur_bb = _bbox(cur)
+    if page is None or not cur_bb:
+        return False
+    if not _span_has_body_flow_layout(blocks, cur, page, cur_bb, layout, page_widths):
+        return False
+    prev_bb = _previous_body_flow_bbox_on_page(blocks, idx, page, layout, page_widths)
+    if not prev_bb:
+        return False
+    vertical_gap = float(cur_bb[1]) - float(prev_bb[3])
+    if vertical_gap < 0:
+        return False
+    coord_height = page_heights.get(page) if page_heights else None
+    if coord_height is None:
+        return False
+    return vertical_gap <= max(18.0, coord_height * 0.018)
+
+
+def _previous_body_flow_bbox_on_page(
+    blocks: List[Dict[str, Any]],
+    idx: int,
+    page: int,
+    layout: LayoutStats,
+    page_widths: Dict[int, float] | None = None,
+) -> List[float] | None:
+    for candidate in reversed(blocks[:idx]):
+        if candidate.get("type") == FOOTNOTE or candidate.get("type") in FLOAT_LIKE_TYPES:
+            continue
+        if candidate.get("type") != PARAGRAPH:
+            return None
+        bboxes = _block_bboxes_on_pages(candidate, {page})
+        flow_bboxes = [
+            bbox
+            for bbox in bboxes
+            if _span_has_body_flow_layout(blocks, candidate, page, bbox, layout, page_widths)
+        ]
+        if flow_bboxes:
+            return max(flow_bboxes, key=lambda bbox: float(bbox[3]))
+        candidate_pages = set(_block_pages(candidate))
+        candidate_page = _block_page(candidate)
+        if candidate_page is not None:
+            candidate_pages.add(candidate_page)
+        if candidate_pages and max(candidate_pages) < page:
+            continue
+        return None
+    return None
 
 
 def _is_page_end_set_off_before_footnote(
@@ -750,7 +846,7 @@ def _page_body_left(
                 candidates.append(float(bb[0]))
     if not candidates:
         return scaled_body_left
-    return min([*candidates, scaled_body_left])
+    return min(candidates)
 
 
 def _page_body_left_for_page(
@@ -774,7 +870,7 @@ def _page_body_left_for_page(
                 candidates.append(float(bb[0]))
     if not candidates:
         return scaled_body_left
-    return min([*candidates, scaled_body_left])
+    return min(candidates)
 
 
 def _block_bboxes_on_pages(block: Dict[str, Any], pages: set[int]) -> List[List[float]]:

@@ -3,6 +3,7 @@ body prose lines, demoting the prose tail back to paragraph type."""
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
@@ -29,6 +30,7 @@ def reconcile_display_block_body_paragraph_split(
     """
     page_widths = _page_coord_widths(blocks)
     page_body_lefts = _page_body_lefts(blocks, layout, page_widths)
+    _split_leading_body_intro_from_display_blocks(blocks, layout, page_widths, page_body_lefts)
     i = 0
     while i < len(blocks):
         cur = blocks[i]
@@ -102,8 +104,6 @@ def reconcile_display_block_body_paragraph_split(
         else:
             attrs.pop("note_refs", None)
 
-        import copy
-
         new_para = copy.deepcopy(cur)
         new_para["block_id"] = f"{cur.get('block_id')}_body"
         new_para["type"] = PARAGRAPH
@@ -173,8 +173,6 @@ def _split_embedded_paragraph_boundaries_from_display_blocks(
         cur["text"] = _text_for_spans(prefix_spans)
         _apply_source_from_spans(cur, original_source, prefix_spans)
 
-        import copy
-
         inserts: List[Dict[str, Any]] = []
         paragraph = copy.deepcopy(cur)
         paragraph["block_id"] = f"{original_id}_paragraph"
@@ -214,6 +212,154 @@ def _split_embedded_paragraph_boundaries_from_display_blocks(
         )
         blocks[i + 1 : i + 1] = inserts
         i += 1 + len(inserts)
+
+
+def _split_leading_body_intro_from_display_blocks(
+    blocks: List[Dict[str, Any]],
+    layout: LayoutStats,
+    page_widths: Dict[int, float] | None,
+    page_body_lefts: Dict[int, float],
+) -> None:
+    i = 0
+    while i < len(blocks):
+        cur = blocks[i]
+        if cur.get("type") != DISPLAY_BLOCK:
+            i += 1
+            continue
+        split = _leading_body_intro_split(cur, blocks, i, layout, page_widths, page_body_lefts)
+        if split is None:
+            i += 1
+            continue
+        intro_spans, display_spans = split
+        intro_text = _text_for_spans(intro_spans)
+        display_text = _text_for_spans(display_spans)
+        if not intro_text or not display_text:
+            i += 1
+            continue
+
+        original_source = cur.get("source") or {}
+        original_attrs = cur.get("attrs") or {}
+        original_id = cur.get("block_id")
+        split_offset = len(intro_text)
+        intro_runs, display_runs = _split_inline_runs_at_offset(
+            original_attrs.get("inline_runs"), split_offset
+        )
+        intro_refs, display_refs = _split_note_refs_by_runs(
+            original_attrs.get("note_refs"), intro_runs, display_runs
+        )
+
+        intro = copy.deepcopy(cur)
+        intro["block_id"] = f"{original_id}_intro"
+        intro["type"] = PARAGRAPH
+        intro["text"] = intro_text
+        intro.pop("level", None)
+        intro_attrs = intro.setdefault("attrs", {})
+        _demote_display_attrs(intro_attrs)
+        intro_attrs["split_from_display_block_id"] = original_id
+        if intro_runs:
+            intro_attrs["inline_runs"] = intro_runs
+        else:
+            intro_attrs.pop("inline_runs", None)
+        if intro_refs is not None:
+            intro_attrs["note_refs"] = intro_refs
+        else:
+            intro_attrs.pop("note_refs", None)
+        _apply_source_from_spans(intro, original_source, intro_spans)
+
+        cur["text"] = display_text
+        cur_attrs = cur.setdefault("attrs", {})
+        cur_attrs["split_leading_body_intro"] = True
+        if display_runs:
+            cur_attrs["inline_runs"] = display_runs
+        else:
+            cur_attrs.pop("inline_runs", None)
+        if display_refs is not None:
+            cur_attrs["note_refs"] = display_refs
+        else:
+            cur_attrs.pop("note_refs", None)
+        _apply_source_from_spans(cur, original_source, display_spans)
+        blocks.insert(i, intro)
+        i += 2
+
+
+def _leading_body_intro_split(
+    block: Dict[str, Any],
+    blocks: List[Dict[str, Any]],
+    idx: int,
+    layout: LayoutStats,
+    page_widths: Dict[int, float] | None,
+    page_body_lefts: Dict[int, float],
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]] | None:
+    if (block.get("attrs") or {}).get("merge_reason") != "same_page_display_block_continuation":
+        return None
+    spans = [
+        span
+        for span in (block.get("source") or {}).get("spans") or []
+        if isinstance(span, dict) and span.get("text")
+    ]
+    if len(spans) < 2:
+        return None
+    first = spans[0]
+    second = spans[1]
+    first_bbox = _span_bbox(first)
+    second_bbox = _span_bbox(second)
+    page = first.get("page")
+    if (
+        first_bbox is None
+        or second_bbox is None
+        or page is None
+        or second.get("page") != page
+    ):
+        return None
+    page = int(page)
+    if not _span_has_body_flow_layout(first, layout, page_widths, page_body_lefts):
+        return None
+    if not _is_display_lane_span(second, layout, page_widths):
+        return None
+    prev_bbox = _previous_body_flow_span_bbox(blocks, idx, page, layout, page_widths, page_body_lefts)
+    if not prev_bbox:
+        return None
+    line_height = max(1.0, float(first_bbox[3]) - float(first_bbox[1]))
+    tight_gap = max(18.0, line_height * 1.25)
+    boundary_gap = max(24.0, line_height * 1.5)
+    prev_gap = float(first_bbox[1]) - float(prev_bbox[3])
+    next_gap = float(second_bbox[1]) - float(first_bbox[3])
+    if not (0 <= prev_gap <= tight_gap and next_gap >= boundary_gap):
+        return None
+    return [first], spans[1:]
+
+
+def _previous_body_flow_span_bbox(
+    blocks: List[Dict[str, Any]],
+    idx: int,
+    page: int,
+    layout: LayoutStats,
+    page_widths: Dict[int, float] | None,
+    page_body_lefts: Dict[int, float],
+) -> BBox | None:
+    for candidate in reversed(blocks[:idx]):
+        if candidate.get("type") == FOOTNOTE or candidate.get("type") in FLOAT_LIKE_TYPES:
+            continue
+        if candidate.get("type") != PARAGRAPH:
+            return None
+        bboxes = []
+        source = candidate.get("source") or {}
+        for span in source.get("spans") or []:
+            if not isinstance(span, dict) or span.get("page") != page:
+                continue
+            bbox = _span_bbox(span)
+            if bbox and _span_has_body_flow_layout(span, layout, page_widths, page_body_lefts):
+                bboxes.append(bbox)
+        if not bboxes:
+            bbox = _bbox(candidate)
+            if _block_page(candidate) == page and bbox:
+                span = {"page": page, "bbox": bbox}
+                if _span_has_body_flow_layout(span, layout, page_widths, page_body_lefts):
+                    bboxes.append(bbox)
+        if bboxes:
+            return max(bboxes, key=lambda bbox: float(bbox[3]))
+        return None
+    return None
 
 
 def _geometry_embedded_paragraph_split(

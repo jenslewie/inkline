@@ -518,23 +518,7 @@ def merge_cross_page_paragraphs(
             if left.get("type") == PARAGRAPH and right.get("type") == DISPLAY_BLOCK:
                 i += 1
                 continue
-            if (
-                left.get("type") == DISPLAY_BLOCK
-                and right.get("type") == PARAGRAPH
-                and layout is not None
-                and not _display_block_layout(right, layout, page_widths.get(_block_page(right)))
-            ):
-                i += 1
-                continue
             display_like = left.get("type") == DISPLAY_BLOCK
-            if (
-                display_like
-                and right.get("type") == PARAGRAPH
-                and layout is not None
-                and not _display_block_layout(right, layout, page_widths.get(_block_page(right)))
-            ):
-                i += 1
-                continue
             rp = _block_page(right)
             if rp is None or rp <= left_page:
                 i += 1
@@ -569,8 +553,7 @@ def merge_cross_page_paragraphs(
                 display_like
                 and right.get("type") == PARAGRAPH
                 and layout is not None
-                and starts_after_float
-                and _looks_like_body_resumption(right, layout, page_widths)
+                and not _display_block_layout(right, layout, page_widths.get(_block_page(right)))
             ):
                 i += 1
                 continue
@@ -642,7 +625,7 @@ def _set_off_display_before_float_body_resume(
 ) -> bool:
     if layout is None or not starts_after_float:
         return False
-    if left.get("type") != PARAGRAPH or right.get("type") != PARAGRAPH:
+    if left.get("type") not in {PARAGRAPH, DISPLAY_BLOCK} or right.get("type") != PARAGRAPH:
         return False
     if not any(item.get("type") in FLOAT_INTERRUPTION_TYPES for item in interruptions):
         return False
@@ -653,6 +636,8 @@ def _set_off_display_before_float_body_resume(
         not _display_block_layout(left, layout, page_widths.get(_block_page(left)))
         and not page_local_set_off
     ):
+        return False
+    if not page_local_set_off and _looks_like_body_resumption(left, layout, page_widths):
         return False
     if not _looks_like_body_resumption(right, layout, page_widths):
         return False

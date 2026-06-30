@@ -200,7 +200,7 @@ def _attach_captions(figure: Dict[str, Any], caption_blocks: List[Dict[str, Any]
     if caption_text and caption_text not in existing:
         existing.append(caption_text)
     attrs["caption_block_ids"] = [b.get("block_id") for b in caption_blocks if b.get("block_id")]
-    attrs["caption_raw_types"] = [(b.get("attrs") or {}).get("raw_type") for b in caption_blocks]
+    attrs["caption_raw_types"] = [_caption_raw_type(b) for b in caption_blocks]
     attrs["caption_merge_reason"] = "nearby_figure_caption_layout"
     caption_bbox = union_bbox([_bbox(b) for b in caption_blocks])
     if caption_bbox:
@@ -210,6 +210,17 @@ def _attach_captions(figure: Dict[str, Any], caption_blocks: List[Dict[str, Any]
     if original_bbox:
         attrs.setdefault("image_bbox", original_bbox)
     source["bbox"] = union_bbox([original_bbox, caption_bbox])
+
+
+def _caption_raw_type(block: Dict[str, Any]) -> Any:
+    attrs = block.get("attrs") or {}
+    raw_type = attrs.get("raw_type")
+    if raw_type:
+        return raw_type
+    raw_types = attrs.get("raw_types")
+    if isinstance(raw_types, list) and len(raw_types) == 1 and raw_types[0]:
+        return raw_types[0]
+    return block.get("type")
 
 
 def _absorb_image_overlapping_text(blocks: List[Dict[str, Any]]) -> None:

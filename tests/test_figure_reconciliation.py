@@ -424,6 +424,36 @@ def test_right_side_heading_and_display_block_merge_as_caption() -> None:
     assert blocks[1] is body_after
 
 
+def test_caption_raw_types_fall_back_to_block_type_when_attrs_missing() -> None:
+    figure = _block(FIGURE, "", page=1, bbox=[100, 100, 700, 600])
+    title = _block(HEADING, "图题", page=1, bbox=[120, 620, 400, 650])
+    body = _block(PARAGRAPH, "说明文字。", page=1, bbox=[120, 660, 500, 700])
+    title["attrs"] = {"raw_type": "title"}
+    blocks = [figure, title, body]
+
+    reconcile_figure_captions(blocks)
+
+    assert len(blocks) == 1
+    assert blocks[0]["attrs"]["caption_raw_types"] == ["title", PARAGRAPH]
+
+
+def test_caption_raw_types_prefer_raw_types_over_display_block_type() -> None:
+    figure = _block(FIGURE, "", page=1, bbox=[100, 100, 700, 600])
+    title = _block(HEADING, "图题", page=1, bbox=[120, 620, 400, 650])
+    body = _block(DISPLAY_BLOCK, "说明文字。", page=1, bbox=[120, 660, 500, 700])
+    title["attrs"] = {"raw_type": "title"}
+    body["attrs"] = {
+        "layout_role": "inline_display_block",
+        "raw_types": [PARAGRAPH],
+    }
+    blocks = [figure, title, body]
+
+    reconcile_figure_captions(blocks)
+
+    assert len(blocks) == 1
+    assert blocks[0]["attrs"]["caption_raw_types"] == ["title", PARAGRAPH]
+
+
 def test_heading_caption_title_does_not_absorb_unaligned_body_paragraph() -> None:
     """A body paragraph after a caption-like heading still needs continuation geometry."""
     figure = _block(FIGURE, "", page=1, bbox=[81, 227, 848, 457])

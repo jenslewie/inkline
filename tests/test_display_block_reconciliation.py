@@ -729,6 +729,115 @@ class TestDisplayRunStopConditions:
         ]
         assert blocks[1]["text"].startswith("贼等不虞汉兵忽到")
 
+    def test_existing_display_before_float_body_resume_keeps_boundary_marker(
+        self,
+    ) -> None:
+        layout = _layout(body_left=110, body_right=882, page_width=1000)
+        body_before = _block(
+            PARAGRAPH,
+            "六天之后，赫定到达叶尔羌河分为诸多支流之处，每条支流都暗藏着危险。",
+            page=88,
+            bbox=[112, 628, 886, 678],
+        )
+        display = _block(
+            DISPLAY_BLOCK,
+            "河床变窄。水流以惊险的速度带着我们前行。水花在我们周围翻腾。",
+            page=88,
+            bbox=[157, 711, 886, 820],
+            attrs={
+                "display_boundary_after_float_body_resume": True,
+                "classification_evidence": ["set_off_display_before_float_body_resume"],
+            },
+        )
+        footnote = _block(
+            "footnote",
+            "1 Hedin, My Life as an Explorer.",
+            page=88,
+            bbox=[112, 880, 888, 915],
+        )
+        figure = _block(FIGURE, "", page=89, bbox=[213, 111, 998, 618])
+        body_after = _block(
+            PARAGRAPH,
+            "激流突然停了，大船陷入淤泥之中。",
+            page=89,
+            bbox=[107, 659, 876, 709],
+        )
+        blocks = [body_before, display, footnote, figure, body_after]
+
+        merge_cross_page_paragraphs(
+            blocks,
+            source_pdf=None,
+            layout=layout,
+            allow_missing_pdf_text=True,
+        )
+        reconcile_display_blocks(blocks, layout)
+
+        assert display["type"] == DISPLAY_BLOCK
+        assert display["attrs"]["display_boundary_after_float_body_resume"] is True
+        assert display["attrs"]["classification_evidence"] == [
+            "set_off_display_before_float_body_resume"
+        ]
+
+    def test_body_like_page_bottom_before_next_page_float_merges_with_body_resume(
+        self,
+    ) -> None:
+        layout = _layout(body_left=110, body_right=882, page_width=1000)
+        previous_body = _block(
+            PARAGRAPH,
+            "上一段正文已经跨页合并，建立下一页 figure 之后的正文流。",
+            page=164,
+            bbox=[107, 697, 878, 826],
+        )
+        previous_body["source"]["pages"] = [164, 165]
+        previous_body["source"]["spans"] = [
+            {"page": 164, "bbox": [108, 620, 878, 805], "block_id": "prev_left"},
+            {"page": 165, "bbox": [107, 697, 878, 826], "block_id": "prev_right"},
+        ]
+        figure_before = _block(FIGURE, "", page=165, bbox=[158, 113, 998, 615])
+        left = _block(
+            PARAGRAPH,
+            "学者们不能确定一个斯塔特有多重。12克？当时流通的一种斯塔",
+            page=165,
+            bbox=[153, 814, 876, 834],
+        )
+        footnote = _block("footnote", "1 注释。", page=165, bbox=[105, 885, 651, 919])
+        figure_next = _block(FIGURE, "", page=166, bbox=[0, 107, 823, 612])
+        right = _block(
+            PARAGRAPH,
+            "特就这么重。或者0.6克？这是当时在撒马尔罕流通的一种银币的重量。",
+            page=166,
+            bbox=[95, 693, 868, 743],
+        )
+        next_body = _block(
+            PARAGRAPH,
+            "讲到洛阳惨状的那位生意人比米娜要有钱多了。",
+            page=166,
+            bbox=[95, 752, 872, 920],
+        )
+        blocks = [previous_body, figure_before, left, footnote, figure_next, right, next_body]
+
+        merge_cross_page_paragraphs(
+            blocks,
+            source_pdf=None,
+            layout=layout,
+            allow_missing_pdf_text=True,
+        )
+
+        assert [block["type"] for block in blocks] == [
+            PARAGRAPH,
+            FIGURE,
+            PARAGRAPH,
+            "footnote",
+            FIGURE,
+            PARAGRAPH,
+        ]
+        assert blocks[2]["text"] == (
+            "学者们不能确定一个斯塔特有多重。12克？当时流通的一种斯塔"
+            "特就这么重。或者0.6克？这是当时在撒马尔罕流通的一种银币的重量。"
+        )
+        assert blocks[2]["source"]["pages"] == [165, 166]
+        assert blocks[2]["attrs"]["merge_reason"] == "cross_page_paragraph_continuation_across_float"
+
     def test_tight_body_flow_before_float_body_resume_not_promoted(
         self,
     ) -> None:
@@ -764,6 +873,67 @@ class TestDisplayRunStopConditions:
 
         assert body_intro["type"] == PARAGRAPH
         assert not (body_intro.get("attrs") or {}).get("display_boundary_after_float_body_resume")
+
+    def test_boundary_marker_without_fresh_set_off_geometry_stays_paragraph(self) -> None:
+        before = _block(
+            PARAGRAPH,
+            "根据唐朝正史，首都长安有30万户96万人。这一百万人中，大多数为汉人，"
+            "但在西市周围也有一个不小的外国人聚落。",
+            page=203,
+            bbox=[142, 264, 912, 487],
+        )
+        body = _block(
+            PARAGRAPH,
+            "这些移民也带来了自己的宗教习俗。城中至少有五座，也许有六座祆祠，"
+            "其中四座在西市附近。",
+            page=203,
+            bbox=[142, 496, 911, 632],
+            attrs={
+                "display_boundary_after_float_body_resume": True,
+                "classification_evidence": [
+                    "set_off_display_before_float_body_resume",
+                    "other_layout_signal",
+                ],
+            },
+        )
+        footnote = _block("footnote", "1 注释。", page=203, bbox=[140, 677, 910, 745])
+        blocks = [before, body, footnote]
+
+        reconcile_display_blocks(blocks, DEFAULT_LAYOUT)
+
+        assert body["type"] == PARAGRAPH
+        assert not (body.get("attrs") or {}).get("display_boundary_after_float_body_resume")
+        assert (body.get("attrs") or {}).get("classification_evidence") == [
+            "other_layout_signal"
+        ]
+
+    def test_cross_page_body_flow_after_float_resume_stays_paragraph(self) -> None:
+        before = _block(
+            PARAGRAPH,
+            "上一页正文跨页延续，最后一行仍在本页正文栏内结束。",
+            page=164,
+            bbox=[108, 620, 878, 805],
+        )
+        before["source"]["pages"] = [164, 165]
+        before["source"]["spans"] = [
+            {"page": 164, "bbox": [108, 620, 878, 805], "block_id": "left"},
+            {"page": 165, "bbox": [107, 697, 878, 805], "block_id": "right"},
+        ]
+        footnote = _block("footnote", "1 注释。", page=164, bbox=[105, 882, 878, 918])
+        figure = _block(FIGURE, "", page=165, bbox=[158, 113, 998, 615])
+        body = _block(
+            PARAGRAPH,
+            "学者们不能确定一个斯塔特有多重。12克？当时流通的一种斯塔",
+            page=165,
+            bbox=[153, 814, 876, 834],
+            attrs={"display_boundary_after_float_body_resume": True},
+        )
+        blocks = [before, footnote, figure, body]
+
+        reconcile_display_blocks(blocks, DEFAULT_LAYOUT)
+
+        assert body["type"] == PARAGRAPH
+        assert not (body.get("attrs") or {}).get("display_boundary_after_float_body_resume")
 
 
 # ---------------------------------------------------------------------------
@@ -1033,6 +1203,55 @@ class TestBodyParagraphSplit:
         assert blocks[2]["text"].startswith("玄奘不同意")
         assert "玄奘坚持要走" in blocks[2]["text"]
         assert [span["block_id"] for span in blocks[1]["source"]["spans"]] == ["display"]
+
+    def test_same_page_display_continuation_leading_body_intro_splits(self) -> None:
+        before = _block(
+            PARAGRAPH,
+            "今天就算再不细心的游人也能注意到克孜尔石窟的窟壁上有很多壁画被挖走了。",
+            page=95,
+            bbox=[119, 197, 892, 305],
+        )
+        display = _block(
+            DISPLAY_BLOCK,
+            (
+                "勒柯克发明了一种转移这些易碎壁画的新技术。他不无骄傲地描述道：\n"
+                "壁画是在窟壁一层特殊材料上绘制的。此材料是用黏土混合上富含植物"
+                "纤维的驼粪、碎麦秆等而成。"
+            ),
+            page=95,
+            bbox=[165, 313, 891, 652],
+            attrs={"merge_reason": "same_page_display_block_continuation"},
+        )
+        display["source"]["spans"] = [
+            {
+                "page": 95,
+                "bbox": [165, 313, 888, 334],
+                "block_id": "intro",
+                "text": "勒柯克发明了一种转移这些易碎壁画的新技术。他不无骄傲地描述道：",
+            },
+            {
+                "page": 95,
+                "bbox": [165, 371, 891, 652],
+                "block_id": "quote",
+                "text": "壁画是在窟壁一层特殊材料上绘制的。此材料是用黏土混合上富含植物纤维的驼粪、碎麦秆等而成。",
+            },
+        ]
+        after = _block(
+            PARAGRAPH,
+            "这种一步一步的描述读后让人不由得倒吸一口凉气。",
+            page=95,
+            bbox=[116, 691, 888, 799],
+        )
+        blocks = [before, display, after]
+
+        reconcile_display_block_body_paragraph_split(blocks, DEFAULT_LAYOUT)
+
+        assert len(blocks) == 4
+        assert blocks[1]["type"] == PARAGRAPH
+        assert blocks[2]["type"] == DISPLAY_BLOCK
+        assert blocks[1]["text"].startswith("勒柯克发明")
+        assert blocks[2]["text"].startswith("壁画是在")
+        assert [span["block_id"] for span in blocks[2]["source"]["spans"]] == ["quote"]
 
 
 # ---------------------------------------------------------------------------

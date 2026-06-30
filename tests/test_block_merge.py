@@ -1,4 +1,8 @@
-from inkline.parsers.mineru.reconcile.block_merge import _merge_block_pair
+from inkline.parsers.mineru.reconcile.block_merge import (
+    _merge_block_pair,
+    _refresh_display_block_attrs,
+)
+from inkline.parsers.mineru.schema.block_types import DISPLAY_BLOCK
 
 
 def test_merge_block_pair_rebases_right_inline_note_offset() -> None:
@@ -45,3 +49,22 @@ def test_merge_block_pair_rebases_right_inline_note_offset() -> None:
     assert "note_refs" not in left["attrs"]
     assert [run["type"] for run in left["attrs"]["inline_runs"]] == ["text", "note_ref", "text"]
     assert left["attrs"]["inline_runs"][0]["text"].endswith(right_prefix + "  ")
+
+
+def test_refresh_display_block_attrs_preserves_footnote_merge_display_reason() -> None:
+    block = {
+        "block_id": "b001634",
+        "type": DISPLAY_BLOCK,
+        "text": "更欲镌龛一所，踌躇瞻眺，余所竟无，唯此一岭，磋峨可劈激地祇于下，龟筮告吉，揆日兴工。",
+        "source": {"page": 253, "bbox": [170, 106, 888, 812], "pages": [253, 254]},
+        "attrs": {
+            "merge_reason": "cross_page_paragraph_continuation_across_footnote",
+            "merge_evidence": {"left_ends_with_terminal_punctuation": False},
+        },
+    }
+
+    _refresh_display_block_attrs(block)
+
+    assert block["type"] == DISPLAY_BLOCK
+    assert block["attrs"]["merge_reason"] == "display_block_continuation_across_footnotes"
+    assert block["attrs"]["merge_evidence"] == {"footnote_interrupted_display_block": True}
