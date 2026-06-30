@@ -8,10 +8,8 @@ correctly (patch the definition module namespace).
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, cast
 
@@ -19,9 +17,24 @@ from ....analysis.page_geometry import PageGeometry
 from ....schema.models import CanonicalBlock
 from ...block_access import block_id
 from . import api as qwen_api
+from . import evidence_store
 from . import page_plan as qwen_page_plan
 from . import prompt as qwen_prompt
 from . import types as qwen_types
+
+_avg_seconds = evidence_store.avg_seconds
+_collect_summary = evidence_store.collect_summary
+_duration = evidence_store.duration
+_log_debug = evidence_store.log_debug
+_log_info = evidence_store.log_info
+_log_warning = evidence_store.log_warning
+_new_collect_stats = evidence_store.new_collect_stats
+_now_iso = evidence_store.now_iso
+_read_existing_evidence = evidence_store.read_existing_evidence
+_reset_timing_log = evidence_store.reset_timing_log
+_update_collect_stats = evidence_store.update_collect_stats
+_write_evidence = evidence_store.write_evidence
+_write_timing_event = evidence_store.write_timing_event
 
 
 @dataclass
@@ -93,7 +106,9 @@ def _collect_qwen_marker_evidence(
     evidence: List[qwen_types.QwenMarkerPageEvidence] = []
     with fitz.open(config.source_pdf) as doc:
         for page_index, page in enumerate(collect_pass.page_list, start=1):
-            result = _collect_qwen_page_result(doc, page_index, page, config, pass_name, collect_pass)
+            result = _collect_qwen_page_result(
+                doc, page_index, page, config, pass_name, collect_pass
+            )
             if result is None:
                 continue
             evidence.append(result.item)
@@ -891,167 +906,3 @@ def _collect_single_paragraph_body_refs(
 
 def _page_footnote_markers_by_page(blocks: List[CanonicalBlock]) -> Dict[int, List[str]]:
     return qwen_page_plan._page_footnote_markers_by_page(blocks)
-
-
-def _log_info(message: str, *args: Any) -> None:
-    try:
-        from loguru import logger  # pyright: ignore[reportMissingImports]
-    except ImportError:
-        return
-    logger.info(message, *args)
-
-
-def _log_debug(message: str, *args: Any) -> None:
-    try:
-        from loguru import logger  # pyright: ignore[reportMissingImports]
-    except ImportError:
-        return
-    logger.debug(message, *args)
-
-
-def _log_warning(message: str, *args: Any) -> None:
-    try:
-        from loguru import logger  # pyright: ignore[reportMissingImports]
-    except ImportError:
-        return
-    logger.warning(message, *args)
-
-
-def _new_collect_stats() -> Dict[str, Any]:
-    return {
-        "pages": 0,
-        "cache_hits": 0,
-        "model_calls": 0,
-        "footnote_defs": 0,
-        "body_refs": 0,
-        "page_seconds": 0.0,
-    }
-
-
-def _update_collect_stats(
-    stats: Dict[str, Any],
-    cache_hit: bool,
-    model_calls: List[Dict[str, Any]],
-    footnote_def_count: int,
-    body_ref_count: int,
-    page_seconds: float,
-) -> None:
-    stats["pages"] += 1
-    stats["cache_hits"] += int(cache_hit)
-    stats["model_calls"] += len(model_calls)
-    stats["footnote_defs"] += footnote_def_count
-    stats["body_refs"] += body_ref_count
-    stats["page_seconds"] += page_seconds
-
-
-def _collect_summary(stats: Dict[str, Any], pass_seconds: float) -> Dict[str, Any]:
-    return {
-        "pages": stats["pages"],
-        "cache_hits": stats["cache_hits"],
-        "cache_misses": stats["pages"] - stats["cache_hits"],
-        "model_calls": stats["model_calls"],
-        "footnote_defs": stats["footnote_defs"],
-        "body_refs": stats["body_refs"],
-        "total_page_seconds": round(float(stats["page_seconds"]), 6),
-        "avg_page_seconds": _avg_seconds(stats["page_seconds"], stats["pages"]),
-        "pass_seconds": pass_seconds,
-    }
-
-
-def _avg_seconds(total: float, count: int) -> float:
-    return round(total / count, 6) if count else 0.0
-
-
-def _read_existing_evidence(path: Path) -> Dict[tuple[int, str], qwen_types.QwenMarkerPageEvidence]:
-    if not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    items = payload.get("pages") if isinstance(payload, dict) else payload
-    if not isinstance(items, list):
-        return {}
-    out: Dict[tuple[int, str], qwen_types.QwenMarkerPageEvidence] = {}
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        page = item.get("page")
-        image = item.get("image")
-        if not isinstance(page, int) or not isinstance(image, str):
-            continue
-        evidence = qwen_types.QwenMarkerPageEvidence(
-            page=page,
-            image=image,
-            crop_bbox_pdf=[float(value) for value in item.get("crop_bbox_pdf") or []],
-            dpi=int(item.get("dpi") or 0),
-            raw_json=dict(item.get("raw_json") or {}),
-            body_refs=qwen_api._clean_body_refs(item.get("body_refs")),
-            footnote_defs=qwen_api._clean_footnote_defs(item.get("footnote_defs")),
-            prompt_version=int(item.get("prompt_version") or 0),
-        )
-        if evidence.prompt_version != qwen_types._PROMPT_VERSION:
-            continue
-        key = (page, Path(image).name)
-        existing = out.get(key)
-        out[key] = (
-            _merge_cached_qwen_evidence(existing, evidence) if existing is not None else evidence
-        )
-    return out
-
-
-def _merge_cached_qwen_evidence(
-    left: qwen_types.QwenMarkerPageEvidence, right: qwen_types.QwenMarkerPageEvidence
-) -> qwen_types.QwenMarkerPageEvidence:
-    raw_json = {**left.raw_json, **right.raw_json}
-    return qwen_types.QwenMarkerPageEvidence(
-        page=right.page,
-        image=right.image or left.image,
-        crop_bbox_pdf=right.crop_bbox_pdf or left.crop_bbox_pdf,
-        dpi=right.dpi or left.dpi,
-        raw_json=raw_json,
-        body_refs=right.body_refs or left.body_refs,
-        footnote_defs=right.footnote_defs or left.footnote_defs,
-        prompt_version=right.prompt_version or left.prompt_version,
-    )
-
-
-def _write_evidence(path: Path, evidence: Sequence[qwen_types.QwenMarkerPageEvidence]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {"engine": "qwen_marker_locator", "pages": [item.to_json() for item in evidence]},
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
-
-def _timing_log_path(config: qwen_types.QwenMarkerLocatorConfig) -> Path:
-    return config.timing_log_path or (config.artifact_dir / "qwen_marker_timing.jsonl")
-
-
-def _reset_timing_log(config: qwen_types.QwenMarkerLocatorConfig) -> None:
-    path = _timing_log_path(config)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("", encoding="utf-8")
-
-
-def _write_timing_event(config: qwen_types.QwenMarkerLocatorConfig, event: Dict[str, Any]) -> None:
-    path = _timing_log_path(config)
-    payload = {
-        "schema": "qwen_marker_timing.v1",
-        **event,
-    }
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-        f.write("\n")
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
-
-
-def _duration(start: float) -> float:
-    return round(time.perf_counter() - start, 6)
