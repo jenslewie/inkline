@@ -8,7 +8,7 @@ from Qwen page items.
 from __future__ import annotations
 
 from itertools import pairwise
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from ...extraction.text import normalize_note_marker, normalize_ws
 from ...schema.models import CanonicalBlock
@@ -24,6 +24,19 @@ from .marker_offsets import (
 )
 from .marker_patterns import BODY_TYPES, TERMINAL_PUNCTUATION, _marker_int
 from .scopes import _NoteContext
+
+
+class _QwenBodyRefMatchInputs(NamedTuple):
+    page: int
+    marker: str
+    item: Dict[str, Any]
+    before: str
+    after: str
+    before_for_match: str
+    after_for_match: str
+    quote: str
+    requested_block_id: str
+    allow_existing: bool
 
 
 def _qwen_marker_page_items(qwen_marker_pages: Any) -> List[Dict[str, Any]]:
@@ -63,71 +76,132 @@ def _locate_qwen_body_ref(
 ) -> Optional[Tuple[CanonicalBlock, _InlineMarkerLocation]]:
     before = str(item.get("before_text") or "")
     after = str(item.get("after_text") or "")
-    before_for_match = _qwen_context_without_neighbor_markers(before)
-    after_for_match = _qwen_context_without_neighbor_markers(after)
-    quote = str(item.get("quote") or "")
-    requested_block_id = str(item.get("block_id") or "")
-    candidates: List[Tuple[int, CanonicalBlock, _InlineMarkerLocation]] = []
+    match_inputs = _QwenBodyRefMatchInputs(
+        page=page,
+        marker=marker,
+        item=item,
+        before=before,
+        after=after,
+        before_for_match=_qwen_context_without_neighbor_markers(before),
+        after_for_match=_qwen_context_without_neighbor_markers(after),
+        quote=str(item.get("quote") or ""),
+        requested_block_id=str(item.get("block_id") or ""),
+        allow_existing=allow_existing,
+    )
+    requested_candidates: List[Tuple[int, CanonicalBlock, _InlineMarkerLocation]] = []
+    fallback_candidates: List[Tuple[int, CanonicalBlock, _InlineMarkerLocation]] = []
     for block_index, block in enumerate(blocks):
-        if block.get("type") not in BODY_TYPES or page not in context.pages_for(block):
+        candidate = _qwen_body_ref_candidate(block_index, block, context, match_inputs)
+        if candidate is None:
             continue
-        if requested_block_id and _qwen_block_id(block) != requested_block_id:
-            continue
-        if not allow_existing and _existing_ref_marker_on_page(block, marker, page, context):
-            continue
-        text = str(block.get("text") or "")
-        offset = _qwen_marker_offset_in_text(text, marker, before_for_match, after_for_match, quote)
-        visible_marker = _qwen_visible_marker_at(text, marker, offset) if offset is not None else ""
-        used_visible_fallback = False
-        if requested_block_id and not visible_marker:
-            fallback = _unique_distinctive_visible_marker(text, marker)
-            if fallback is not None:
-                offset, visible_marker = fallback
-                used_visible_fallback = True
-        if offset is None:
-            continue
-        candidates.append(
-            (
-                block_index,
-                block,
-                _InlineMarkerLocation(
-                    char_index=offset,
-                    source="qwen_marker_locator",
-                    confidence=str(item.get("confidence") or "candidate"),
-                    evidence={
-                        "qwen_marker": marker,
-                        "qwen_quote": quote,
-                        **_qwen_body_ref_source_evidence(item),
-                        **_qwen_matching_context_evidence(
-                            before, after, before_for_match, after_for_match
-                        ),
-                        **(
-                            {
-                                "qwen_visible_marker_text": visible_marker,
-                                "qwen_visible_marker_stripped": True,
-                                **(
-                                    {"qwen_unique_visible_marker_fallback": True}
-                                    if used_visible_fallback
-                                    else {}
-                                ),
-                            }
-                            if visible_marker
-                            else {}
-                        ),
-                    },
-                ),
-            )
+        block_id_matches_request = bool(
+            match_inputs.requested_block_id
+            and _qwen_block_id(block) == match_inputs.requested_block_id
         )
+        target_candidates = (
+            fallback_candidates
+            if match_inputs.requested_block_id and not block_id_matches_request
+            else requested_candidates
+        )
+        target_candidates.append(candidate)
+    candidates = requested_candidates
+    if match_inputs.requested_block_id and not candidates:
+        candidates = fallback_candidates
+        crop_match = _select_candidate_by_crop_geometry(candidates, item)
+        if crop_match is not None:
+            return crop_match
     if len(candidates) == 1:
         _index, block, inline_location = candidates[0]
         return block, inline_location
     if candidates:
         return None
-    if requested_block_id:
-        return None
     return _locate_qwen_cross_block_body_ref(
         blocks, context, page, marker, item, allow_existing=allow_existing
     )
+
+
+def _qwen_body_ref_candidate(
+    block_index: int,
+    block: CanonicalBlock,
+    context: _NoteContext,
+    inputs: _QwenBodyRefMatchInputs,
+) -> Optional[Tuple[int, CanonicalBlock, _InlineMarkerLocation]]:
+    if block.get("type") not in BODY_TYPES or inputs.page not in context.pages_for(block):
+        return None
+    if (
+        not inputs.allow_existing
+        and _existing_ref_marker_on_page(block, inputs.marker, inputs.page, context)
+    ):
+        return None
+    text = str(block.get("text") or "")
+    offset = _qwen_marker_offset_in_text(
+        text,
+        inputs.marker,
+        inputs.before_for_match,
+        inputs.after_for_match,
+        inputs.quote,
+    )
+    visible_marker = (
+        _qwen_visible_marker_at(text, inputs.marker, offset) if offset is not None else ""
+    )
+    block_id_matches_request = bool(
+        inputs.requested_block_id and _qwen_block_id(block) == inputs.requested_block_id
+    )
+    if (
+        inputs.requested_block_id
+        and not block_id_matches_request
+        and not visible_marker
+        and not _is_block_crop_body_ref(inputs.item)
+    ):
+        return None
+    used_visible_fallback = False
+    if block_id_matches_request and not visible_marker:
+        fallback = _unique_distinctive_visible_marker(text, inputs.marker)
+        if fallback is not None:
+            offset, visible_marker = fallback
+            used_visible_fallback = True
+    if offset is None:
+        return None
+    return (
+        block_index,
+        block,
+        _InlineMarkerLocation(
+            char_index=offset,
+            source="qwen_marker_locator",
+            confidence=str(inputs.item.get("confidence") or "candidate"),
+            evidence=_qwen_body_ref_location_evidence(
+                inputs,
+                visible_marker=visible_marker,
+                used_visible_fallback=used_visible_fallback,
+            ),
+        ),
+    )
+
+
+def _qwen_body_ref_location_evidence(
+    inputs: _QwenBodyRefMatchInputs,
+    *,
+    visible_marker: str,
+    used_visible_fallback: bool,
+) -> Dict[str, Any]:
+    evidence = {
+        "qwen_marker": inputs.marker,
+        "qwen_quote": inputs.quote,
+        **_qwen_body_ref_source_evidence(inputs.item),
+        **_qwen_matching_context_evidence(
+            inputs.before, inputs.after, inputs.before_for_match, inputs.after_for_match
+        ),
+    }
+    if visible_marker:
+        evidence.update(
+            {
+                "qwen_visible_marker_text": visible_marker,
+                "qwen_visible_marker_stripped": True,
+            }
+        )
+        if used_visible_fallback:
+            evidence["qwen_unique_visible_marker_fallback"] = True
+    return evidence
 
 
 def _unique_distinctive_visible_marker(text: str, marker: str) -> Optional[Tuple[int, str]]:
@@ -175,6 +249,74 @@ def _qwen_body_ref_source_evidence(item: Dict[str, Any]) -> Dict[str, Any]:
         value = item.get(source_key)
         if value:
             out[evidence_key] = value
+    return out
+
+
+def _is_block_crop_body_ref(item: Dict[str, Any]) -> bool:
+    return str(item.get("body_ref_source") or "") == "paragraph_crop"
+
+
+def _select_candidate_by_crop_geometry(
+    candidates: List[Tuple[int, CanonicalBlock, _InlineMarkerLocation]],
+    item: Dict[str, Any],
+) -> Optional[Tuple[CanonicalBlock, _InlineMarkerLocation]]:
+    if len(candidates) < 2:
+        return None
+    visible_candidates = [
+        candidate
+        for candidate in candidates
+        if candidate[2].evidence.get("qwen_visible_marker_text")
+    ]
+    if len(visible_candidates) == 1:
+        _index, block, inline_location = visible_candidates[0]
+        inline_location.evidence["qwen_stale_block_id_resolved_by_visible_marker"] = True
+        return block, inline_location
+    if visible_candidates:
+        candidates = visible_candidates
+    crop_bbox = _numeric_bbox(item.get("crop_bbox_pdf"))
+    page_bbox = _numeric_bbox(item.get("qwen_page_crop_bbox_pdf"))
+    if crop_bbox is None or page_bbox is None:
+        return None
+    page_height = page_bbox[3] - page_bbox[1]
+    if page_height <= 0:
+        return None
+
+    block_bboxes: List[Tuple[CanonicalBlock, _InlineMarkerLocation, List[float]]] = []
+    page_bottom = 0.0
+    for _index, block, inline_location in candidates:
+        bbox = _numeric_bbox((block.get("source") or {}).get("bbox"))
+        if bbox is None:
+            continue
+        block_bboxes.append((block, inline_location, bbox))
+        page_bottom = max(page_bottom, bbox[3])
+    if len(block_bboxes) < 2:
+        return None
+
+    content_height = max(page_height if page_height <= 1200 else 1000.0, page_bottom)
+    crop_center_y = (crop_bbox[1] + crop_bbox[3]) / 2
+    target_y = ((crop_center_y - page_bbox[1]) / page_height) * content_height
+    ranked = sorted(
+        (
+            (abs(((bbox[1] + bbox[3]) / 2) - target_y), block, inline_location)
+            for block, inline_location, bbox in block_bboxes
+        ),
+        key=lambda value: value[0],
+    )
+    if len(ranked) >= 2 and abs(ranked[0][0] - ranked[1][0]) < 1.0:
+        return None
+    _distance, block, inline_location = ranked[0]
+    inline_location.evidence["qwen_stale_block_id_resolved_by_crop_geometry"] = True
+    return block, inline_location
+
+
+def _numeric_bbox(value: Any) -> Optional[List[float]]:
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    out: List[float] = []
+    for item in value:
+        if not isinstance(item, (int, float)):
+            return None
+        out.append(float(item))
     return out
 
 

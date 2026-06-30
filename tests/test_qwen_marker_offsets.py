@@ -92,6 +92,310 @@ def test_qwen_does_not_override_existing_equation_inline_run() -> None:
     assert block["attrs"]["inline_runs"][0]["text"].endswith("硇砂  ")
 
 
+def test_qwen_keeps_text_when_visible_marker_matches_valid_existing_inline_run() -> None:
+    block = {
+        "block_id": "b000350",
+        "type": "paragraph",
+        "text": "让当地统治者学会了在礼物上附上木简。14号室出土的三根木简。",
+        "source": {"page": 59},
+        "attrs": {
+            "note_refs": [
+                {
+                    "marker": "1",
+                    "source": "equation_inline",
+                    "source_page": 59,
+                    "raw_marker": "^{1}",
+                    "target_note_id": "note_b000361",
+                }
+            ],
+            "inline_runs": [
+                {"type": "text", "text": "让当地统治者学会了在礼物上附上木简。"},
+                {
+                    "type": "note_ref",
+                    "marker": "1",
+                    "source": "equation_inline",
+                    "source_page": 59,
+                    "target_note_id": "note_b000361",
+                },
+                {"type": "text", "text": "14号室出土的三根木简。"},
+            ],
+        },
+    }
+
+    changed = _update_existing_qwen_ref_inline_location(
+        block,
+        "1",
+        59,
+        {
+            "marker": "1",
+            "before_text": "附上木简。",
+            "after_text": "14号室出",
+            "quote": "附上木简。114号室出",
+            "confidence": "high",
+        },
+        _InlineMarkerLocation(
+            char_index=block["text"].index("1"),
+            source="qwen_marker_locator",
+            confidence="high",
+            evidence={
+                "qwen_marker": "1",
+                "qwen_visible_marker_text": "1",
+                "qwen_visible_marker_stripped": True,
+            },
+        ),
+    )
+
+    assert changed is False
+    assert block["text"] == "让当地统治者学会了在礼物上附上木简。14号室出土的三根木简。"
+    assert _inline_runs_text(block["attrs"]["inline_runs"]) == block["text"]
+    ref = next(run for run in block["attrs"]["inline_runs"] if run["type"] == "note_ref")
+    assert "evidence" not in ref
+
+
+def test_qwen_inserts_ref_without_stripping_marker_that_starts_after_text() -> None:
+    block = {
+        "block_id": "b000350",
+        "type": "paragraph",
+        "text": (
+            "让当地统治者学会了在礼物上附上木简。"
+            "14号室出土的三根木简上使用了篡位者王莽的特殊语言。"
+        ),
+        "source": {"page": 59},
+        "attrs": {
+            "note_refs": [
+                {
+                    "marker": "1",
+                    "source": "equation_inline",
+                    "source_page": 59,
+                    "raw_marker": "^{1}",
+                    "target_note_id": "note_b000361",
+                }
+            ],
+            "inline_runs": [
+                {
+                    "type": "text",
+                    "text": (
+                        "让当地统治者学会了在礼物上附上木简。"
+                        "14号室出土的三根木简上使用了篡位者王莽的特殊语言。"
+                    ),
+                },
+            ],
+        },
+    }
+
+    changed = _update_existing_qwen_ref_inline_location(
+        block,
+        "1",
+        59,
+        {
+            "marker": "1",
+            "before_text": "附上木简。",
+            "after_text": "14号室出",
+            "quote": "附上木简。114号室出",
+            "confidence": "high",
+        },
+        _InlineMarkerLocation(
+            char_index=block["text"].index("14号室"),
+            source="qwen_marker_locator",
+            confidence="high",
+            evidence={
+                "qwen_marker": "1",
+                "qwen_visible_marker_text": "1",
+                "qwen_visible_marker_stripped": True,
+            },
+        ),
+    )
+
+    assert changed is True
+    assert block["text"] == (
+        "让当地统治者学会了在礼物上附上木简。"
+        "14号室出土的三根木简上使用了篡位者王莽的特殊语言。"
+    )
+    runs = block["attrs"]["inline_runs"]
+    assert _inline_runs_text(runs) == block["text"]
+    ref = next(run for run in runs if run.get("type") == "note_ref")
+    assert ref["marker"] == "1"
+    assert ref["evidence"]["qwen_visible_marker_kept_as_after_text_prefix"] is True
+    assert "qwen_visible_marker_stripped" not in ref["evidence"]
+
+
+def test_qwen_reused_block_id_falls_back_to_text_anchor_when_ids_drift() -> None:
+    blocks = [
+        {
+            "block_id": "b000350",
+            "type": "footnote",
+            "text": "5 玉被称做“琅玕”和“玫瑰”。",
+            "source": {"page": 58},
+        },
+        {
+            "block_id": "b000352",
+            "type": "paragraph",
+            "text": "让当地统治者学会了在礼物上附上木简。14号室出土的三根木简。",
+            "source": {
+                "page": 59,
+                "spans": [
+                    {
+                        "page": 59,
+                        "bbox": [110, 115, 886, 309],
+                        "text": "让当地统治者学会了在礼物上附上木简。14号室出土的三根木简。",
+                    }
+                ],
+            },
+        },
+    ]
+    context = _NoteContext(blocks)
+
+    located = _locate_qwen_body_ref(
+        blocks,
+        context,
+        59,
+        "1",
+        {
+            "marker": "1",
+            "before_text": "附上木简。",
+            "after_text": "14号室出",
+            "quote": "附上木简。114号室出",
+            "confidence": "high",
+            "block_id": "b000350",
+        },
+    )
+
+    assert located is not None
+    block, inline_location = located
+    assert block["block_id"] == "b000352"
+    assert inline_location.char_index == block["text"].index("1")
+    assert inline_location.evidence["qwen_visible_marker_text"] == "1"
+
+
+def test_qwen_reused_block_crop_id_falls_back_without_visible_marker() -> None:
+    blocks = [
+        {
+            "block_id": "b000302",
+            "type": "footnote",
+            "text": "4 正史编纂者、编撰或出版时间的列表见 Endymion Wilkinson。",
+            "source": {"page": 52},
+        },
+        {
+            "block_id": "b000297",
+            "type": "paragraph",
+            "text": "贵霜王朝曾几次派兵进入西域。公元90年，贵霜王派七万军队开赴西域。",
+            "source": {"page": 52},
+        },
+    ]
+    context = _NoteContext(blocks)
+
+    located = _locate_qwen_body_ref(
+        blocks,
+        context,
+        52,
+        "4",
+        {
+            "marker": "4",
+            "before_text": "进入西域。",
+            "after_text": "公元90年，贵霜王",
+            "quote": "进入西域。4公元90年，贵霜王",
+            "confidence": "high",
+            "block_id": "b000302",
+            "body_ref_source": "paragraph_crop",
+        },
+    )
+
+    assert located is not None
+    block, inline_location = located
+    assert block["block_id"] == "b000297"
+    assert inline_location.char_index == block["text"].index("公元90年")
+    assert "qwen_visible_marker_text" not in inline_location.evidence
+
+
+def test_qwen_reused_block_crop_id_uses_geometry_to_disambiguate_text_matches() -> None:
+    blocks = [
+        {
+            "block_id": "b000292",
+            "type": "paragraph",
+            "text": "山中的一个堡垒，人们可以从这里进入西域。还有一些其他语言的题记。",
+            "source": {"page": 52, "bbox": [110, 90, 880, 180]},
+        },
+        {
+            "block_id": "b000302",
+            "type": "footnote",
+            "text": "4 正史编纂者、编撰或出版时间的列表见 Endymion Wilkinson。",
+            "source": {"page": 52, "bbox": [110, 880, 880, 915]},
+        },
+        {
+            "block_id": "b000297",
+            "type": "paragraph",
+            "text": "贵霜王朝曾几次派兵进入西域。公元90年，贵霜王派七万军队开赴西域。",
+            "source": {"page": 52, "bbox": [110, 390, 880, 565]},
+        },
+    ]
+    context = _NoteContext(blocks)
+
+    located = _locate_qwen_body_ref(
+        blocks,
+        context,
+        52,
+        "4",
+        {
+            "marker": "4",
+            "before_text": "进入西域。",
+            "after_text": "公元90年，贵霜王",
+            "quote": "进入西域。4公元90年，贵霜王",
+            "confidence": "high",
+            "block_id": "b000302",
+            "body_ref_source": "paragraph_crop",
+            "crop_bbox_pdf": [141.224, 814.356, 1264.748, 1185.635],
+            "qwen_page_crop_bbox_pdf": [0.0, 0.0, 1418.74, 2098.12],
+        },
+    )
+
+    assert located is not None
+    block, inline_location = located
+    assert block["block_id"] == "b000297"
+    assert inline_location.evidence["qwen_stale_block_id_resolved_by_crop_geometry"] is True
+
+
+def test_qwen_reused_block_crop_id_prefers_visible_marker_over_geometry() -> None:
+    blocks = [
+        {
+            "block_id": "b001346",
+            "type": "paragraph",
+            "text": "此外还写着银饼的确切重量和称重的官员。",
+            "source": {"page": 208, "bbox": [84, 492, 854, 718]},
+        },
+        {
+            "block_id": "b001347",
+            "type": "paragraph",
+            "text": "官府收到银饼后会将其熔成大块，以及银块重量和称重的官员。¹因为中央的官员会把银饼熔成大块。",
+            "source": {"page": 208, "bbox": [83, 117, 894, 864]},
+        },
+    ]
+    context = _NoteContext(blocks)
+
+    located = _locate_qwen_body_ref(
+        blocks,
+        context,
+        208,
+        "1",
+        {
+            "marker": "1",
+            "before_text": "员。",
+            "after_text": "因为",
+            "quote": "员。1因为",
+            "confidence": "high",
+            "block_id": "b001352",
+            "body_ref_source": "paragraph_crop",
+            "crop_bbox_pdf": [105.755, 1504.729, 1223.604, 1819.523],
+            "qwen_page_crop_bbox_pdf": [0.0, 0.0, 1418.74, 2098.12],
+        },
+    )
+
+    assert located is not None
+    block, inline_location = located
+    assert block["block_id"] == "b001347"
+    assert inline_location.evidence["qwen_visible_marker_text"] == "¹"
+    assert inline_location.evidence["qwen_stale_block_id_resolved_by_visible_marker"] is True
+
+
 def test_qwen_overrides_invalid_existing_equation_inline_run() -> None:
     block = {
         "block_id": "b1",

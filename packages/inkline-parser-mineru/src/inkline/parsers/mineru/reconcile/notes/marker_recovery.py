@@ -36,6 +36,15 @@ from .marker_offsets import (
 from .marker_patterns import BODY_TYPES, TERMINAL_PUNCTUATION, _marker_int, _visible_note_candidates
 from .scopes import _EndnoteSectionStrategy, _NoteContext
 
+_LocatedQwenItem = Tuple[
+    CanonicalBlock,
+    str,
+    int,
+    Dict[str, Any],
+    _InlineMarkerLocation,
+    Optional[str],
+]
+
 
 def _recover_direct_page_footnote_qwen_refs(
     blocks: List[CanonicalBlock],
@@ -134,6 +143,7 @@ def _collect_page_footnote_qwen_matches(
     for item in evidence.get("body_refs") or []:
         if not isinstance(item, dict):
             continue
+        item = _with_qwen_page_crop_bbox(item, evidence)
         marker = normalize_note_marker(str(item.get("marker") or "").replace("＊", "*"))
         if not marker or marker not in page_defs_text or marker in existing:
             if marker and marker in page_defs_text and marker in existing:
@@ -176,6 +186,7 @@ def _apply_page_footnote_qwen_matches(
     ]
     applicable_items.sort(key=lambda located: (block_index[id(located[0])], -located[3].char_index))
     for target, marker, item, inline_location in applicable_items:
+        inline_location = _prepare_qwen_visible_marker_location(target, item, inline_location)
         _strip_qwen_visible_marker(target, inline_location)
         _append_note_ref(
             target,
@@ -215,29 +226,13 @@ def _recover_direct_scoped_endnote_qwen_refs(
     if not defs_by_scope:
         return
     existing_by_scope = _existing_body_ref_markers_by_scope(blocks, context)
-    located_items: List[
-        Tuple[CanonicalBlock, str, int, Dict[str, Any], _InlineMarkerLocation, Optional[str]]
-    ] = []
-    for evidence in _qwen_marker_page_items(qwen_marker_pages):
-        page = evidence.get("page")
-        if not isinstance(page, int):
-            continue
-        for item in evidence.get("body_refs") or []:
-            if not isinstance(item, dict):
-                continue
-            marker = normalize_note_marker(str(item.get("marker") or "").replace("＊", "*"))
-            if not marker:
-                continue
-            located = _locate_qwen_body_ref(blocks, context, page, marker, item)
-            if located is None:
-                continue
-            target, inline_location = located
-            scope = context.scope_for(target)
-            if marker not in defs_by_scope.get(scope, set()):
-                continue
-            if marker in existing_by_scope.get(scope, set()):
-                continue
-            located_items.append((target, marker, page, item, inline_location, scope))
+    located_items = _collect_direct_scoped_endnote_qwen_items(
+        blocks,
+        context,
+        qwen_marker_pages,
+        defs_by_scope=defs_by_scope,
+        existing_by_scope=existing_by_scope,
+    )
 
     ambiguous_keys = _ambiguous_qwen_location_keys(
         [
@@ -259,6 +254,7 @@ def _recover_direct_scoped_endnote_qwen_refs(
             continue
         if marker in existing_by_scope.get(scope, set()):
             continue
+        inline_location = _prepare_qwen_visible_marker_location(target, item, inline_location)
         _strip_qwen_visible_marker(target, inline_location)
         _append_note_ref(
             target,
@@ -277,6 +273,62 @@ def _recover_direct_scoped_endnote_qwen_refs(
             inline_location=inline_location,
         )
         existing_by_scope.setdefault(scope, set()).add(marker)
+
+
+def _collect_direct_scoped_endnote_qwen_items(
+    blocks: List[CanonicalBlock],
+    context: _NoteContext,
+    qwen_marker_pages: Any,
+    *,
+    defs_by_scope: Dict[Optional[str], Set[str]],
+    existing_by_scope: Dict[Optional[str], Set[str]],
+) -> List[_LocatedQwenItem]:
+    located_items: List[_LocatedQwenItem] = []
+    for evidence in _qwen_marker_page_items(qwen_marker_pages):
+        page = evidence.get("page")
+        if not isinstance(page, int):
+            continue
+        for item in evidence.get("body_refs") or []:
+            located = _direct_scoped_endnote_qwen_item(
+                blocks,
+                context,
+                page,
+                item,
+                defs_by_scope=defs_by_scope,
+                existing_by_scope=existing_by_scope,
+                evidence=evidence,
+            )
+            if located is not None:
+                located_items.append(located)
+    return located_items
+
+
+def _direct_scoped_endnote_qwen_item(
+    blocks: List[CanonicalBlock],
+    context: _NoteContext,
+    page: int,
+    item: Any,
+    *,
+    defs_by_scope: Dict[Optional[str], Set[str]],
+    existing_by_scope: Dict[Optional[str], Set[str]],
+    evidence: Dict[str, Any],
+) -> Optional[_LocatedQwenItem]:
+    if not isinstance(item, dict):
+        return None
+    item = _with_qwen_page_crop_bbox(item, evidence)
+    marker = normalize_note_marker(str(item.get("marker") or "").replace("＊", "*"))
+    if not marker:
+        return None
+    located = _locate_qwen_body_ref(blocks, context, page, marker, item)
+    if located is None:
+        return None
+    target, inline_location = located
+    scope = context.scope_for(target)
+    if marker not in defs_by_scope.get(scope, set()):
+        return None
+    if marker in existing_by_scope.get(scope, set()):
+        return None
+    return target, marker, page, item, inline_location, scope
 
 
 def _scoped_endnote_definition_markers(
@@ -360,6 +412,15 @@ def _has_block_specific_qwen_ref(
     return False
 
 
+def _with_qwen_page_crop_bbox(item: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    page_crop_bbox = evidence.get("crop_bbox_pdf")
+    if not page_crop_bbox:
+        return item
+    merged = dict(item)
+    merged["qwen_page_crop_bbox_pdf"] = page_crop_bbox
+    return merged
+
+
 def _update_existing_qwen_ref_inline_location(
     block: CanonicalBlock,
     marker: str,
@@ -373,6 +434,7 @@ def _update_existing_qwen_ref_inline_location(
             continue
         if _has_valid_existing_structured_inline_run(block, ref):
             continue
+        inline_location = _prepare_qwen_visible_marker_location(block, item, inline_location)
         _strip_qwen_visible_marker(block, inline_location)
         visible_location = _visible_raw_marker_inline_location(block, ref)
         if visible_location is not None:
@@ -405,6 +467,38 @@ def _update_existing_qwen_ref_inline_location(
         _insert_inline_note_run(block, ref, inline_location.char_index)
         changed = True
     return changed
+
+
+def _prepare_qwen_visible_marker_location(
+    block: CanonicalBlock,
+    item: Dict[str, Any],
+    inline_location: _InlineMarkerLocation,
+) -> _InlineMarkerLocation:
+    if not _qwen_visible_marker_is_after_text_prefix(block, item, inline_location):
+        return inline_location
+    evidence = dict(inline_location.evidence)
+    evidence.pop("qwen_visible_marker_stripped", None)
+    evidence["qwen_visible_marker_kept_as_after_text_prefix"] = True
+    return _InlineMarkerLocation(
+        char_index=inline_location.char_index,
+        source=inline_location.source,
+        confidence=inline_location.confidence,
+        evidence=evidence,
+    )
+
+
+def _qwen_visible_marker_is_after_text_prefix(
+    block: CanonicalBlock,
+    item: Dict[str, Any],
+    inline_location: _InlineMarkerLocation,
+) -> bool:
+    marker_text = str(inline_location.evidence.get("qwen_visible_marker_text") or "")
+    after_text = str(item.get("after_text") or "")
+    if not marker_text or not after_text.startswith(marker_text):
+        return False
+    text = str(block.get("text") or "")
+    offset = inline_location.char_index
+    return text[offset : offset + len(after_text)] == after_text
 
 
 def _has_valid_existing_structured_inline_run(block: CanonicalBlock, ref: Dict[str, Any]) -> bool:
@@ -618,6 +712,8 @@ def _qwen_anchor_key(
 def _strip_qwen_visible_marker(
     block: CanonicalBlock, inline_location: _InlineMarkerLocation
 ) -> None:
+    if inline_location.evidence.get("qwen_visible_marker_kept_as_after_text_prefix"):
+        return
     marker_text = str(inline_location.evidence.get("qwen_visible_marker_text") or "")
     offset = inline_location.char_index
     if not marker_text:
