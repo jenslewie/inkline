@@ -8,6 +8,7 @@ from page_handlers when no special page type is detected.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..analysis.layout import is_right_aligned_short
@@ -56,196 +57,342 @@ def process_normal_flow(
     in_toc: bool,
     text_style: Optional[_RawTextStyleProvider] = None,
 ) -> Tuple[List[Dict[str, Any]], Optional[str], bool]:
-    out: List[Dict[str, Any]] = []
-    i = 0
-    last_text_context = ""
-    display_boundary_attrs: Dict[int, str] = {}
-    while i < len(content_blocks):
-        b = content_blocks[i]
-        if b.raw_type in {"page_number", "page_header"}:
-            i += 1
+    state = _NormalFlowState(prev_major_type=prev_major_type, in_toc=in_toc)
+    while state.i < len(content_blocks):
+        block = content_blocks[state.i]
+        if _should_skip_raw_block(block):
+            state.i += 1
             continue
-        if b.raw_type == "page_footer" and _looks_like_note_definition_footer(b):
-            out.append(
-                make_paragraph(
-                    ids,
-                    b,
-                    block_type=LIST_ITEM,
-                    extra_attrs={
-                        "promoted_from": "page_footer",
-                        "promote_reason": "note_definition_footer",
-                    },
-                )
+        if block.raw_type == "paragraph" and block_text(block):
+            _handle_paragraph_block(ids, content_blocks, layout, state, text_style)
+            continue
+        if _handle_known_non_paragraph_block(ids, content_blocks, state, block):
+            continue
+        if block_text(block):
+            state.out.append(make_paragraph(ids, block, block_type=block.raw_type))
+            state.prev_major_type = block.raw_type
+        state.i += 1
+
+    return state.out, state.prev_major_type, state.in_toc
+
+
+@dataclass
+class _NormalFlowState:
+    out: List[Dict[str, Any]] = field(default_factory=list)
+    i: int = 0
+    prev_major_type: Optional[str] = None
+    in_toc: bool = False
+    last_text_context: str = ""
+    display_boundary_attrs: Dict[int, str] = field(default_factory=dict)
+
+
+def _should_skip_raw_block(block: RawBlock) -> bool:
+    return block.raw_type in {"page_number", "page_header"}
+
+
+def _handle_known_non_paragraph_block(
+    ids: IdFactory,
+    content_blocks: List[RawBlock],
+    state: _NormalFlowState,
+    block: RawBlock,
+) -> bool:
+    if block.raw_type == "page_footer" and _looks_like_note_definition_footer(block):
+        _append_note_footer_as_list_item(ids, state, block)
+        return True
+    if block.raw_type == "title":
+        _append_title_group(ids, content_blocks, state)
+        return True
+    if block.raw_type == "image":
+        state.out.append(make_figure(ids, block))
+        state.prev_major_type = FIGURE
+        state.i += 1
+        return True
+    if block.raw_type == "chart":
+        state.out.append(make_chart_table(ids, block))
+        state.prev_major_type = TABLE
+        state.i += 1
+        return True
+    if block.raw_type == "table":
+        _append_table_or_continuation(ids, state, block)
+        return True
+    if block.raw_type in {"page_footnote", "ref_text"} and block_text(block):
+        _append_page_footnote(ids, state, block)
+        return True
+    if block.raw_type == "list":
+        _append_list_items(ids, state, block)
+        return True
+    return False
+
+
+def _append_note_footer_as_list_item(
+    ids: IdFactory, state: _NormalFlowState, block: RawBlock
+) -> None:
+    state.out.append(
+        make_paragraph(
+            ids,
+            block,
+            block_type=LIST_ITEM,
+            extra_attrs={
+                "promoted_from": "page_footer",
+                "promote_reason": "note_definition_footer",
+            },
+        )
+    )
+    state.prev_major_type = LIST_ITEM
+    state.i += 1
+
+
+def _append_title_group(
+    ids: IdFactory, content_blocks: List[RawBlock], state: _NormalFlowState
+) -> None:
+    group, next_index = _collect_title_group(content_blocks, state.i)
+    role = "chapter_title" if _is_chapter_title_group(group) else HEADING
+    level = 2 if role == "chapter_title" else 1
+    state.out.append(make_heading(ids, group, level=level, role=role))
+    state.prev_major_type = role
+    state.i = next_index
+
+
+def _collect_title_group(blocks: List[RawBlock], start: int) -> Tuple[List[RawBlock], int]:
+    group = [blocks[start]]
+    index = start + 1
+    while (
+        index < len(blocks)
+        and blocks[index].raw_type == "title"
+        and abs(blocks[index].y0 - group[-1].y1) < 80
+    ):
+        group.append(blocks[index])
+        index += 1
+    return group, index
+
+
+def _is_chapter_title_group(group: List[RawBlock]) -> bool:
+    return len(group) > 1 or any(CHAPTER_RE.match(block_text(block)) for block in group)
+
+
+def _append_table_or_continuation(
+    ids: IdFactory, state: _NormalFlowState, block: RawBlock
+) -> None:
+    content = block.raw.get("content", {})
+    html = content.get("html", "") if isinstance(content, dict) else ""
+    if html.strip():
+        state.out.append(make_table(ids, block))
+        state.prev_major_type = TABLE
+    else:
+        state.out.append(
+            canonical_block(
+                ids.next(),
+                TABLE_CONTINUATION,
+                "",
+                block.page,
+                block.bbox,
+                attrs={"role": "continued_table_region", "html_empty": True},
             )
-            prev_major_type = LIST_ITEM
-            i += 1
-            continue
-        if b.raw_type == "title":
-            group = [b]
-            j = i + 1
-            while (
-                j < len(content_blocks)
-                and content_blocks[j].raw_type == "title"
-                and abs(content_blocks[j].y0 - group[-1].y1) < 80
-            ):
-                group.append(content_blocks[j])
-                j += 1
-            role = (
-                "chapter_title"
-                if any(CHAPTER_RE.match(block_text(x)) for x in group) or len(group) > 1
-                else HEADING
-            )
-            level = 2 if role == "chapter_title" else 1
-            out.append(make_heading(ids, group, level=level, role=role))
-            prev_major_type = role
-            i = j
-            continue
-        if b.raw_type == "image":
-            out.append(make_figure(ids, b))
-            prev_major_type = FIGURE
-            i += 1
-            continue
-        if b.raw_type == "chart":
-            out.append(make_chart_table(ids, b))
-            prev_major_type = TABLE
-            i += 1
-            continue
-        if b.raw_type == "table":
-            content = b.raw.get("content", {})
-            html = content.get("html", "") if isinstance(content, dict) else ""
-            if html.strip():
-                out.append(make_table(ids, b))
-                prev_major_type = TABLE
-            else:
-                out.append(
-                    canonical_block(
-                        ids.next(),
-                        TABLE_CONTINUATION,
-                        "",
-                        b.page,
-                        b.bbox,
-                        attrs={"role": "continued_table_region", "html_empty": True},
-                    )
-                )
-            prev_major_type = TABLE_CONTINUATION
-            i += 1
-            continue
-        if b.raw_type in {"page_footnote", "ref_text"} and block_text(b):
-            footnote_attrs: Dict[str, Any] = {"role": "page_footnote"}
-            middle_markers = b.raw.get("_middle_page_inline_markers")
-            if isinstance(middle_markers, list) and middle_markers:
-                footnote_attrs["_middle_page_inline_markers"] = list(middle_markers)
-            out.append(make_paragraph(ids, b, block_type=FOOTNOTE, extra_attrs=footnote_attrs))
-            i += 1
-            continue
-        if b.raw_type == "list":
-            content = b.raw.get("content", {})
-            items = content.get("list_items", [])
-            list_type = content.get("list_type")
-            for li in items:
-                t, _ = extract_list_item_text(li)
-                if t:
-                    pseudo = RawBlock(
-                        page=b.page,
-                        index=b.index,
-                        raw_type="list_item",
-                        text=t,
-                        bbox=b.bbox,
-                        raw=li,
-                    )
-                    list_attrs = {"list_type": list_type} if list_type else None
-                    out.append(
-                        make_paragraph(ids, pseudo, block_type=LIST_ITEM, extra_attrs=list_attrs)
-                    )
-            prev_major_type = "list"
-            i += 1
-            continue
-        if b.raw_type == "paragraph" and block_text(b):
-            if _is_centered_table_heading_continuation(content_blocks, i, layout):
-                out.append(make_heading(ids, [b], level=2, role="table_heading_byline"))
-                prev_major_type = HEADING
-                i += 1
-                continue
+        )
+    state.prev_major_type = TABLE_CONTINUATION
+    state.i += 1
 
-            if _is_flush_right_terminal_line_before_section_boundary(content_blocks, i, layout):
-                out.append(make_flush_right_terminal_block(ids, [b]))
-                prev_major_type = DISPLAY_BLOCK
-                i += 1
-                continue
 
-            terminal_after_body_line = _following_flush_right_terminal_lines(
-                content_blocks, i, layout
-            )
-            if terminal_after_body_line and _is_left_body_line_before_terminal_block(
-                content_blocks, i, layout
-            ):
-                out.append(make_paragraph(ids, b))
-                out.append(make_flush_right_terminal_block(ids, terminal_after_body_line))
-                prev_major_type = DISPLAY_BLOCK
-                i += 1 + len(terminal_after_body_line)
-                continue
+def _append_page_footnote(ids: IdFactory, state: _NormalFlowState, block: RawBlock) -> None:
+    footnote_attrs: Dict[str, Any] = {"role": "page_footnote"}
+    middle_markers = block.raw.get("_middle_page_inline_markers")
+    if isinstance(middle_markers, list) and middle_markers:
+        footnote_attrs["_middle_page_inline_markers"] = list(middle_markers)
+    state.out.append(make_paragraph(ids, block, block_type=FOOTNOTE, extra_attrs=footnote_attrs))
+    state.i += 1
 
-            tail_blocks = [
-                x
-                for x in content_blocks[i:]
-                if block_text(x) or x.raw_type in {"image", "table", "title", "list"}
-            ]
-            remaining = [x for x in tail_blocks if x.raw_type == "paragraph" and block_text(x)]
-            if (
-                len(remaining) == len(tail_blocks)
-                and 1 <= len(remaining) <= 4
-                and (
-                    len(remaining) > 1
-                    or len(block_text(remaining[0])) >= 8
-                    or remaining[0].width >= layout.body_width * 0.16
-                )
-                and all(_is_flush_right_terminal_line(x, layout) for x in remaining)
-            ):
-                out.append(make_flush_right_terminal_block(ids, remaining))
-                prev_major_type = DISPLAY_BLOCK
-                i = len(content_blocks)
-                continue
 
-            prev_text = last_text_context or (
-                out[-1]["text"] if out and out[-1]["type"] in {PARAGRAPH, HEADING} else ""
-            )
-            if should_start_display_block(
-                content_blocks, i, prev_text, layout, text_style=text_style
-            ):
-                group, j, boundary_reason = collect_display_block(
-                    content_blocks, i, prev_text, layout, text_style=text_style
-                )
-                if boundary_reason and j < len(content_blocks):
-                    display_boundary_attrs[id(content_blocks[j])] = boundary_reason
-                out.append(
-                    make_display_block(
-                        ids,
-                        group,
-                        layout_role="inline_display_block",
-                        prev_text=prev_text,
-                        extra_attrs=display_attrs_for_group(group, content_blocks, layout),
-                    )
-                )
-                prev_major_type = DISPLAY_BLOCK
-                last_text_context = ""
-                i = j
-                continue
-
-            extra_attrs = None
-            boundary_reason = display_boundary_attrs.get(id(b))
-            if boundary_reason:
-                extra_attrs = {"display_boundary_before": boundary_reason}
-            out.append(make_paragraph(ids, b, extra_attrs=extra_attrs))
-            last_text_context = block_text(b)
-            prev_major_type = PARAGRAPH
-            i += 1
+def _append_list_items(ids: IdFactory, state: _NormalFlowState, block: RawBlock) -> None:
+    content = block.raw.get("content", {})
+    items = content.get("list_items", [])
+    list_type = content.get("list_type")
+    for item in items:
+        text, _ = extract_list_item_text(item)
+        if not text:
             continue
-        if block_text(b):
-            out.append(make_paragraph(ids, b, block_type=b.raw_type))
-            prev_major_type = b.raw_type
-        i += 1
+        pseudo = RawBlock(
+            page=block.page,
+            index=block.index,
+            raw_type="list_item",
+            text=text,
+            bbox=block.bbox,
+            raw=item,
+        )
+        list_attrs = {"list_type": list_type} if list_type else None
+        state.out.append(make_paragraph(ids, pseudo, block_type=LIST_ITEM, extra_attrs=list_attrs))
+    state.prev_major_type = "list"
+    state.i += 1
 
-    return out, prev_major_type, in_toc
+
+def _handle_paragraph_block(
+    ids: IdFactory,
+    content_blocks: List[RawBlock],
+    layout: LayoutStats,
+    state: _NormalFlowState,
+    text_style: Optional[_RawTextStyleProvider],
+) -> None:
+    block = content_blocks[state.i]
+    if _append_centered_table_heading(ids, content_blocks, layout, state):
+        return
+    if _append_flush_right_terminal_before_boundary(ids, content_blocks, layout, state):
+        return
+    if _append_body_line_with_following_terminal(ids, content_blocks, layout, state):
+        return
+    if _append_tail_terminal_group(ids, content_blocks, layout, state):
+        return
+    if _append_inline_display_block(ids, content_blocks, layout, state, text_style):
+        return
+    _append_plain_paragraph(ids, state, block)
+
+
+def _append_centered_table_heading(
+    ids: IdFactory,
+    content_blocks: List[RawBlock],
+    layout: LayoutStats,
+    state: _NormalFlowState,
+) -> bool:
+    if not _is_centered_table_heading_continuation(content_blocks, state.i, layout):
+        return False
+    state.out.append(make_heading(ids, [content_blocks[state.i]], level=2, role="table_heading_byline"))
+    state.prev_major_type = HEADING
+    state.i += 1
+    return True
+
+
+def _append_flush_right_terminal_before_boundary(
+    ids: IdFactory,
+    content_blocks: List[RawBlock],
+    layout: LayoutStats,
+    state: _NormalFlowState,
+) -> bool:
+    if not _is_flush_right_terminal_line_before_section_boundary(content_blocks, state.i, layout):
+        return False
+    state.out.append(make_flush_right_terminal_block(ids, [content_blocks[state.i]]))
+    state.prev_major_type = DISPLAY_BLOCK
+    state.i += 1
+    return True
+
+
+def _append_body_line_with_following_terminal(
+    ids: IdFactory,
+    content_blocks: List[RawBlock],
+    layout: LayoutStats,
+    state: _NormalFlowState,
+) -> bool:
+    terminal_after_body_line = _following_flush_right_terminal_lines(
+        content_blocks, state.i, layout
+    )
+    if not terminal_after_body_line or not _is_left_body_line_before_terminal_block(
+        content_blocks, state.i, layout
+    ):
+        return False
+    state.out.append(make_paragraph(ids, content_blocks[state.i]))
+    state.out.append(make_flush_right_terminal_block(ids, terminal_after_body_line))
+    state.prev_major_type = DISPLAY_BLOCK
+    state.i += 1 + len(terminal_after_body_line)
+    return True
+
+
+def _append_tail_terminal_group(
+    ids: IdFactory,
+    content_blocks: List[RawBlock],
+    layout: LayoutStats,
+    state: _NormalFlowState,
+) -> bool:
+    remaining = _remaining_paragraph_tail(content_blocks, state.i)
+    tail_blocks = _meaningful_tail_blocks(content_blocks, state.i)
+    if not _is_terminal_paragraph_tail(remaining, tail_blocks, layout):
+        return False
+    state.out.append(make_flush_right_terminal_block(ids, remaining))
+    state.prev_major_type = DISPLAY_BLOCK
+    state.i = len(content_blocks)
+    return True
+
+
+def _meaningful_tail_blocks(blocks: List[RawBlock], start: int) -> List[RawBlock]:
+    return [
+        block
+        for block in blocks[start:]
+        if block_text(block) or block.raw_type in {"image", "table", "title", "list"}
+    ]
+
+
+def _remaining_paragraph_tail(blocks: List[RawBlock], start: int) -> List[RawBlock]:
+    return [
+        block
+        for block in _meaningful_tail_blocks(blocks, start)
+        if block.raw_type == "paragraph" and block_text(block)
+    ]
+
+
+def _is_terminal_paragraph_tail(
+    remaining: List[RawBlock], tail_blocks: List[RawBlock], layout: LayoutStats
+) -> bool:
+    return bool(
+        len(remaining) == len(tail_blocks)
+        and 1 <= len(remaining) <= 4
+        and _tail_has_enough_visual_weight(remaining, layout)
+        and all(_is_flush_right_terminal_line(block, layout) for block in remaining)
+    )
+
+
+def _tail_has_enough_visual_weight(remaining: List[RawBlock], layout: LayoutStats) -> bool:
+    return bool(
+        len(remaining) > 1
+        or len(block_text(remaining[0])) >= 8
+        or remaining[0].width >= layout.body_width * 0.16
+    )
+
+
+def _append_inline_display_block(
+    ids: IdFactory,
+    content_blocks: List[RawBlock],
+    layout: LayoutStats,
+    state: _NormalFlowState,
+    text_style: Optional[_RawTextStyleProvider],
+) -> bool:
+    prev_text = _previous_text_context(state)
+    if not should_start_display_block(
+        content_blocks, state.i, prev_text, layout, text_style=text_style
+    ):
+        return False
+    group, next_index, boundary_reason = collect_display_block(
+        content_blocks, state.i, prev_text, layout, text_style=text_style
+    )
+    if boundary_reason and next_index < len(content_blocks):
+        state.display_boundary_attrs[id(content_blocks[next_index])] = boundary_reason
+    state.out.append(
+        make_display_block(
+            ids,
+            group,
+            layout_role="inline_display_block",
+            prev_text=prev_text,
+            extra_attrs=display_attrs_for_group(group, content_blocks, layout),
+        )
+    )
+    state.prev_major_type = DISPLAY_BLOCK
+    state.last_text_context = ""
+    state.i = next_index
+    return True
+
+
+def _previous_text_context(state: _NormalFlowState) -> str:
+    if state.last_text_context:
+        return state.last_text_context
+    if state.out and state.out[-1]["type"] in {PARAGRAPH, HEADING}:
+        return str(state.out[-1]["text"])
+    return ""
+
+
+def _append_plain_paragraph(
+    ids: IdFactory, state: _NormalFlowState, block: RawBlock
+) -> None:
+    boundary_reason = state.display_boundary_attrs.get(id(block))
+    extra_attrs = {"display_boundary_before": boundary_reason} if boundary_reason else None
+    state.out.append(make_paragraph(ids, block, extra_attrs=extra_attrs))
+    state.last_text_context = block_text(block)
+    state.prev_major_type = PARAGRAPH
+    state.i += 1
 
 
 def _is_centered_table_heading_continuation(
