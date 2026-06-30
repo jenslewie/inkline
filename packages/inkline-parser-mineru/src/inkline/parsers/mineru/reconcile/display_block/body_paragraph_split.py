@@ -4,6 +4,7 @@ body prose lines, demoting the prose tail back to paragraph type."""
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
@@ -47,6 +48,20 @@ from .source_spans import (
 )
 
 
+@dataclass(frozen=True)
+class _BodyTailSplit:
+    display_text: str
+    body_text: str
+    split_idx: int
+    original_source: Dict[str, Any]
+    source_spans: List[Dict[str, Any]]
+    display_runs: List[Dict[str, Any]]
+    body_runs: List[Dict[str, Any]]
+    display_refs: List[Dict[str, Any]] | None
+    body_refs: List[Dict[str, Any]] | None
+    nonempty_lines: List[str]
+
+
 def reconcile_display_block_body_paragraph_split(
     blocks: List[Dict[str, Any]], layout: LayoutStats
 ) -> None:
@@ -60,123 +75,188 @@ def reconcile_display_block_body_paragraph_split(
     page_widths = _page_coord_widths(blocks)
     page_body_lefts = _page_body_lefts(blocks, layout, page_widths)
     _split_leading_body_intro_from_display_blocks(blocks, layout, page_widths, page_body_lefts)
+    _split_body_tails_from_display_blocks(blocks, layout, page_widths, page_body_lefts)
+    _split_embedded_paragraph_boundaries_from_display_blocks(blocks, layout, page_widths)
+    _split_embedded_short_line_groups_from_paragraphs(blocks, layout, page_widths, page_body_lefts)
+
+
+def _split_body_tails_from_display_blocks(
+    blocks: List[Dict[str, Any]],
+    layout: LayoutStats,
+    page_widths: Dict[int, float] | None,
+    page_body_lefts: Dict[int, float],
+) -> None:
     i = 0
     while i < len(blocks):
         cur = blocks[i]
-        if cur.get("type") != DISPLAY_BLOCK:
-            i += 1
-            continue
-        text = str(cur.get("text", "")).strip()
-        if "\n" not in text:
-            i += 1
-            continue
-
-        split_point = _find_body_split_point(
-            cur, text, layout, page_widths, page_body_lefts, blocks, i
+        split = _body_tail_split_for_block(
+            cur, blocks, i, layout, page_widths, page_body_lefts
         )
-        if split_point is None:
+        if split is None:
             i += 1
             continue
-
-        display_text = text[:split_point].strip()
-        body_text = text[split_point:].strip()
-        if not display_text or not body_text:
-            i += 1
-            continue
-
-        # Check that the body section actually looks like prose
-        body_lines = [ln.strip() for ln in body_text.split("\n") if ln.strip()]
-        if len(body_lines) < 1:
-            i += 1
-            continue
-        # The body section should have at least one long line
-        split_idx = len(text[:split_point].split("\n")) - 1
-        original_source = cur.get("source") or {}
-        source_spans = [
-            span for span in original_source.get("spans") or [] if isinstance(span, dict)
-        ]
-        if all(len(ln) <= 60 for ln in body_lines):
-            split_lines = text.split("\n")
-            has_body_lane = _line_has_body_lane_source_span(
-                cur, split_lines, split_idx, layout, page_widths, page_body_lefts
-            )
-            has_body_flow = _line_has_body_flow_source_span(
-                cur, split_lines, split_idx, layout, page_widths, page_body_lefts
-            )
-            if not has_body_lane and not (
-                has_body_flow and _has_following_cross_page_paragraph(blocks, i)
-            ):
-                i += 1
-                continue
-
-        # Partition inline metadata before modifying the block
-        display_block_runs, body_runs = _split_inline_runs_at_offset(
-            (cur.get("attrs") or {}).get("inline_runs"), split_point
-        )
-        display_block_refs, body_refs = _split_note_refs_by_runs(
-            (cur.get("attrs") or {}).get("note_refs"),
-            display_block_runs,
-            body_runs,
-        )
-
-        cur["text"] = display_text
-        attrs = cur.setdefault("attrs", {})
-        ev = attrs.setdefault("classification_evidence", [])
-        if "split_body_paragraph_from_display_block" not in ev:
-            ev.append("split_body_paragraph_from_display_block")
-        if display_block_runs:
-            attrs["inline_runs"] = display_block_runs
-        else:
-            attrs.pop("inline_runs", None)
-        if display_block_refs is not None:
-            attrs["note_refs"] = display_block_refs
-        else:
-            attrs.pop("note_refs", None)
-
-        new_para = copy.deepcopy(cur)
-        new_para["block_id"] = f"{cur.get('block_id')}_body"
-        new_para["type"] = PARAGRAPH
-        new_para["text"] = body_text
-        new_para.pop("level", None)
-        # Keep source (approximate bbox is better than null)
-        nattrs = new_para.setdefault("attrs", {})
-        for k in [
-            "role",
-            "content_form",
-            "content_form_confidence",
-            "content_form_scores",
-            "classification_evidence",
-            "quote_text",
-            "attribution",
-            "layout_role",
-            "line_count",
-            "has_attribution_line",
-            "line_layouts",
-            "raw_types",
-        ]:
-            nattrs.pop(k, None)
-        nattrs.pop("merged_from", None)
-        nattrs.pop("merge_evidence", None)
-        nattrs.pop("merge_origin", None)
-        if body_runs:
-            nattrs["inline_runs"] = body_runs
-        else:
-            nattrs.pop("inline_runs", None)
-        if body_refs is not None:
-            nattrs["note_refs"] = body_refs
-        else:
-            nattrs.pop("note_refs", None)
-        nattrs["split_from_display_block_id"] = cur.get("block_id")
-        nonempty_lines = [line.strip() for line in text.split("\n") if line.strip()]
-        if len(source_spans) == len(nonempty_lines) and 0 < split_idx < len(source_spans):
-            _apply_source_from_spans(cur, original_source, source_spans[:split_idx])
-            _apply_source_from_spans(new_para, original_source, source_spans[split_idx:])
+        new_para = _apply_body_tail_split(cur, split)
         blocks.insert(i + 1, new_para)
         _merge_split_tail_with_following_paragraph(blocks, i + 1)
         i += 2
 
-    _split_embedded_paragraph_boundaries_from_display_blocks(blocks, layout, page_widths)
-    _split_embedded_short_line_groups_from_paragraphs(blocks, layout, page_widths, page_body_lefts)
+
+def _body_tail_split_for_block(
+    block: Dict[str, Any],
+    blocks: List[Dict[str, Any]],
+    block_index: int,
+    layout: LayoutStats,
+    page_widths: Dict[int, float] | None,
+    page_body_lefts: Dict[int, float],
+) -> _BodyTailSplit | None:
+    if block.get("type") != DISPLAY_BLOCK:
+        return None
+    text = str(block.get("text", "")).strip()
+    if "\n" not in text:
+        return None
+    split_point = _find_body_split_point(
+        block, text, layout, page_widths, page_body_lefts, blocks, block_index
+    )
+    if split_point is None:
+        return None
+    display_text = text[:split_point].strip()
+    body_text = text[split_point:].strip()
+    if not display_text or not body_text:
+        return None
+    body_lines = [ln.strip() for ln in body_text.split("\n") if ln.strip()]
+    if not body_lines:
+        return None
+    split_idx = len(text[:split_point].split("\n")) - 1
+    if not _body_tail_has_prose_evidence(
+        block, blocks, block_index, text, body_lines, split_idx, layout, page_widths, page_body_lefts
+    ):
+        return None
+    original_source = block.get("source") or {}
+    source_spans = [
+        span for span in original_source.get("spans") or [] if isinstance(span, dict)
+    ]
+    display_runs, body_runs = _split_inline_runs_at_offset(
+        (block.get("attrs") or {}).get("inline_runs"), split_point
+    )
+    display_refs, body_refs = _split_note_refs_by_runs(
+        (block.get("attrs") or {}).get("note_refs"),
+        display_runs,
+        body_runs,
+    )
+    return _BodyTailSplit(
+        display_text=display_text,
+        body_text=body_text,
+        split_idx=split_idx,
+        original_source=original_source,
+        source_spans=source_spans,
+        display_runs=display_runs,
+        body_runs=body_runs,
+        display_refs=display_refs,
+        body_refs=body_refs,
+        nonempty_lines=[line.strip() for line in text.split("\n") if line.strip()],
+    )
+
+
+def _body_tail_has_prose_evidence(
+    block: Dict[str, Any],
+    blocks: List[Dict[str, Any]],
+    block_index: int,
+    text: str,
+    body_lines: List[str],
+    split_idx: int,
+    layout: LayoutStats,
+    page_widths: Dict[int, float] | None,
+    page_body_lefts: Dict[int, float],
+) -> bool:
+    if any(len(line) > 60 for line in body_lines):
+        return True
+    split_lines = text.split("\n")
+    has_body_lane = _line_has_body_lane_source_span(
+        block, split_lines, split_idx, layout, page_widths, page_body_lefts
+    )
+    has_body_flow = _line_has_body_flow_source_span(
+        block, split_lines, split_idx, layout, page_widths, page_body_lefts
+    )
+    return has_body_lane or (
+        has_body_flow and _has_following_cross_page_paragraph(blocks, block_index)
+    )
+
+
+def _apply_body_tail_split(block: Dict[str, Any], split: _BodyTailSplit) -> Dict[str, Any]:
+    block["text"] = split.display_text
+    attrs = block.setdefault("attrs", {})
+    ev = attrs.setdefault("classification_evidence", [])
+    if "split_body_paragraph_from_display_block" not in ev:
+        ev.append("split_body_paragraph_from_display_block")
+    _set_optional_inline_runs(attrs, split.display_runs)
+    _set_optional_note_refs(attrs, split.display_refs)
+
+    new_para = copy.deepcopy(block)
+    new_para["block_id"] = f"{block.get('block_id')}_body"
+    new_para["type"] = PARAGRAPH
+    new_para["text"] = split.body_text
+    new_para.pop("level", None)
+    _prepare_split_body_tail_attrs(new_para, block, split)
+    if (
+        len(split.source_spans) == len(split.nonempty_lines)
+        and 0 < split.split_idx < len(split.source_spans)
+    ):
+        _apply_source_from_spans(
+            block,
+            split.original_source,
+            split.source_spans[: split.split_idx],
+        )
+        _apply_source_from_spans(
+            new_para,
+            split.original_source,
+            split.source_spans[split.split_idx :],
+        )
+    return new_para
+
+
+def _prepare_split_body_tail_attrs(
+    paragraph: Dict[str, Any],
+    original: Dict[str, Any],
+    split: _BodyTailSplit,
+) -> None:
+    attrs = paragraph.setdefault("attrs", {})
+    for key in [
+        "role",
+        "content_form",
+        "content_form_confidence",
+        "content_form_scores",
+        "classification_evidence",
+        "quote_text",
+        "attribution",
+        "layout_role",
+        "line_count",
+        "has_attribution_line",
+        "line_layouts",
+        "raw_types",
+    ]:
+        attrs.pop(key, None)
+    attrs.pop("merged_from", None)
+    attrs.pop("merge_evidence", None)
+    attrs.pop("merge_origin", None)
+    _set_optional_inline_runs(attrs, split.body_runs)
+    _set_optional_note_refs(attrs, split.body_refs)
+    attrs["split_from_display_block_id"] = original.get("block_id")
+
+
+def _set_optional_inline_runs(attrs: Dict[str, Any], runs: List[Dict[str, Any]]) -> None:
+    if runs:
+        attrs["inline_runs"] = runs
+    else:
+        attrs.pop("inline_runs", None)
+
+
+def _set_optional_note_refs(
+    attrs: Dict[str, Any], refs: List[Dict[str, Any]] | None
+) -> None:
+    if refs is not None:
+        attrs["note_refs"] = refs
+    else:
+        attrs.pop("note_refs", None)
 
 
 def _split_embedded_paragraph_boundaries_from_display_blocks(
