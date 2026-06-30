@@ -378,55 +378,78 @@ def _split_leading_body_intro_from_display_blocks(
             i += 1
             continue
         intro_spans, display_spans = split
-        intro_text = _text_for_spans(intro_spans)
-        display_text = _text_for_spans(display_spans)
-        if not intro_text or not display_text:
+        intro = _apply_leading_body_intro_split(cur, intro_spans, display_spans)
+        if intro is None:
             i += 1
             continue
-
-        original_source = cur.get("source") or {}
-        original_attrs = cur.get("attrs") or {}
-        original_id = cur.get("block_id")
-        split_offset = len(intro_text)
-        intro_runs, display_runs = _split_inline_runs_at_offset(
-            original_attrs.get("inline_runs"), split_offset
-        )
-        intro_refs, display_refs = _split_note_refs_by_runs(
-            original_attrs.get("note_refs"), intro_runs, display_runs
-        )
-
-        intro = copy.deepcopy(cur)
-        intro["block_id"] = f"{original_id}_intro"
-        intro["type"] = PARAGRAPH
-        intro["text"] = intro_text
-        intro.pop("level", None)
-        intro_attrs = intro.setdefault("attrs", {})
-        _demote_display_attrs(intro_attrs)
-        intro_attrs["split_from_display_block_id"] = original_id
-        if intro_runs:
-            intro_attrs["inline_runs"] = intro_runs
-        else:
-            intro_attrs.pop("inline_runs", None)
-        if intro_refs is not None:
-            intro_attrs["note_refs"] = intro_refs
-        else:
-            intro_attrs.pop("note_refs", None)
-        _apply_source_from_spans(intro, original_source, intro_spans)
-
-        cur["text"] = display_text
-        cur_attrs = cur.setdefault("attrs", {})
-        cur_attrs["split_leading_body_intro"] = True
-        if display_runs:
-            cur_attrs["inline_runs"] = display_runs
-        else:
-            cur_attrs.pop("inline_runs", None)
-        if display_refs is not None:
-            cur_attrs["note_refs"] = display_refs
-        else:
-            cur_attrs.pop("note_refs", None)
-        _apply_source_from_spans(cur, original_source, display_spans)
         blocks.insert(i, intro)
         i += 2
+
+
+def _apply_leading_body_intro_split(
+    block: Dict[str, Any],
+    intro_spans: List[Dict[str, Any]],
+    display_spans: List[Dict[str, Any]],
+) -> Dict[str, Any] | None:
+    intro_text = _text_for_spans(intro_spans)
+    display_text = _text_for_spans(display_spans)
+    if not intro_text or not display_text:
+        return None
+    original_source = block.get("source") or {}
+    original_attrs = block.get("attrs") or {}
+    original_id = block.get("block_id")
+    intro_runs, display_runs = _split_inline_runs_at_offset(
+        original_attrs.get("inline_runs"), len(intro_text)
+    )
+    intro_refs, display_refs = _split_note_refs_by_runs(
+        original_attrs.get("note_refs"), intro_runs, display_runs
+    )
+    intro = _leading_intro_block(
+        block, original_id, intro_text, original_source, intro_spans, intro_runs, intro_refs
+    )
+    _apply_leading_display_tail(
+        block, display_text, original_source, display_spans, display_runs, display_refs
+    )
+    return intro
+
+
+def _leading_intro_block(
+    template: Dict[str, Any],
+    original_id: str | None,
+    text: str,
+    original_source: Dict[str, Any],
+    spans: List[Dict[str, Any]],
+    runs: List[Dict[str, Any]],
+    refs: List[Dict[str, Any]] | None,
+) -> Dict[str, Any]:
+    block = copy.deepcopy(template)
+    block["block_id"] = f"{original_id}_intro"
+    block["type"] = PARAGRAPH
+    block["text"] = text
+    block.pop("level", None)
+    attrs = block.setdefault("attrs", {})
+    _demote_display_attrs(attrs)
+    attrs["split_from_display_block_id"] = original_id
+    _set_optional_inline_runs(attrs, runs)
+    _set_optional_note_refs(attrs, refs)
+    _apply_source_from_spans(block, original_source, spans)
+    return block
+
+
+def _apply_leading_display_tail(
+    block: Dict[str, Any],
+    text: str,
+    original_source: Dict[str, Any],
+    spans: List[Dict[str, Any]],
+    runs: List[Dict[str, Any]],
+    refs: List[Dict[str, Any]] | None,
+) -> None:
+    block["text"] = text
+    attrs = block.setdefault("attrs", {})
+    attrs["split_leading_body_intro"] = True
+    _set_optional_inline_runs(attrs, runs)
+    _set_optional_note_refs(attrs, refs)
+    _apply_source_from_spans(block, original_source, spans)
 
 
 def _leading_body_intro_split(
