@@ -91,32 +91,9 @@ def materialize_full_page_image_assets(
 ) -> None:
     if not source_pdf:
         return
-    full_page_figures = [
-        b
-        for b in canonical.get("blocks", [])
-        if b.get("type") == FIGURE
-        and (b.get("attrs") or {}).get("layout_role") == "full_page_image"
-    ]
+    full_page_figures = _full_page_figures(canonical)
     if not full_page_figures:
         return
-
-    # Build a lookup of existing snapshot assets so that full_page_image
-    # figures can reuse the same physical image file when the page already
-    # has a snapshot rendered.
-    existing_assets = canonical.get("assets", {}).get("images", [])
-    snapshot_asset_by_page: Dict[int, Dict[str, Any]] = {}
-    for asset in existing_assets:
-        if not isinstance(asset, dict):
-            continue
-        aid = asset.get("image_id", "")
-        if not aid.endswith("-snapshot"):
-            continue
-        # image_id format: page-XXXX-snapshot
-        try:
-            page_num = int(aid.split("-")[1])
-        except (ValueError, IndexError):
-            continue
-        snapshot_asset_by_page[page_num] = asset
 
     try:
         import fitz  # type: ignore
@@ -131,78 +108,123 @@ def materialize_full_page_image_assets(
     doc = fitz.open(pdf_path)
     try:
         matrix = fitz.Matrix(dpi / 72.0, dpi / 72.0)
+        snapshot_asset_by_page = _snapshot_assets_by_page(canonical)
         for b in full_page_figures:
             page = (b.get("source") or {}).get("page")
             if not isinstance(page, int) or page < 1 or page > len(doc):
                 continue
 
             snapshot = snapshot_asset_by_page.get(page)
-            snapshot_path = (
-                _resolve_stored_path(str(snapshot["path"]), output_dir) if snapshot else None
-            )
-            if snapshot and snapshot_path and snapshot_path.exists():
-                # Reuse the snapshot's physical path — same image, no need
-                # to render again.
-                reused_path = str(snapshot["path"])
-                # Point the block's image_path to the reused location
-                # (images/pages/ instead of images/full_page/) so that the
-                # path reflects the actual physical file.
-                attrs = b.setdefault("attrs", {})
-                image_id = f"page-{page:04d}-full"
-                original = attrs.get("image_path")
-                if original:
-                    attrs["cropped_image_path"] = original
-                attrs["image_path"] = str(
-                    Path("images") / "pages" / Path(reused_path).name
-                )
-                attrs["image_id"] = image_id
-                attrs["image_render_source"] = snapshot.get(
-                    "image_render_source", "source_pdf"
-                )
-                attrs["image_render_dpi"] = snapshot.get("image_render_dpi", dpi)
-                _upsert_image_asset(
-                    canonical,
-                    {
-                        "image_id": image_id,
-                        "path": reused_path,
-                        "media_type": snapshot.get("media_type", "image/png"),
-                        "role": "figure",
-                        "source": {"page": page},
-                        "related_block_ids": [b.get("block_id")] if b.get("block_id") else [],
-                    },
-                )
+            if _reuse_snapshot_for_full_page_figure(canonical, b, snapshot, output_dir, page, dpi):
                 continue
 
-            # No snapshot asset to reuse — render a new full-page image.
-            asset_dir = output_dir / "images" / "full_page"
-            asset_dir.mkdir(parents=True, exist_ok=True)
-            image_name = f"page_{page:04d}.png"
-            image_path = asset_dir / image_name
-            if not image_path.exists():
-                pix = doc[page - 1].get_pixmap(matrix=matrix, alpha=False)
-                pix.save(str(image_path))
-            attrs = b.setdefault("attrs", {})
-            image_id = f"page-{page:04d}-full"
-            original = attrs.get("image_path")
-            if original:
-                attrs["cropped_image_path"] = original
-            attrs["image_path"] = str(Path("images") / "full_page" / image_name)
-            attrs["image_id"] = image_id
-            attrs["image_render_source"] = "source_pdf"
-            attrs["image_render_dpi"] = dpi
-            _upsert_image_asset(
-                canonical,
-                {
-                    "image_id": image_id,
-                    "path": _asset_path_relative_to_output_dir(image_path, output_dir),
-                    "media_type": "image/png",
-                    "role": "figure",
-                    "source": {"page": page},
-                    "related_block_ids": [b.get("block_id")] if b.get("block_id") else [],
-                },
-            )
+            _render_full_page_figure(canonical, b, doc[page - 1], matrix, output_dir, page, dpi)
     finally:
         doc.close()
+
+
+def _full_page_figures(canonical: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [
+        block
+        for block in canonical.get("blocks", [])
+        if block.get("type") == FIGURE
+        and (block.get("attrs") or {}).get("layout_role") == "full_page_image"
+    ]
+
+
+def _snapshot_assets_by_page(canonical: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
+    snapshot_asset_by_page: Dict[int, Dict[str, Any]] = {}
+    for asset in canonical.get("assets", {}).get("images", []):
+        if not isinstance(asset, dict):
+            continue
+        page = _snapshot_page_from_asset_id(str(asset.get("image_id", "")))
+        if page is not None:
+            snapshot_asset_by_page[page] = asset
+    return snapshot_asset_by_page
+
+
+def _snapshot_page_from_asset_id(image_id: str) -> Optional[int]:
+    if not image_id.endswith("-snapshot"):
+        return None
+    try:
+        return int(image_id.split("-")[1])
+    except (ValueError, IndexError):
+        return None
+
+
+def _reuse_snapshot_for_full_page_figure(
+    canonical: Dict[str, Any],
+    block: Dict[str, Any],
+    snapshot: Optional[Dict[str, Any]],
+    output_dir: Path,
+    page: int,
+    dpi: int,
+) -> bool:
+    if not snapshot:
+        return False
+    reused_path = str(snapshot["path"])
+    if not _resolve_stored_path(reused_path, output_dir).exists():
+        return False
+
+    attrs = block.setdefault("attrs", {})
+    image_id = f"page-{page:04d}-full"
+    original = attrs.get("image_path")
+    if original:
+        attrs["cropped_image_path"] = original
+    attrs["image_path"] = str(Path("images") / "pages" / Path(reused_path).name)
+    attrs["image_id"] = image_id
+    attrs["image_render_source"] = snapshot.get("image_render_source", "source_pdf")
+    attrs["image_render_dpi"] = snapshot.get("image_render_dpi", dpi)
+    _upsert_image_asset(
+        canonical,
+        {
+            "image_id": image_id,
+            "path": reused_path,
+            "media_type": snapshot.get("media_type", "image/png"),
+            "role": "figure",
+            "source": {"page": page},
+            "related_block_ids": [block.get("block_id")] if block.get("block_id") else [],
+        },
+    )
+    return True
+
+
+def _render_full_page_figure(
+    canonical: Dict[str, Any],
+    block: Dict[str, Any],
+    page_obj: Any,
+    matrix: Any,
+    output_dir: Path,
+    page: int,
+    dpi: int,
+) -> None:
+    asset_dir = output_dir / "images" / "full_page"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    image_name = f"page_{page:04d}.png"
+    image_path = asset_dir / image_name
+    if not image_path.exists():
+        pix = page_obj.get_pixmap(matrix=matrix, alpha=False)
+        pix.save(str(image_path))
+    attrs = block.setdefault("attrs", {})
+    image_id = f"page-{page:04d}-full"
+    original = attrs.get("image_path")
+    if original:
+        attrs["cropped_image_path"] = original
+    attrs["image_path"] = str(Path("images") / "full_page" / image_name)
+    attrs["image_id"] = image_id
+    attrs["image_render_source"] = "source_pdf"
+    attrs["image_render_dpi"] = dpi
+    _upsert_image_asset(
+        canonical,
+        {
+            "image_id": image_id,
+            "path": _asset_path_relative_to_output_dir(image_path, output_dir),
+            "media_type": "image/png",
+            "role": "figure",
+            "source": {"page": page},
+            "related_block_ids": [block.get("block_id")] if block.get("block_id") else [],
+        },
+    )
 
 
 def materialize_repaired_figure_image_assets(
@@ -236,53 +258,90 @@ def materialize_repaired_figure_image_assets(
     try:
         matrix = fitz.Matrix(dpi / 72.0, dpi / 72.0)
         for b in repaired_figures:
-            page = (b.get("source") or {}).get("page")
-            bbox = _repaired_figure_crop_bbox(b)
-            if not isinstance(page, int) or page < 1 or page > len(doc) or not bbox:
-                continue
-            rect = _scale_bbox_to_pdf_rect(page, doc[page - 1].rect, bbox, geometry)
-            original_rect = rect
-            if _should_expand_repaired_figure_crop(b):
-                rect = _expand_rect_to_visible_content(doc[page - 1], rect)
-            if _is_auto_repaired_dense_text_image(b) and not _rect_expanded_bottom(
-                original_rect, rect
-            ):
-                continue
-            if _is_auto_repaired_dense_text_image(b):
-                rect = _trim_rect_bottom_to_horizontal_rule(doc[page - 1], rect, original_rect)
-            rect = _pad_and_clip_rect(rect, doc[page - 1].rect)
-            if rect.is_empty or rect.width <= 1 or rect.height <= 1:
-                continue
-            block_id = str(b.get("block_id") or f"page_{page:04d}")
-            image_name = f"{block_id}_page_{page:04d}.png"
-            image_path = asset_dir / image_name
-            pix = doc[page - 1].get_pixmap(matrix=matrix, clip=rect, alpha=False)
-            _save_optimized_png(pix, image_path)
-            attrs = b.setdefault("attrs", {})
-            image_id = f"{block_id}-image"
-            original = attrs.get("image_path")
-            if original:
-                attrs.setdefault("original_image_path", original)
-            attrs["image_path"] = str(Path("images") / "repaired" / image_name)
-            attrs["image_id"] = image_id
-            attrs["image_render_source"] = "source_pdf_crop"
-            attrs["image_render_dpi"] = dpi
-            attrs["image_render_bbox"] = _pdf_rect_to_coord_bbox(
-                page, doc[page - 1].rect, rect, geometry
-            )
-            _upsert_image_asset(
+            _materialize_repaired_figure(
                 canonical,
-                {
-                    "image_id": image_id,
-                    "path": _asset_path_relative_to_output_dir(image_path, output_dir),
-                    "media_type": "image/png",
-                    "role": "figure",
-                    "source": {"page": page, "bbox": attrs.get("image_render_bbox")},
-                    "related_block_ids": [b.get("block_id")] if b.get("block_id") else [],
-                },
+                b,
+                doc,
+                matrix,
+                asset_dir,
+                output_dir,
+                geometry,
+                dpi,
             )
     finally:
         doc.close()
+
+
+def _materialize_repaired_figure(
+    canonical: Dict[str, Any],
+    block: Dict[str, Any],
+    doc: Any,
+    matrix: Any,
+    asset_dir: Path,
+    output_dir: Path,
+    geometry: PageGeometry,
+    dpi: int,
+) -> None:
+    page = (block.get("source") or {}).get("page")
+    bbox = _repaired_figure_crop_bbox(block)
+    if not isinstance(page, int) or page < 1 or page > len(doc) or not bbox:
+        return
+
+    page_obj = doc[page - 1]
+    rect = _repaired_figure_pdf_rect(block, page_obj, page, bbox, geometry)
+    if rect is None:
+        return
+
+    block_id = str(block.get("block_id") or f"page_{page:04d}")
+    image_name = f"{block_id}_page_{page:04d}.png"
+    image_path = asset_dir / image_name
+    pix = page_obj.get_pixmap(matrix=matrix, clip=rect, alpha=False)
+    _save_optimized_png(pix, image_path)
+    attrs = _update_repaired_figure_attrs(block, block_id, image_name, dpi)
+    attrs["image_render_bbox"] = _pdf_rect_to_coord_bbox(page, page_obj.rect, rect, geometry)
+    _upsert_image_asset(
+        canonical,
+        {
+            "image_id": attrs["image_id"],
+            "path": _asset_path_relative_to_output_dir(image_path, output_dir),
+            "media_type": "image/png",
+            "role": "figure",
+            "source": {"page": page, "bbox": attrs.get("image_render_bbox")},
+            "related_block_ids": [block.get("block_id")] if block.get("block_id") else [],
+        },
+    )
+
+
+def _repaired_figure_pdf_rect(
+    block: Dict[str, Any], page_obj: Any, page: int, bbox: list[float], geometry: PageGeometry
+) -> Any | None:
+    rect = _scale_bbox_to_pdf_rect(page, page_obj.rect, bbox, geometry)
+    original_rect = rect
+    if _should_expand_repaired_figure_crop(block):
+        rect = _expand_rect_to_visible_content(page_obj, rect)
+    if _is_auto_repaired_dense_text_image(block) and not _rect_expanded_bottom(original_rect, rect):
+        return None
+    if _is_auto_repaired_dense_text_image(block):
+        rect = _trim_rect_bottom_to_horizontal_rule(page_obj, rect, original_rect)
+    rect = _pad_and_clip_rect(rect, page_obj.rect)
+    if rect.is_empty or rect.width <= 1 or rect.height <= 1:
+        return None
+    return rect
+
+
+def _update_repaired_figure_attrs(
+    block: Dict[str, Any], block_id: str, image_name: str, dpi: int
+) -> Dict[str, Any]:
+    attrs = block.setdefault("attrs", {})
+    image_id = f"{block_id}-image"
+    original = attrs.get("image_path")
+    if original:
+        attrs.setdefault("original_image_path", original)
+    attrs["image_path"] = str(Path("images") / "repaired" / image_name)
+    attrs["image_id"] = image_id
+    attrs["image_render_source"] = "source_pdf_crop"
+    attrs["image_render_dpi"] = dpi
+    return attrs
 
 
 def _save_optimized_png(pix: Any, image_path: Path) -> None:
@@ -392,31 +451,53 @@ def _resolve_figure_image_path(
         return candidate
     filename = Path(image_path).name
     search_dirs = source_dirs or [output_dir]
+    return (
+        _resolve_from_search_dirs(image_path, filename, search_dirs)
+        or _resolve_from_vlm_image_dirs(filename, search_dirs)
+        or _resolve_from_doc_id_image_dirs(filename, search_dirs, doc_id)
+    )
+
+
+def _resolve_from_search_dirs(
+    image_path: str, filename: str, search_dirs: List[Path]
+) -> Optional[Path]:
     for base in search_dirs:
         joined = base / image_path
         if joined.exists():
             return joined
-        images_dir = base / "images"
-        if images_dir.is_dir():
-            candidate = images_dir / filename
-            if candidate.exists():
-                return candidate
+        candidate = base / "images" / filename
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _resolve_from_vlm_image_dirs(filename: str, search_dirs: List[Path]) -> Optional[Path]:
     for base in search_dirs:
         for vlm_dir in base.rglob("vlm/images"):
             candidate = vlm_dir / filename
             if candidate.exists():
                 return candidate
-    if doc_id:
-        for base in search_dirs:
-            for candidate_dir in [
-                base / "mineru_raw" / doc_id / "vlm" / "images",
-                base / doc_id / "mineru_raw" / doc_id / "vlm" / "images",
-            ]:
-                if candidate_dir.is_dir():
-                    candidate = candidate_dir / filename
-                    if candidate.exists():
-                        return candidate
     return None
+
+
+def _resolve_from_doc_id_image_dirs(
+    filename: str, search_dirs: List[Path], doc_id: str
+) -> Optional[Path]:
+    if not doc_id:
+        return None
+    for base in search_dirs:
+        for candidate_dir in _doc_id_image_dirs(base, doc_id):
+            candidate = candidate_dir / filename
+            if candidate.exists():
+                return candidate
+    return None
+
+
+def _doc_id_image_dirs(base: Path, doc_id: str) -> List[Path]:
+    return [
+        base / "mineru_raw" / doc_id / "vlm" / "images",
+        base / doc_id / "mineru_raw" / doc_id / "vlm" / "images",
+    ]
 
 
 def _needs_repaired_figure_asset(block: Dict[str, Any]) -> bool:
@@ -561,7 +642,6 @@ def _pdf_rect_to_coord_bbox(
 def _expand_rect_to_visible_content(page: Any, rect: Any) -> Any:
     try:
         import fitz  # type: ignore
-        from PIL import Image  # type: ignore
     except Exception:
         return rect
 
@@ -578,45 +658,84 @@ def _expand_rect_to_visible_content(page: Any, rect: Any) -> Any:
     best = rect
 
     for _ in range(4):
-        try:
-            pix = page.get_pixmap(matrix=fitz.Matrix(1, 1), clip=search, alpha=False)
-            image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
-        except Exception:
+        content = _visible_content_bbox(page, search)
+        if content is None:
             return best
-        ink = image.point(lambda p: 255 if p < 245 else 0)
-        content_bbox = ink.getbbox()
-        if not content_bbox:
+        pix, content_bbox = content
+        if content_bbox is None:
             return best
 
-        x0, y0, x1, y1 = content_bbox
-        expanded = fitz.Rect(search.x0 + x0, search.y0 + y0, search.x0 + x1, search.y0 + y1)
+        expanded = _content_rect(fitz, search, content_bbox)
         candidate = expanded | rect
-        candidate_area = max(1.0, candidate.width * candidate.height)
-        if candidate_area > original_area * 1.45:
+        if _rect_area(candidate) > original_area * 1.45:
             return best
         best = candidate
 
-        touches_left = x0 <= 1 and search.x0 > page_rect.x0
-        touches_top = y0 <= 1 and search.y0 > page_rect.y0
-        touches_right = x1 >= pix.width - 1 and search.x1 < page_rect.x1
-        touches_bottom = y1 >= pix.height - 1 and search.y1 < page_rect.y1
-        if not (touches_left or touches_top or touches_right or touches_bottom):
+        touches = _content_touches_search_edges(content_bbox, pix, search, page_rect)
+        if not any(touches):
             return best
 
-        next_search = fitz.Rect(search)
-        if touches_left:
-            next_search.x0 = max(page_rect.x0, next_search.x0 - x_step)
-        if touches_top:
-            next_search.y0 = max(page_rect.y0, next_search.y0 - y_step)
-        if touches_right:
-            next_search.x1 = min(page_rect.x1, next_search.x1 + x_step)
-        if touches_bottom:
-            next_search.y1 = min(page_rect.y1, next_search.y1 + y_step)
+        next_search = _expanded_search_rect(fitz, search, page_rect, touches, x_step, y_step)
         if next_search == search:
             return best
         search = next_search
 
     return best
+
+
+def _visible_content_bbox(page: Any, search: Any) -> Optional[Tuple[Any, Any]]:
+    try:
+        import fitz  # type: ignore
+        from PIL import Image  # type: ignore
+
+        pix = page.get_pixmap(matrix=fitz.Matrix(1, 1), clip=search, alpha=False)
+        image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
+    except Exception:
+        return None
+    ink = image.point(lambda p: 255 if p < 245 else 0)
+    return pix, ink.getbbox()
+
+
+def _content_rect(fitz_module: Any, search: Any, content_bbox: Tuple[int, int, int, int]) -> Any:
+    x0, y0, x1, y1 = content_bbox
+    return fitz_module.Rect(search.x0 + x0, search.y0 + y0, search.x0 + x1, search.y0 + y1)
+
+
+def _rect_area(rect: Any) -> float:
+    return max(1.0, rect.width * rect.height)
+
+
+def _content_touches_search_edges(
+    content_bbox: Tuple[int, int, int, int], pix: Any, search: Any, page_rect: Any
+) -> Tuple[bool, bool, bool, bool]:
+    x0, y0, x1, y1 = content_bbox
+    return (
+        x0 <= 1 and search.x0 > page_rect.x0,
+        y0 <= 1 and search.y0 > page_rect.y0,
+        x1 >= pix.width - 1 and search.x1 < page_rect.x1,
+        y1 >= pix.height - 1 and search.y1 < page_rect.y1,
+    )
+
+
+def _expanded_search_rect(
+    fitz_module: Any,
+    search: Any,
+    page_rect: Any,
+    touches: Tuple[bool, bool, bool, bool],
+    x_step: float,
+    y_step: float,
+) -> Any:
+    touches_left, touches_top, touches_right, touches_bottom = touches
+    next_search = fitz_module.Rect(search)
+    if touches_left:
+        next_search.x0 = max(page_rect.x0, next_search.x0 - x_step)
+    if touches_top:
+        next_search.y0 = max(page_rect.y0, next_search.y0 - y_step)
+    if touches_right:
+        next_search.x1 = min(page_rect.x1, next_search.x1 + x_step)
+    if touches_bottom:
+        next_search.y1 = min(page_rect.y1, next_search.y1 + y_step)
+    return next_search
 
 
 def _pad_and_clip_rect(rect: Any, page_rect: Any, padding: float = 4.0) -> Any:
