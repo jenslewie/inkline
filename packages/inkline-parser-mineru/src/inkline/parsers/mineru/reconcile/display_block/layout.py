@@ -21,6 +21,12 @@ from ..layout_helpers import (
     _page_coord_widths,
     _scaled_body_metrics,
 )
+from .body_flow_geometry import block_bboxes_on_pages as _block_bboxes_on_pages
+from .body_flow_geometry import (
+    has_cross_page_body_flow_spans as _has_cross_page_body_flow_spans,
+)
+from .body_flow_geometry import is_page_top_large_block as _is_page_top_large_block
+from .body_flow_geometry import span_has_body_flow_layout as _span_has_body_flow_layout
 
 
 def reconcile_display_blocks(blocks: List[Dict[str, Any]], layout: LayoutStats) -> None:
@@ -346,9 +352,7 @@ def _has_indented_display_geometry(
     ):
         return False
     if not spans_multiple_pages and (
-        _has_tight_body_flow_from_previous_paragraph(
-            blocks, idx, layout, page_widths, page_heights
-        )
+        _has_tight_body_flow_from_previous_paragraph(blocks, idx, layout, page_widths, page_heights)
         or _has_tight_body_flow_from_previous_body_span(
             blocks, idx, layout, page_widths, page_heights
         )
@@ -904,96 +908,6 @@ def _page_body_left(
     return min(candidates)
 
 
-def _page_body_left_for_page(
-    blocks: List[Dict[str, Any]],
-    page: int,
-    cur: Dict[str, Any],
-    layout: LayoutStats,
-    page_widths: Dict[int, float] | None = None,
-) -> float:
-    coord_width = page_widths.get(page) if page_widths else None
-    scaled_body_left, _scaled_body_right, scaled_body_width = _scaled_body_metrics(
-        layout, coord_width
-    )
-    candidates: List[float] = []
-    for block in blocks:
-        if block is cur or block.get("type") != PARAGRAPH:
-            continue
-        for bb in _block_bboxes_on_pages(block, {page}):
-            width = max(0.0, float(bb[2]) - float(bb[0]))
-            if width >= scaled_body_width * 0.70:
-                candidates.append(float(bb[0]))
-    if not candidates:
-        return scaled_body_left
-    return min(candidates)
-
-
-def _block_bboxes_on_pages(block: Dict[str, Any], pages: set[int]) -> List[List[float]]:
-    source = block.get("source") or {}
-    span_bboxes: List[List[float]] = []
-    for span in source.get("spans") or []:
-        span_page = span.get("page")
-        span_bbox = span.get("bbox")
-        if span_page in pages and isinstance(span_bbox, list) and len(span_bbox) >= 4:
-            span_bboxes.append(span_bbox)
-    if span_bboxes:
-        return span_bboxes
-    block_page = _block_page(block)
-    bb = _bbox(block)
-    if block_page in pages and bb:
-        return [bb]
-    return []
-
-
-def _has_cross_page_body_flow_spans(
-    blocks: List[Dict[str, Any]],
-    cur: Dict[str, Any],
-    layout: LayoutStats,
-    page_widths: Dict[int, float] | None = None,
-) -> bool:
-    spans = [
-        span for span in (cur.get("source") or {}).get("spans") or [] if isinstance(span, dict)
-    ]
-    pages = _block_pages(cur)
-    if len(pages) < 2 or len(spans) < 2:
-        return False
-    checked = 0
-    for span in spans:
-        page = span.get("page")
-        bbox = span.get("bbox")
-        if page is None or not isinstance(bbox, list) or len(bbox) < 4:
-            continue
-        checked += 1
-        if not _span_has_body_flow_layout(blocks, cur, int(page), bbox, layout, page_widths):
-            return False
-    return checked >= 2
-
-
-def _span_has_body_flow_layout(
-    blocks: List[Dict[str, Any]],
-    cur: Dict[str, Any],
-    page: int,
-    bbox: List[float],
-    layout: LayoutStats,
-    page_widths: Dict[int, float] | None = None,
-) -> bool:
-    coord_width = page_widths.get(page) if page_widths else None
-    _scaled_body_left, _scaled_body_right, scaled_body_width = _scaled_body_metrics(
-        layout, coord_width
-    )
-    body_left = _page_body_left_for_page(blocks, page, cur, layout, page_widths)
-    x0 = float(bbox[0])
-    width = max(0.0, float(bbox[2]) - x0)
-    if width < scaled_body_width * 0.65:
-        return False
-    near_body_left = x0 <= body_left + max(48.0, scaled_body_width * 0.06)
-    indent = x0 - body_left
-    first_line_indent = (
-        max(34.0, scaled_body_width * 0.045) <= indent <= max(82.0, scaled_body_width * 0.11)
-    )
-    return near_body_left or first_line_indent
-
-
 def _is_long_body_lane_paragraph(
     blocks: List[Dict[str, Any]],
     idx: int,
@@ -1023,11 +937,3 @@ def _is_long_body_lane_paragraph(
     near_body_left = x0 <= body_left + max(55.0, scaled_body_width * 0.07)
     body_width = width >= scaled_body_width * 0.90
     return near_body_left and body_width
-
-
-def _is_page_top_large_block(
-    blocks: List[Dict[str, Any]], block: Dict[str, Any], bbox: List[Any], page: int, layout: LayoutStats
-) -> bool:
-    page_height = _page_coord_heights(blocks).get(page, layout.page_height)
-    height = max(0.0, float(bbox[3]) - float(bbox[1]))
-    return float(bbox[1]) <= page_height * 0.25 and height >= page_height * 0.45
