@@ -7,6 +7,8 @@ from typing import Any
 from inkline.epub.markup import indent_lines
 from inkline.epub.table.model import TableView
 
+VALID_ALIGNMENTS = {"left", "center", "right"}
+
 
 def render_table_html(table: TableView) -> str:
     table_part = table.html_fragment
@@ -41,17 +43,7 @@ def apply_cell_alignments(html: str, cell_alignments: Any) -> str:
     if not cell_alignments:
         return html
 
-    default = cell_alignments.get("default", "")
-    rows_map: dict[int, str] = {}
-    for row_alignment in cell_alignments.get("rows") or []:
-        if isinstance(row_alignment, (list, tuple)) and len(row_alignment) >= 2:
-            rows_map[row_alignment[0]] = row_alignment[1]
-
-    cells_map: dict[tuple[int, int], str] = {}
-    for cell_alignment in cell_alignments.get("cells") or []:
-        if isinstance(cell_alignment, (list, tuple)) and len(cell_alignment) >= 3:
-            cells_map[(cell_alignment[0], cell_alignment[1])] = cell_alignment[2]
-
+    default, rows_map, cells_map = _alignment_maps(cell_alignments)
     row = 0
     col = 0
     result: list[str] = []
@@ -71,27 +63,42 @@ def apply_cell_alignments(html: str, cell_alignments: Any) -> str:
             # <td> or <th> tag: determine alignment
             tag = m.group(3)
             attrs_str = m.group(4) or ""
-
             alignment = cells_map.get((row, col)) or rows_map.get(row) or default
             col += 1
-
-            if alignment in {"left", "center", "right"}:
-                class_match = re.search(r'\bclass\s*=\s*(["\'])(.*?)\1', attrs_str)
-                if class_match:
-                    quote = class_match.group(1)
-                    existing = class_match.group(2)
-                    merged = f"{existing} td-align-{alignment}"
-                    full_class = f"class={quote}{merged}{quote}"
-                    new_attrs = (
-                        attrs_str[: class_match.start()]
-                        + full_class
-                        + attrs_str[class_match.end() :]
-                    )
-                    result.append(f"<{tag}{new_attrs}>")
-                else:
-                    result.append(f'<{tag}{attrs_str} class="td-align-{alignment}">')
-            else:
-                result.append(f"<{tag}{attrs_str}>")
+            result.append(_cell_tag_with_alignment(tag, attrs_str, alignment))
         pos = m.end()
     result.append(html[pos:])
     return "".join(result)
+
+
+def _alignment_maps(
+    cell_alignments: Any,
+) -> tuple[str, dict[int, str], dict[tuple[int, int], str]]:
+    default = cell_alignments.get("default", "")
+    rows_map = {
+        row_alignment[0]: row_alignment[1]
+        for row_alignment in cell_alignments.get("rows") or []
+        if isinstance(row_alignment, (list, tuple)) and len(row_alignment) >= 2
+    }
+    cells_map = {
+        (cell_alignment[0], cell_alignment[1]): cell_alignment[2]
+        for cell_alignment in cell_alignments.get("cells") or []
+        if isinstance(cell_alignment, (list, tuple)) and len(cell_alignment) >= 3
+    }
+    return default, rows_map, cells_map
+
+
+def _cell_tag_with_alignment(tag: str, attrs_str: str, alignment: str) -> str:
+    if alignment not in VALID_ALIGNMENTS:
+        return f"<{tag}{attrs_str}>"
+
+    class_match = re.search(r'\bclass\s*=\s*(["\'])(.*?)\1', attrs_str)
+    if not class_match:
+        return f'<{tag}{attrs_str} class="td-align-{alignment}">'
+
+    quote = class_match.group(1)
+    existing = class_match.group(2)
+    merged = f"{existing} td-align-{alignment}"
+    full_class = f"class={quote}{merged}{quote}"
+    new_attrs = attrs_str[: class_match.start()] + full_class + attrs_str[class_match.end() :]
+    return f"<{tag}{new_attrs}>"
