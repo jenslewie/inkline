@@ -1,10 +1,27 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, cast
 
 from inkline.epub.figure.model import Caption, CaptionSide, ImageRef, SideCaptionLayout
 
 FULL_WIDTH_IMAGE_MIN_PERCENT = 80.0
+
+
+@dataclass(frozen=True)
+class _Box:
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+    @property
+    def width(self) -> float:
+        return max(1.0, self.right - self.left)
+
+    @property
+    def height(self) -> float:
+        return max(1.0, self.bottom - self.top)
 
 
 def estimate_document_page_width(document: dict[str, Any]) -> float | None:
@@ -30,28 +47,16 @@ def estimate_document_page_width(document: dict[str, Any]) -> float | None:
 
 def infer_side_caption_layout(block: dict[str, Any]) -> SideCaptionLayout | None:
     attrs = block.get("attrs") or {}
-    image_bbox = attrs.get("image_bbox")
-    caption_bbox = attrs.get("caption_bbox")
+    image = _box_from_bbox(attrs.get("image_bbox"))
+    caption = _box_from_bbox(attrs.get("caption_bbox"))
     source_bbox = (block.get("source") or {}).get("bbox")
-    if not (is_bbox(image_bbox) and is_bbox(caption_bbox) and is_bbox(source_bbox)):
+    if image is None or caption is None or not is_bbox(source_bbox):
         return None
-    image_box = cast(list[Any], image_bbox)
-    caption_box = cast(list[Any], caption_bbox)
-    image_left, image_top, image_right, image_bottom = [float(v) for v in image_box[:4]]
-    caption_left, caption_top, caption_right, caption_bottom = [float(v) for v in caption_box[:4]]
-    image_width = max(1.0, image_right - image_left)
-    image_height = max(1.0, image_bottom - image_top)
-    caption_width = max(1.0, caption_right - caption_left)
-    caption_height = max(1.0, caption_bottom - caption_top)
-    vertical_overlap = min(image_bottom, caption_bottom) - max(image_top, caption_top)
-    min_height = min(image_height, caption_height)
-    if vertical_overlap < min_height * 0.25:
+
+    if _vertical_overlap(image, caption) < min(image.height, caption.height) * 0.25:
         return None
-    side: CaptionSide | None = None
-    if caption_left >= image_right - image_width * 0.05:
-        side = "right"
-    elif caption_right <= image_left + image_width * 0.05:
-        side = "left"
+
+    side = _caption_side(image, caption)
     if side is None:
         return None
     source_width = bbox_width(source_bbox)
@@ -59,9 +64,35 @@ def infer_side_caption_layout(block: dict[str, Any]) -> SideCaptionLayout | None
         return None
     return SideCaptionLayout(
         side=side,
-        image_percent=min(100.0, max(1.0, image_width / source_width * 100.0)),
-        caption_percent=min(100.0, max(1.0, caption_width / source_width * 100.0)),
+        image_percent=_width_percent(image, source_width),
+        caption_percent=_width_percent(caption, source_width),
     )
+
+
+def _box_from_bbox(bbox: Any) -> _Box | None:
+    if not is_bbox(bbox):
+        return None
+    try:
+        left, top, right, bottom = (float(v) for v in bbox[:4])
+    except (TypeError, ValueError):
+        return None
+    return _Box(left, top, right, bottom)
+
+
+def _vertical_overlap(left: _Box, right: _Box) -> float:
+    return min(left.bottom, right.bottom) - max(left.top, right.top)
+
+
+def _caption_side(image: _Box, caption: _Box) -> CaptionSide | None:
+    if caption.left >= image.right - image.width * 0.05:
+        return "right"
+    if caption.right <= image.left + image.width * 0.05:
+        return "left"
+    return None
+
+
+def _width_percent(box: _Box, source_width: float) -> float:
+    return min(100.0, max(1.0, box.width / source_width * 100.0))
 
 
 def infer_image_max_width_percent(block: dict[str, Any], page_width: float | None) -> float | None:
