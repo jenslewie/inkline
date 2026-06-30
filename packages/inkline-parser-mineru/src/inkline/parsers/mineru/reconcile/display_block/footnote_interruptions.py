@@ -24,14 +24,12 @@ from ..layout_helpers import (
     _page_coord_widths,
     _scaled_body_metrics,
 )
-from .body_paragraph_split import (
-    _set_partitioned_inline_attrs,
-    _split_inline_runs_at_offset,
-    _split_note_refs_by_runs,
-)
 from .helpers import (
     display_lanes_compatible,
 )
+from .inline_split import set_partitioned_inline_attrs as _set_partitioned_inline_attrs
+from .inline_split import split_inline_runs_at_offset as _split_inline_runs_at_offset
+from .inline_split import split_note_refs_by_runs as _split_note_refs_by_runs
 
 
 @dataclass(frozen=True)
@@ -224,7 +222,9 @@ def _split_next_page_leading_continuation_line(blocks: List[Dict[str, Any]], idx
 
     block["text"] = lines[0]
     block["source"] = _source_for_spans(source, [sources.first_span], sources.first_bbox)
-    _set_partitioned_inline_attrs(block.setdefault("attrs", {}), inline.first_runs, inline.first_refs)
+    _set_partitioned_inline_attrs(
+        block.setdefault("attrs", {}), inline.first_runs, inline.first_refs
+    )
 
     rest = copy.deepcopy(block)
     rest["block_id"] = f"{block.get('block_id')}_tail"

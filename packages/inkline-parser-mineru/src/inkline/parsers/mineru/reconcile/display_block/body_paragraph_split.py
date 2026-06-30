@@ -15,15 +15,13 @@ from ..block_access import block_page as _block_page
 from ..block_merge import _merge_block_pair
 from ..constants import FLOAT_LIKE_TYPES
 from ..layout_helpers import _page_coord_widths, _scaled_body_metrics
-from ..notes.keys import note_ref_key as _note_ref_key
-from .source_spans import (
-    apply_embedded_display_source as _apply_embedded_display_source,
+from .embedded_short_lines import (
+    split_embedded_short_line_groups_from_paragraphs as _split_embedded_short_line_groups_from_paragraphs,
 )
+from .inline_split import split_inline_runs_at_offset as _split_inline_runs_at_offset
+from .inline_split import split_note_refs_by_runs as _split_note_refs_by_runs
 from .source_spans import (
     apply_source_from_spans as _apply_source_from_spans,
-)
-from .source_spans import (
-    embedded_display_spans as _embedded_display_spans,
 )
 from .source_spans import (
     is_display_lane_span as _is_display_lane_span,
@@ -39,9 +37,6 @@ from .source_spans import (
 )
 from .source_spans import (
     span_has_body_flow_layout as _span_has_body_flow_layout,
-)
-from .source_spans import (
-    surrounding_spans as _surrounding_spans,
 )
 from .source_spans import (
     text_for_spans as _text_for_spans,
@@ -60,54 +55,6 @@ class _BodyTailSplit:
     display_refs: List[Dict[str, Any]] | None
     body_refs: List[Dict[str, Any]] | None
     nonempty_lines: List[str]
-
-
-@dataclass(frozen=True)
-class _EmbeddedShortLineSplit:
-    before_text: str
-    display_text: str
-    after_text: str
-    start_line: int
-    end_line: int
-    lines: List[str]
-    original_attrs: Dict[str, Any]
-    original_source: Dict[str, Any]
-    source_spans: List[Dict[str, Any]]
-    before_runs: List[Dict[str, Any]]
-    display_runs: List[Dict[str, Any]]
-    after_runs: List[Dict[str, Any]]
-    before_refs: List[Dict[str, Any]] | None
-    display_refs: List[Dict[str, Any]] | None
-    after_refs: List[Dict[str, Any]] | None
-    fallback_before_spans: List[Dict[str, Any]]
-    fallback_display_spans: List[Dict[str, Any]]
-    fallback_after_spans: List[Dict[str, Any]]
-
-
-@dataclass(frozen=True)
-class _ShortLineTextSplit:
-    before_text: str
-    display_text: str
-    after_text: str
-    start_line: int
-    end_line: int
-
-
-@dataclass(frozen=True)
-class _InlineSplitPartitions:
-    before_runs: List[Dict[str, Any]]
-    display_runs: List[Dict[str, Any]]
-    after_runs: List[Dict[str, Any]]
-    before_refs: List[Dict[str, Any]] | None
-    display_refs: List[Dict[str, Any]] | None
-    after_refs: List[Dict[str, Any]] | None
-
-
-@dataclass(frozen=True)
-class _FallbackSpans:
-    before: List[Dict[str, Any]]
-    display: List[Dict[str, Any]]
-    after: List[Dict[str, Any]]
 
 
 def reconcile_display_block_body_paragraph_split(
@@ -137,9 +84,7 @@ def _split_body_tails_from_display_blocks(
     i = 0
     while i < len(blocks):
         cur = blocks[i]
-        split = _body_tail_split_for_block(
-            cur, blocks, i, layout, page_widths, page_body_lefts
-        )
+        split = _body_tail_split_for_block(cur, blocks, i, layout, page_widths, page_body_lefts)
         if split is None:
             i += 1
             continue
@@ -176,13 +121,19 @@ def _body_tail_split_for_block(
         return None
     split_idx = len(text[:split_point].split("\n")) - 1
     if not _body_tail_has_prose_evidence(
-        block, blocks, block_index, text, body_lines, split_idx, layout, page_widths, page_body_lefts
+        block,
+        blocks,
+        block_index,
+        text,
+        body_lines,
+        split_idx,
+        layout,
+        page_widths,
+        page_body_lefts,
     ):
         return None
     original_source = block.get("source") or {}
-    source_spans = [
-        span for span in original_source.get("spans") or [] if isinstance(span, dict)
-    ]
+    source_spans = [span for span in original_source.get("spans") or [] if isinstance(span, dict)]
     display_runs, body_runs = _split_inline_runs_at_offset(
         (block.get("attrs") or {}).get("inline_runs"), split_point
     )
@@ -245,9 +196,8 @@ def _apply_body_tail_split(block: Dict[str, Any], split: _BodyTailSplit) -> Dict
     new_para["text"] = split.body_text
     new_para.pop("level", None)
     _prepare_split_body_tail_attrs(new_para, block, split)
-    if (
-        len(split.source_spans) == len(split.nonempty_lines)
-        and 0 < split.split_idx < len(split.source_spans)
+    if len(split.source_spans) == len(split.nonempty_lines) and 0 < split.split_idx < len(
+        split.source_spans
     ):
         _apply_source_from_spans(
             block,
@@ -298,9 +248,7 @@ def _set_optional_inline_runs(attrs: Dict[str, Any], runs: List[Dict[str, Any]])
         attrs.pop("inline_runs", None)
 
 
-def _set_optional_note_refs(
-    attrs: Dict[str, Any], refs: List[Dict[str, Any]] | None
-) -> None:
+def _set_optional_note_refs(attrs: Dict[str, Any], refs: List[Dict[str, Any]] | None) -> None:
     if refs is not None:
         attrs["note_refs"] = refs
     else:
@@ -522,19 +470,16 @@ def _leading_body_intro_split(
     first_bbox = _span_bbox(first)
     second_bbox = _span_bbox(second)
     page = first.get("page")
-    if (
-        first_bbox is None
-        or second_bbox is None
-        or page is None
-        or second.get("page") != page
-    ):
+    if first_bbox is None or second_bbox is None or page is None or second.get("page") != page:
         return None
     page = int(page)
     if not _span_has_body_flow_layout(first, layout, page_widths, page_body_lefts):
         return None
     if not _is_display_lane_span(second, layout, page_widths):
         return None
-    prev_bbox = _previous_body_flow_span_bbox(blocks, idx, page, layout, page_widths, page_body_lefts)
+    prev_bbox = _previous_body_flow_span_bbox(
+        blocks, idx, page, layout, page_widths, page_body_lefts
+    )
     if not prev_bbox:
         return None
     line_height = max(1.0, float(first_bbox[3]) - float(first_bbox[1]))
@@ -629,339 +574,6 @@ def _geometry_embedded_paragraph_split(
     return None
 
 
-def _demote_display_attrs(attrs: Dict[str, Any]) -> None:
-    for key in [
-        "layout_role",
-        "layout_form",
-        "line_count",
-        "has_attribution_line",
-        "line_layouts",
-        "raw_types",
-        "merged_from",
-        "merge_reason",
-        "merge_evidence",
-        "interrupted_by",
-    ]:
-        attrs.pop(key, None)
-
-
-def _split_embedded_short_line_groups_from_paragraphs(
-    blocks: List[Dict[str, Any]],
-    layout: LayoutStats,
-    page_widths: Dict[int, float] | None = None,
-    page_body_lefts: Dict[int, float] | None = None,
-) -> None:
-    i = 0
-    while i < len(blocks):
-        cur = blocks[i]
-        if cur.get("type") != PARAGRAPH:
-            i += 1
-            continue
-        attrs = cur.get("attrs") or {}
-        if not attrs.get("split_from_display_block_id"):
-            i += 1
-            continue
-        text = str(cur.get("text") or "").strip()
-        split = _embedded_short_line_split_plan(
-            cur, text, layout, page_widths, page_body_lefts
-        )
-        if split is None:
-            i += 1
-            continue
-        inserts = _apply_embedded_short_line_split(
-            cur, split, layout, page_widths, page_body_lefts
-        )
-        blocks[i + 1 : i + 1] = inserts
-        i += 1 + len(inserts)
-
-
-def _embedded_short_line_split_plan(
-    block: Dict[str, Any],
-    text: str,
-    layout: LayoutStats,
-    page_widths: Dict[int, float] | None,
-    page_body_lefts: Dict[int, float] | None,
-) -> _EmbeddedShortLineSplit | None:
-    text_split = _embedded_short_line_text_split(block, text, layout, page_widths)
-    if text_split is None:
-        return None
-    original_attrs = block.get("attrs") or {}
-    original_source = block.get("source") or {}
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
-    inline = _embedded_inline_partitions(
-        original_attrs, text_split.before_text, text_split.display_text
-    )
-    source_spans = [
-        span for span in original_source.get("spans") or [] if isinstance(span, dict)
-    ]
-    fallback = _embedded_fallback_spans(
-        source_spans,
-        lines,
-        layout,
-        page_widths,
-        page_body_lefts,
-        text_split.start_line,
-        text_split.end_line,
-    )
-    return _EmbeddedShortLineSplit(
-        before_text=text_split.before_text,
-        display_text=text_split.display_text,
-        after_text=text_split.after_text,
-        start_line=text_split.start_line,
-        end_line=text_split.end_line,
-        lines=lines,
-        original_attrs=original_attrs,
-        original_source=original_source,
-        source_spans=source_spans,
-        before_runs=inline.before_runs,
-        display_runs=inline.display_runs,
-        after_runs=inline.after_runs,
-        before_refs=inline.before_refs,
-        display_refs=inline.display_refs,
-        after_refs=inline.after_refs,
-        fallback_before_spans=fallback.before,
-        fallback_display_spans=fallback.display,
-        fallback_after_spans=fallback.after,
-    )
-
-
-def _embedded_short_line_text_split(
-    block: Dict[str, Any],
-    text: str,
-    layout: LayoutStats,
-    page_widths: Dict[int, float] | None,
-) -> _ShortLineTextSplit | None:
-    split = _embedded_short_line_group_split_by_geometry(block, text, layout, page_widths)
-    if split is None:
-        split = _embedded_short_line_group_split(text)
-    if split is None:
-        return None
-    before_text, display_text, after_text, start_line, end_line = split
-    return _ShortLineTextSplit(before_text, display_text, after_text, start_line, end_line)
-
-
-def _embedded_inline_partitions(
-    attrs: Dict[str, Any], before_text: str, display_text: str
-) -> _InlineSplitPartitions:
-    before_runs, display_after_runs = _split_inline_runs_at_offset(
-        attrs.get("inline_runs"), _display_start_offset(before_text)
-    )
-    display_runs, after_runs = _split_inline_runs_at_offset(display_after_runs, len(display_text))
-    before_refs, display_after_refs = _split_note_refs_by_runs(
-        attrs.get("note_refs"), before_runs, display_after_runs
-    )
-    display_refs, after_refs = _split_note_refs_by_runs(
-        display_after_refs, display_runs, after_runs
-    )
-    return _InlineSplitPartitions(
-        before_runs, display_runs, after_runs, before_refs, display_refs, after_refs
-    )
-
-
-def _display_start_offset(before_text: str) -> int:
-    return len(before_text) + (1 if before_text else 0)
-
-
-def _embedded_fallback_spans(
-    source_spans: List[Dict[str, Any]],
-    lines: List[str],
-    layout: LayoutStats,
-    page_widths: Dict[int, float] | None,
-    page_body_lefts: Dict[int, float] | None,
-    start_line: int,
-    end_line: int,
-) -> _FallbackSpans:
-    if not source_spans or len(source_spans) == len(lines):
-        return _FallbackSpans([], [], [])
-    display_spans = _embedded_display_spans(
-        source_spans,
-        layout,
-        page_widths,
-        page_body_lefts,
-        max(1, end_line - start_line),
-    )
-    before_spans, after_spans = _surrounding_spans(source_spans, display_spans)
-    return _FallbackSpans(before_spans, display_spans, after_spans)
-
-
-def _apply_embedded_short_line_split(
-    block: Dict[str, Any],
-    split: _EmbeddedShortLineSplit,
-    layout: LayoutStats,
-    page_widths: Dict[int, float] | None,
-    page_body_lefts: Dict[int, float] | None,
-) -> List[Dict[str, Any]]:
-    _apply_embedded_before_paragraph(block, split)
-    inserts = [
-        _embedded_short_line_display_block(block, split, layout, page_widths, page_body_lefts)
-    ]
-    if split.after_text:
-        inserts.append(_embedded_after_block(block, split))
-    return inserts
-
-
-def _apply_embedded_before_paragraph(
-    block: Dict[str, Any], split: _EmbeddedShortLineSplit
-) -> None:
-    block["text"] = split.before_text
-    attrs = block.setdefault("attrs", {})
-    attrs.pop("layout_form", None)
-    attrs["embedded_display_split"] = True
-    _set_partitioned_inline_attrs(attrs, split.before_runs, split.before_refs)
-    if len(split.source_spans) == len(split.lines):
-        _apply_source_from_spans(
-            block, split.original_source, split.source_spans[: split.start_line]
-        )
-    elif split.fallback_before_spans:
-        _apply_source_from_spans(block, split.original_source, split.fallback_before_spans)
-
-
-def _embedded_short_line_display_block(
-    block: Dict[str, Any],
-    split: _EmbeddedShortLineSplit,
-    layout: LayoutStats,
-    page_widths: Dict[int, float] | None,
-    page_body_lefts: Dict[int, float] | None,
-) -> Dict[str, Any]:
-    display_block = copy.deepcopy(block)
-    display_block["block_id"] = f"{block.get('block_id')}_display"
-    display_block["type"] = DISPLAY_BLOCK
-    display_block["text"] = split.display_text
-    display_attrs = display_block.setdefault("attrs", {})
-    display_attrs["layout_role"] = "inline_display_block"
-    display_attrs["layout_form"] = "short_line_group"
-    display_attrs["line_count"] = len(
-        [line for line in split.display_text.split("\n") if line.strip()]
-    )
-    display_attrs["split_from_paragraph_id"] = block.get("block_id")
-    _set_partitioned_inline_attrs(display_attrs, split.display_runs, split.display_refs)
-    _apply_embedded_display_spans(
-        block, display_block, split, layout, page_widths, page_body_lefts
-    )
-    return display_block
-
-
-def _apply_embedded_display_spans(
-    original_block: Dict[str, Any],
-    display_block: Dict[str, Any],
-    split: _EmbeddedShortLineSplit,
-    layout: LayoutStats,
-    page_widths: Dict[int, float] | None,
-    page_body_lefts: Dict[int, float] | None,
-) -> None:
-    if len(split.source_spans) == len(split.lines):
-        _apply_source_from_spans(
-            display_block,
-            split.original_source,
-            split.source_spans[split.start_line : split.end_line],
-        )
-    elif split.fallback_display_spans:
-        _apply_source_from_spans(
-            display_block, split.original_source, split.fallback_display_spans
-        )
-    else:
-        _apply_embedded_display_source(
-            original_block,
-            display_block,
-            layout,
-            page_widths,
-            page_body_lefts,
-            split.start_line,
-            split.end_line,
-        )
-
-
-def _embedded_after_block(
-    block: Dict[str, Any], split: _EmbeddedShortLineSplit
-) -> Dict[str, Any]:
-    after_block = copy.deepcopy(block)
-    after_block["block_id"] = f"{block.get('block_id')}_after"
-    after_block["type"] = PARAGRAPH
-    after_block["text"] = split.after_text
-    after_attrs = after_block.setdefault("attrs", {})
-    after_attrs.pop("layout_role", None)
-    after_attrs.pop("layout_form", None)
-    after_attrs.pop("line_count", None)
-    _set_partitioned_inline_attrs(after_attrs, split.after_runs, split.after_refs)
-    after_attrs["split_from_paragraph_id"] = block.get("block_id")
-    if len(split.source_spans) == len(split.lines):
-        _apply_source_from_spans(
-            after_block, split.original_source, split.source_spans[split.end_line :]
-        )
-    elif split.fallback_after_spans:
-        _apply_source_from_spans(after_block, split.original_source, split.fallback_after_spans)
-    return after_block
-
-
-def _embedded_short_line_group_split(
-    text: str,
-) -> tuple[str, str, str, int, int] | None:
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
-    if len(lines) < 3:
-        return None
-    for start in range(1, len(lines) - 1):
-        if start > 1 and _looks_like_display_short_line(lines[start - 1]):
-            continue
-        end = start
-        while end < len(lines) and _looks_like_display_short_line(lines[end]):
-            end += 1
-        if end - start < 2:
-            continue
-        before = "\n".join(lines[:start]).strip()
-        display = "\n".join(lines[start:end]).strip()
-        after = "\n".join(lines[end:]).strip()
-        if before and display:
-            return before, display, after, start, end
-    return None
-
-
-def _embedded_short_line_group_split_by_geometry(
-    block: Dict[str, Any],
-    text: str,
-    layout: LayoutStats,
-    page_widths: Dict[int, float] | None = None,
-) -> tuple[str, str, str, int, int] | None:
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
-    spans = [
-        span for span in (block.get("source") or {}).get("spans") or [] if isinstance(span, dict)
-    ]
-    if len(lines) < 3 or len(spans) != len(lines):
-        return None
-    bboxes = [_span_bbox(span) for span in spans]
-    if any(bbox is None for bbox in bboxes):
-        return None
-    boxes = [bbox for bbox in bboxes if bbox is not None]
-    heights = [max(1.0, float(bbox[3]) - float(bbox[1])) for bbox in boxes]
-    line_height = sorted(heights)[len(heights) // 2] if heights else 18.0
-    boundary_gap = max(24.0, line_height * 1.5)
-    tight_gap = max(22.0, line_height * 1.25)
-
-    for start in range(1, len(lines) - 1):
-        before_gap = float(boxes[start][1]) - float(boxes[start - 1][3])
-        if before_gap < boundary_gap:
-            continue
-        end = start + 1
-        while end < len(lines) and _line_belongs_to_geometry_run(
-            boxes[start], boxes[end], layout, page_widths, spans[end]
-        ):
-            gap = float(boxes[end][1]) - float(boxes[end - 1][3])
-            if gap < -8.0 or gap > tight_gap:
-                break
-            end += 1
-        if end - start < 2:
-            continue
-        if end < len(lines):
-            after_gap = float(boxes[end][1]) - float(boxes[end - 1][3])
-            if after_gap < boundary_gap:
-                continue
-        before = "\n".join(lines[:start]).strip()
-        display = "\n".join(lines[start:end]).strip()
-        after = "\n".join(lines[end:]).strip()
-        if before and display:
-            return before, display, after, start, end
-    return None
-
-
 def _line_belongs_to_geometry_run(
     first_bbox: BBox,
     candidate_bbox: BBox,
@@ -994,25 +606,20 @@ def _geometry_run_max_width(first_width: float, body_width: float) -> float:
     return max(first_width * 1.45, body_width * 0.36)
 
 
-def _looks_like_display_short_line(line: str) -> bool:
-    stripped = line.strip()
-    return bool(stripped) and len(stripped) <= 32
-
-
-def _set_partitioned_inline_attrs(
-    attrs: Dict[str, Any],
-    runs: List[Dict[str, Any]],
-    refs: List[Dict[str, Any]] | None,
-) -> None:
-    if runs:
-        attrs["inline_runs"] = runs
-    else:
-        attrs.pop("inline_runs", None)
-    if refs is not None:
-        if refs:
-            attrs["note_refs"] = refs
-        else:
-            attrs.pop("note_refs", None)
+def _demote_display_attrs(attrs: Dict[str, Any]) -> None:
+    for key in [
+        "layout_role",
+        "layout_form",
+        "line_count",
+        "has_attribution_line",
+        "line_layouts",
+        "raw_types",
+        "merged_from",
+        "merge_reason",
+        "merge_evidence",
+        "interrupted_by",
+    ]:
+        attrs.pop(key, None)
 
 
 def _merge_split_tail_with_following_paragraph(blocks: List[Dict[str, Any]], idx: int) -> None:
@@ -1228,79 +835,3 @@ def _has_note_ref_boundary_before_offset(block: Dict[str, Any], offset: int) -> 
         if run.get("type") == "note_ref" and 0 <= offset - text_offset <= 2:
             return True
     return False
-
-
-def _split_inline_runs_at_offset(
-    runs: Any, split_offset: int
-) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Split inline runs at a character offset in the block text."""
-    if not isinstance(runs, list):
-        return [], []
-    text_char_offset = 0
-    split_run_index = -1
-    split_char_index = 0
-    for index, run in enumerate(runs):
-        if not isinstance(run, dict) or run.get("type") != "text":
-            continue
-        text = str(run.get("text", ""))
-        next_offset = text_char_offset + len(text)
-        if text_char_offset <= split_offset <= next_offset:
-            split_run_index = index
-            split_char_index = split_offset - text_char_offset
-            break
-        text_char_offset = next_offset
-
-    if split_run_index < 0:
-        return [], []
-
-    display_runs: List[Dict[str, Any]] = []
-    body_runs: List[Dict[str, Any]] = []
-    for index, run in enumerate(runs):
-        if not isinstance(run, dict):
-            continue
-        copied = dict(run)
-        if index < split_run_index:
-            display_runs.append(copied)
-        elif index > split_run_index:
-            body_runs.append(copied)
-        else:
-            text = str(copied.get("text", ""))
-            before = text[:split_char_index].rstrip()
-            after = text[split_char_index:].lstrip()
-            if before:
-                display_runs.append({"type": "text", "text": before})
-            if after:
-                body_runs.append({"type": "text", "text": after})
-    return display_runs, body_runs
-
-
-def _split_note_refs_by_runs(
-    refs: Any,
-    display_block_runs: List[Dict[str, Any]],
-    body_runs: List[Dict[str, Any]],
-) -> tuple[List[Dict[str, Any]] | None, List[Dict[str, Any]] | None]:
-    """Partition note refs to match the side they belong to.
-
-    Modelled on overflow_tail_split._split_note_refs_by_runs.
-    """
-    if not isinstance(refs, list):
-        return None, None
-    buckets: Dict[tuple[str, str, int | None], List[Dict[str, Any]]] = {}
-    for ref in refs:
-        if isinstance(ref, dict):
-            buckets.setdefault(_note_ref_key(ref), []).append(ref)
-    return _refs_for_runs(display_block_runs, buckets), _refs_for_runs(body_runs, buckets)
-
-
-def _refs_for_runs(
-    runs: List[Dict[str, Any]],
-    buckets: Dict[tuple[str, str, int | None], List[Dict[str, Any]]],
-) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for run in runs:
-        if run.get("type") != "note_ref":
-            continue
-        matches = buckets.get(_note_ref_key(run)) or []
-        if matches:
-            out.append(matches.pop(0))
-    return out
