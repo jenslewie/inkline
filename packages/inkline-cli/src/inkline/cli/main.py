@@ -20,7 +20,14 @@ def build_parser() -> argparse.ArgumentParser:
         prog="inkline", description="Composable document parsing, export, and RAG pipeline."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+    _add_ingest_commands(subparsers)
+    _add_import_commands(subparsers)
+    _add_export_commands(subparsers)
+    _add_rag_commands(subparsers)
+    return parser
 
+
+def _add_ingest_commands(subparsers: argparse._SubParsersAction) -> None:
     ingest = subparsers.add_parser("ingest", help="Ingest source documents.")
     ingest_sub = ingest.add_subparsers(dest="kind", required=True)
     ingest_pdf = ingest_sub.add_parser("pdf", help="Ingest a PDF using a parser engine.")
@@ -43,6 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_pdf.add_argument("--output", required=True)
     ingest_pdf.set_defaults(handler=_ingest_pdf)
 
+
+def _add_import_commands(subparsers: argparse._SubParsersAction) -> None:
     import_cmd = subparsers.add_parser(
         "import", help="Import an existing document format to canonical."
     )
@@ -54,6 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
     import_epub_cmd.add_argument("--title")
     import_epub_cmd.set_defaults(handler=_import_epub)
 
+
+def _add_export_commands(subparsers: argparse._SubParsersAction) -> None:
     export = subparsers.add_parser("export", help="Export canonical to another format.")
     export_sub = export.add_subparsers(dest="kind", required=True)
     export_epub_cmd = export_sub.add_parser("epub", help="Export canonical to EPUB.")
@@ -61,6 +72,8 @@ def build_parser() -> argparse.ArgumentParser:
     export_epub_cmd.add_argument("--output", required=True)
     export_epub_cmd.set_defaults(handler=_export_epub)
 
+
+def _add_rag_commands(subparsers: argparse._SubParsersAction) -> None:
     rag = subparsers.add_parser("rag", help="RAG chunking, embedding, indexing, and search.")
     rag_sub = rag.add_subparsers(dest="rag_command", required=True)
     rag_chunk = rag_sub.add_parser("chunk", help="Create chunks from canonical JSON.")
@@ -92,8 +105,6 @@ def build_parser() -> argparse.ArgumentParser:
     rag_search.add_argument("--top-k", type=int, default=3)
     rag_search.add_argument("--jsonl", action="store_true")
     rag_search.set_defaults(handler=_rag_search)
-
-    return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
