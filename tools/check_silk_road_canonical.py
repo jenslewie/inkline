@@ -93,6 +93,15 @@ class Finding:
     detail: str
 
 
+@dataclass(frozen=True)
+class DisplayScope:
+    old_ids: set[str]
+    new_ids: set[str]
+    added: list[str]
+    removed: list[str]
+    allowed_target_ids: set[str]
+
+
 def load_document(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -128,29 +137,35 @@ def check_plan1_figures(
     candidate_by_id: dict[str, dict[str, Any]],
 ) -> list[Finding]:
     findings: list[Finding] = []
+    findings.append(_check_plan1_visual_image(candidate_by_id))
+    findings.extend(_check_plan1_figure_groups(candidate_by_id))
+    findings.extend(_check_plan1_figure_captions(baseline_by_id, candidate_by_id))
+    findings.extend(_check_plan1_page51(baseline_by_id, candidate_by_id))
+    findings.append(_check_plan1_caption_spillover(baseline_by_id, candidate_by_id))
+    return findings
 
+
+def _check_plan1_visual_image(candidate_by_id: dict[str, dict[str, Any]]) -> Finding:
     figure = candidate_by_id.get("b000271")
     removed_caption = "b000272" not in candidate_by_id
     repaired_image = "repaired/" in str(attrs_of(figure).get("image_path") or "")
     if figure and figure.get("type") == "figure" and removed_caption and repaired_image:
-        findings.append(
-            finding(
-                "PASS",
-                "plan1",
-                "b000271_visual_image",
-                "b000272 removed and repaired figure image is used",
-            )
+        return finding(
+            "PASS",
+            "plan1",
+            "b000271_visual_image",
+            "b000272 removed and repaired figure image is used",
         )
-    else:
-        findings.append(
-            finding(
-                "FAIL",
-                "plan1",
-                "b000271_visual_image",
-                "expected b000271 figure with b000272 removed and repaired image_path",
-            )
-        )
+    return finding(
+        "FAIL",
+        "plan1",
+        "b000271_visual_image",
+        "expected b000271 figure with b000272 removed and repaired image_path",
+    )
 
+
+def _check_plan1_figure_groups(candidate_by_id: dict[str, dict[str, Any]]) -> list[Finding]:
+    findings: list[Finding] = []
     for anchor_id, absorbed_ids in PLAN1_FIGURE_GROUPS.items():
         anchor = _figure_group_carrier(candidate_by_id, anchor_id, absorbed_ids)
         absorbed = set(attrs_of(anchor).get("absorbed_block_ids") or [])
@@ -185,7 +200,14 @@ def check_plan1_figures(
                     f"expected one visual figure; remaining fragment blocks={remaining}",
                 )
             )
+    return findings
 
+
+def _check_plan1_figure_captions(
+    baseline_by_id: dict[str, dict[str, Any]],
+    candidate_by_id: dict[str, dict[str, Any]],
+) -> list[Finding]:
+    findings: list[Finding] = []
     for figure_id, snippets in PLAN1_FIGURE_CAPTIONS.items():
         if figure_id not in baseline_by_id and not any(
             any(snippet in text_of(block) for snippet in snippets)
@@ -227,7 +249,13 @@ def check_plan1_figures(
                     f"expected figure attrs.captions to contain {snippets}; spilled blocks={spilled}",
                 )
             )
+    return findings
 
+
+def _check_plan1_page51(
+    baseline_by_id: dict[str, dict[str, Any]],
+    candidate_by_id: dict[str, dict[str, Any]],
+) -> list[Finding]:
     blocks = list(candidate_by_id.values())
     page51_relevant = (
         "b000289" in baseline_by_id
@@ -237,100 +265,284 @@ def check_plan1_figures(
             for block in candidate_by_id.values()
         )
     )
-    if page51_relevant:
-        page51_figure = candidate_by_id.get("b000289")
-        page51_attrs = attrs_of(page51_figure)
-        page51_caption = "\n".join(str(item) for item in page51_attrs.get("captions") or [])
-        absorbed_ids = set(page51_attrs.get("absorbed_block_ids") or [])
-        bad_absorption = bool({"b000290", "b000291", "b000292"} & absorbed_ids) or (
-            page51_attrs.get("embedded_text_absorb_reason") == "following_visual_legend_strip"
+    if not page51_relevant:
+        return []
+
+    findings: list[Finding] = [_check_plan1_page51_caption(candidate_by_id)]
+    findings.extend(_check_plan1_page51_paragraphs(blocks))
+    findings.append(_check_plan1_page51_time_join(blocks))
+    return findings
+
+
+def _check_plan1_page51_caption(candidate_by_id: dict[str, dict[str, Any]]) -> Finding:
+    page51_figure = candidate_by_id.get("b000289")
+    page51_attrs = attrs_of(page51_figure)
+    page51_caption = "\n".join(str(item) for item in page51_attrs.get("captions") or [])
+    absorbed_ids = set(page51_attrs.get("absorbed_block_ids") or [])
+    bad_absorption = bool({"b000290", "b000291", "b000292"} & absorbed_ids) or (
+        page51_attrs.get("embedded_text_absorb_reason") == "following_visual_legend_strip"
+    )
+    if (
+        page51_figure
+        and page51_figure.get("type") == "figure"
+        and all(snippet in page51_caption for snippet in PLAN1_PAGE51_CAPTION)
+        and not bad_absorption
+    ):
+        return finding(
+            "PASS",
+            "plan1",
+            "b000289_caption_not_cropped",
+            "caption attached without absorbing surrounding prose into repaired figure crop",
         )
-        if (
-            page51_figure
-            and page51_figure.get("type") == "figure"
-            and all(snippet in page51_caption for snippet in PLAN1_PAGE51_CAPTION)
-            and not bad_absorption
-        ):
+    return finding(
+        "FAIL",
+        "plan1",
+        "b000289_caption_not_cropped",
+        "expected b000289 caption in attrs.captions and no following_visual_legend_strip absorption",
+    )
+
+
+def _check_plan1_page51_paragraphs(blocks: list[dict[str, Any]]) -> list[Finding]:
+    findings: list[Finding] = []
+    for check_name, snippets in PLAN1_PAGE51_PARAGRAPH_FIXES.items():
+        carriers = [
+            block
+            for block in blocks
+            if block.get("type") == "paragraph"
+            and all(snippet in text_of(block) for snippet in snippets)
+        ]
+        if carriers:
+            ids = [str(block.get("block_id")) for block in carriers]
+            findings.append(
+                finding("PASS", "plan1", check_name, f"paragraph text carried by {ids}")
+            )
+        else:
+            findings.append(
+                finding(
+                    "FAIL",
+                    "plan1",
+                    check_name,
+                    f"expected one paragraph containing snippets={snippets}",
+                )
+            )
+    return findings
+
+
+def _check_plan1_page51_time_join(blocks: list[dict[str, Any]]) -> Finding:
+    bad_time_join = [
+        str(block.get("block_id"))
+        for block in blocks
+        if block.get("type") == "paragraph" and "大致的时此外" in text_of(block)
+    ]
+    if bad_time_join:
+        return finding(
+            "FAIL",
+            "plan1",
+            "page51_no_bad_time_join",
+            f"paragraph still has bad join in blocks {bad_time_join}",
+        )
+    return finding("PASS", "plan1", "page51_no_bad_time_join", "no bad time/page join")
+
+
+def _check_plan1_caption_spillover(
+    baseline_by_id: dict[str, dict[str, Any]],
+    candidate_by_id: dict[str, dict[str, Any]],
+) -> Finding:
+    caption_spills = figure_caption_spills(baseline_by_id, candidate_by_id)
+    if not caption_spills:
+        return finding(
+            "PASS", "plan1", "no_figure_caption_spillover", "no lost figure captions detected"
+        )
+    sample = ", ".join(
+        f"{item['figure_id']}->{','.join(item['added_ids'][:3])}" for item in caption_spills[:8]
+    )
+    return finding(
+        "FAIL",
+        "plan1",
+        "no_figure_caption_spillover",
+        f"{len(caption_spills)} figures lost attrs.captions into new flow blocks; sample {sample}",
+    )
+
+
+def check_plan2_display(
+    baseline_by_id: dict[str, dict[str, Any]],
+    candidate_by_id: dict[str, dict[str, Any]],
+) -> list[Finding]:
+    blocks = list(candidate_by_id.values())
+    findings: list[Finding] = []
+    findings.extend(_check_plan2_display_block_ids(baseline_by_id, candidate_by_id))
+    findings.extend(_check_plan2_paragraph_ids(baseline_by_id, candidate_by_id))
+    findings.extend(_check_plan2_display_texts(blocks))
+    findings.extend(_check_plan2_exact_display_texts(blocks))
+    findings.extend(_check_plan2_paragraph_texts(blocks))
+    return findings
+
+
+def _check_plan2_display_block_ids(
+    baseline_by_id: dict[str, dict[str, Any]],
+    candidate_by_id: dict[str, dict[str, Any]],
+) -> list[Finding]:
+    findings: list[Finding] = []
+    for block_id in sorted(PLAN2_DISPLAY_BLOCKS):
+        block = candidate_by_id.get(block_id)
+        baseline_text = text_of(baseline_by_id.get(block_id)).strip()
+        carrier = _display_text_carrier(candidate_by_id, baseline_text)
+        if carrier:
             findings.append(
                 finding(
                     "PASS",
-                    "plan1",
-                    "b000289_caption_not_cropped",
-                    "caption attached without absorbing surrounding prose into repaired figure crop",
+                    "plan2",
+                    block_id,
+                    f"display text carried by block {carrier.get('block_id')}",
                 )
             )
-        else:
-            findings.append(
-                finding(
-                    "FAIL",
-                    "plan1",
-                    "b000289_caption_not_cropped",
-                    "expected b000289 caption in attrs.captions and no following_visual_legend_strip absorption",
-                )
-            )
-
-        for check_name, snippets in PLAN1_PAGE51_PARAGRAPH_FIXES.items():
-            carriers = [
-                block
-                for block in blocks
-                if block.get("type") == "paragraph"
-                and all(snippet in text_of(block) for snippet in snippets)
-            ]
-            if carriers:
-                ids = [str(block.get("block_id")) for block in carriers]
-                findings.append(
-                    finding("PASS", "plan1", check_name, f"paragraph text carried by {ids}")
-                )
-            else:
-                findings.append(
-                    finding(
-                        "FAIL",
-                        "plan1",
-                        check_name,
-                        f"expected one paragraph containing snippets={snippets}",
-                    )
-                )
-
-        bad_time_join = [
-            str(block.get("block_id"))
-            for block in blocks
-            if block.get("type") == "paragraph" and "大致的时此外" in text_of(block)
-        ]
-        if bad_time_join:
-            findings.append(
-                finding(
-                    "FAIL",
-                    "plan1",
-                    "page51_no_bad_time_join",
-                    f"paragraph still has bad join in blocks {bad_time_join}",
-                )
-            )
-        else:
-            findings.append(
-                finding("PASS", "plan1", "page51_no_bad_time_join", "no bad time/page join")
-            )
-
-    caption_spills = figure_caption_spills(baseline_by_id, candidate_by_id)
-    if caption_spills:
-        sample = ", ".join(
-            f"{item['figure_id']}->{','.join(item['added_ids'][:3])}" for item in caption_spills[:8]
+            continue
+        findings.append(
+            _check_plan2_display_block_id(block_id, block, candidate_by_id, baseline_text)
         )
+    return findings
+
+
+def _check_plan2_display_block_id(
+    block_id: str,
+    block: dict[str, Any] | None,
+    candidate_by_id: dict[str, dict[str, Any]],
+    baseline_text: str,
+) -> Finding:
+    if not block:
+        detail = "target block is missing"
+        text_carriers = _text_carriers(candidate_by_id, baseline_text)
+        if text_carriers:
+            detail = f"expected display text is in non-display blocks {[b.get('block_id') for b in text_carriers]}"
+        return finding("FAIL", "plan2", block_id, detail)
+    if block.get("type") != "display_block":
+        return finding(
+            "FAIL", "plan2", block_id, f"expected display_block, got {block.get('type')}"
+        )
+    if block_id == "b000058" and attrs_of(block).get("alignment") != "right":
+        return finding("FAIL", "plan2", block_id, "expected attrs.alignment=right")
+    return finding("PASS", "plan2", block_id, "display classification is correct")
+
+
+def _check_plan2_paragraph_ids(
+    baseline_by_id: dict[str, dict[str, Any]],
+    candidate_by_id: dict[str, dict[str, Any]],
+) -> list[Finding]:
+    findings: list[Finding] = []
+    for block_id in sorted(PLAN2_PARAGRAPHS):
+        block = candidate_by_id.get(block_id)
+        baseline_text = text_of(baseline_by_id.get(block_id)).strip()
+        carrier = _paragraph_text_carrier(candidate_by_id, baseline_text)
+        if carrier:
+            findings.append(
+                finding(
+                    "PASS",
+                    "plan2",
+                    block_id,
+                    f"paragraph text carried by block {carrier.get('block_id')}",
+                )
+            )
+            continue
+        findings.append(_check_plan2_paragraph_id(block_id, block, baseline_text))
+    return findings
+
+
+def _check_plan2_paragraph_id(
+    block_id: str, block: dict[str, Any] | None, baseline_text: str
+) -> Finding:
+    if not block:
+        return finding("WARN", "plan2", block_id, "target block missing in candidate")
+    if not baseline_text:
+        return finding(
+            "INFO",
+            "plan2",
+            block_id,
+            f"skipped id check because baseline block is missing; candidate id is {block.get('type')}",
+        )
+    if block.get("type") != "paragraph":
+        return finding("FAIL", "plan2", block_id, f"expected paragraph, got {block.get('type')}")
+    return finding("PASS", "plan2", block_id, "paragraph classification is correct")
+
+
+def _check_plan2_display_texts(blocks: list[dict[str, Any]]) -> list[Finding]:
+    findings: list[Finding] = []
+    for name, needle in PLAN2_DISPLAY_TEXTS.items():
+        carriers = _non_footnote_text_carriers(blocks, needle)
+        if not carriers:
+            findings.append(finding("FAIL", "plan2", name, "target display text is missing"))
+            continue
+        bad = [block.get("block_id") for block in carriers if block.get("type") != "display_block"]
+        if bad:
+            findings.append(
+                finding(
+                    "FAIL", "plan2", name, f"target display text is in non-display blocks {bad}"
+                )
+            )
+        else:
+            ids = [str(block.get("block_id")) for block in carriers]
+            findings.append(
+                finding("PASS", "plan2", name, f"target text carried by display blocks {ids}")
+            )
+    return findings
+
+
+def _check_plan2_exact_display_texts(blocks: list[dict[str, Any]]) -> list[Finding]:
+    findings: list[Finding] = []
+    for name, expected_text in PLAN2_EXACT_DISPLAY_TEXTS.items():
+        expected = _normalize_multiline_text(expected_text)
+        exact_carriers = [
+            block
+            for block in blocks
+            if block.get("type") == "display_block"
+            and _normalize_multiline_text(text_of(block)) == expected
+        ]
+        if exact_carriers:
+            ids = [str(block.get("block_id")) for block in exact_carriers]
+            findings.append(finding("PASS", "plan2", name, f"exact display text carried by {ids}"))
+            continue
+        first_line = expected_text.split("\n", 1)[0]
+        near = [
+            f"{block.get('block_id')}:{block.get('type')}"
+            for block in blocks
+            if first_line in text_of(block) and block.get("type") != "footnote"
+        ]
         findings.append(
             finding(
                 "FAIL",
-                "plan1",
-                "no_figure_caption_spillover",
-                f"{len(caption_spills)} figures lost attrs.captions into new flow blocks; sample {sample}",
+                "plan2",
+                name,
+                f"expected exact display block text; nearby carriers={near}",
             )
         )
-    else:
-        findings.append(
-            finding(
-                "PASS", "plan1", "no_figure_caption_spillover", "no lost figure captions detected"
-            )
-        )
-
     return findings
+
+
+def _check_plan2_paragraph_texts(blocks: list[dict[str, Any]]) -> list[Finding]:
+    findings: list[Finding] = []
+    for name, needle in PLAN2_PARAGRAPH_TEXTS.items():
+        carriers = _non_footnote_text_carriers(blocks, needle)
+        if not carriers:
+            findings.append(finding("FAIL", "plan2", name, "target text is missing"))
+            continue
+        bad = [block.get("block_id") for block in carriers if block.get("type") != "paragraph"]
+        if bad:
+            findings.append(
+                finding(
+                    "FAIL", "plan2", name, f"target text is still in non-paragraph blocks {bad}"
+                )
+            )
+        else:
+            ids = [str(block.get("block_id")) for block in carriers]
+            findings.append(
+                finding("PASS", "plan2", name, f"target text carried by paragraphs {ids}")
+            )
+    return findings
+
+
+def _non_footnote_text_carriers(blocks: list[dict[str, Any]], needle: str) -> list[dict[str, Any]]:
+    return [
+        block for block in blocks if needle in text_of(block) and block.get("type") != "footnote"
+    ]
 
 
 def _figure_group_carrier(
@@ -411,160 +623,6 @@ def figure_caption_spills(
         if added_nearby:
             out.append({"figure_id": block_id, "added_ids": added_nearby})
     return out
-
-
-def check_plan2_display(
-    baseline_by_id: dict[str, dict[str, Any]],
-    candidate_by_id: dict[str, dict[str, Any]],
-) -> list[Finding]:
-    findings: list[Finding] = []
-    for block_id in sorted(PLAN2_DISPLAY_BLOCKS):
-        block = candidate_by_id.get(block_id)
-        baseline_text = text_of(baseline_by_id.get(block_id)).strip()
-        carrier = _display_text_carrier(candidate_by_id, baseline_text)
-        if carrier:
-            findings.append(
-                finding(
-                    "PASS",
-                    "plan2",
-                    block_id,
-                    f"display text carried by block {carrier.get('block_id')}",
-                )
-            )
-            continue
-        if not block:
-            detail = "target block is missing"
-            text_carriers = _text_carriers(candidate_by_id, baseline_text)
-            if text_carriers:
-                detail = f"expected display text is in non-display blocks {[b.get('block_id') for b in text_carriers]}"
-            findings.append(finding("FAIL", "plan2", block_id, detail))
-            continue
-        if block.get("type") != "display_block":
-            findings.append(
-                finding(
-                    "FAIL", "plan2", block_id, f"expected display_block, got {block.get('type')}"
-                )
-            )
-            continue
-        if block_id == "b000058" and attrs_of(block).get("alignment") != "right":
-            findings.append(finding("FAIL", "plan2", block_id, "expected attrs.alignment=right"))
-            continue
-        findings.append(finding("PASS", "plan2", block_id, "display classification is correct"))
-
-    for block_id in sorted(PLAN2_PARAGRAPHS):
-        block = candidate_by_id.get(block_id)
-        baseline_text = text_of(baseline_by_id.get(block_id)).strip()
-        carrier = _paragraph_text_carrier(candidate_by_id, baseline_text)
-        if carrier:
-            findings.append(
-                finding(
-                    "PASS",
-                    "plan2",
-                    block_id,
-                    f"paragraph text carried by block {carrier.get('block_id')}",
-                )
-            )
-            continue
-        if not block:
-            findings.append(finding("WARN", "plan2", block_id, "target block missing in candidate"))
-            continue
-        if not baseline_text:
-            findings.append(
-                finding(
-                    "INFO",
-                    "plan2",
-                    block_id,
-                    f"skipped id check because baseline block is missing; candidate id is {block.get('type')}",
-                )
-            )
-            continue
-        if block.get("type") != "paragraph":
-            findings.append(
-                finding("FAIL", "plan2", block_id, f"expected paragraph, got {block.get('type')}")
-            )
-        else:
-            findings.append(
-                finding("PASS", "plan2", block_id, "paragraph classification is correct")
-            )
-
-    blocks = list(candidate_by_id.values())
-    for name, needle in PLAN2_DISPLAY_TEXTS.items():
-        carriers = [
-            block
-            for block in blocks
-            if needle in text_of(block) and block.get("type") != "footnote"
-        ]
-        if not carriers:
-            findings.append(finding("FAIL", "plan2", name, "target display text is missing"))
-            continue
-        bad = [block.get("block_id") for block in carriers if block.get("type") != "display_block"]
-        if bad:
-            findings.append(
-                finding(
-                    "FAIL",
-                    "plan2",
-                    name,
-                    f"target display text is in non-display blocks {bad}",
-                )
-            )
-        else:
-            ids = [str(block.get("block_id")) for block in carriers]
-            findings.append(
-                finding("PASS", "plan2", name, f"target text carried by display blocks {ids}")
-            )
-
-    for name, expected_text in PLAN2_EXACT_DISPLAY_TEXTS.items():
-        expected = _normalize_multiline_text(expected_text)
-        exact_carriers = [
-            block
-            for block in blocks
-            if block.get("type") == "display_block"
-            and _normalize_multiline_text(text_of(block)) == expected
-        ]
-        if exact_carriers:
-            ids = [str(block.get("block_id")) for block in exact_carriers]
-            findings.append(finding("PASS", "plan2", name, f"exact display text carried by {ids}"))
-            continue
-        first_line = expected_text.split("\n", 1)[0]
-        near = [
-            f"{block.get('block_id')}:{block.get('type')}"
-            for block in blocks
-            if first_line in text_of(block) and block.get("type") != "footnote"
-        ]
-        findings.append(
-            finding(
-                "FAIL",
-                "plan2",
-                name,
-                f"expected exact display block text; nearby carriers={near}",
-            )
-        )
-
-    for name, needle in PLAN2_PARAGRAPH_TEXTS.items():
-        carriers = [
-            block
-            for block in blocks
-            if needle in text_of(block) and block.get("type") != "footnote"
-        ]
-        if not carriers:
-            findings.append(finding("FAIL", "plan2", name, "target text is missing"))
-            continue
-        bad = [block.get("block_id") for block in carriers if block.get("type") != "paragraph"]
-        if bad:
-            findings.append(
-                finding(
-                    "FAIL",
-                    "plan2",
-                    name,
-                    f"target text is still in non-paragraph blocks {bad}",
-                )
-            )
-        else:
-            ids = [str(block.get("block_id")) for block in carriers]
-            findings.append(
-                finding("PASS", "plan2", name, f"target text carried by paragraphs {ids}")
-            )
-    return findings
 
 
 def check_plan3_mineru_newlines(candidate_by_id: dict[str, dict[str, Any]]) -> list[Finding]:
@@ -891,94 +949,129 @@ def check_display_scope_regression(
 ) -> list[Finding]:
     """Ensure a display-block-focused change did not spill into other structures."""
     findings: list[Finding] = []
+    scope = _display_scope(baseline_by_id, candidate_by_id)
+    findings.append(_check_display_scope_added(scope))
+    findings.append(_check_display_scope_removed(scope))
+    findings.append(_check_display_scope_common_changes(scope, baseline_by_id, candidate_by_id))
+    findings.append(_display_scope_summary(scope))
+    return findings
+
+
+def _display_scope(
+    baseline_by_id: dict[str, dict[str, Any]],
+    candidate_by_id: dict[str, dict[str, Any]],
+) -> DisplayScope:
     old_ids = set(baseline_by_id)
     new_ids = set(candidate_by_id)
-    added = sorted(new_ids - old_ids)
-    removed = sorted(old_ids - new_ids)
     target_carrier_ids = _display_target_text_carrier_ids(baseline_by_id, candidate_by_id)
-    allowed_target_ids = PLAN2_DISPLAY_BLOCKS | PLAN2_PARAGRAPHS | target_carrier_ids
+    return DisplayScope(
+        old_ids=old_ids,
+        new_ids=new_ids,
+        added=sorted(new_ids - old_ids),
+        removed=sorted(old_ids - new_ids),
+        allowed_target_ids=PLAN2_DISPLAY_BLOCKS | PLAN2_PARAGRAPHS | target_carrier_ids,
+    )
 
+
+def _check_display_scope_added(scope: DisplayScope) -> Finding:
     unexpected_added = [
-        block_id for block_id in added if not block_id.endswith(ALLOWED_NEW_BLOCK_SUFFIXES)
+        block_id for block_id in scope.added if not block_id.endswith(ALLOWED_NEW_BLOCK_SUFFIXES)
     ]
-    unexpected_removed = [block_id for block_id in removed if block_id not in allowed_target_ids]
+    if not unexpected_added:
+        return finding("PASS", "display_regression", "unexpected_added_blocks", "none")
+    return finding(
+        "FAIL",
+        "display_regression",
+        "unexpected_added_blocks",
+        f"{len(unexpected_added)} non-display-split blocks added; sample {unexpected_added[:12]}",
+    )
 
-    if unexpected_added:
-        findings.append(
-            finding(
-                "FAIL",
-                "display_regression",
-                "unexpected_added_blocks",
-                f"{len(unexpected_added)} non-display-split blocks added; sample {unexpected_added[:12]}",
-            )
-        )
-    else:
-        findings.append(finding("PASS", "display_regression", "unexpected_added_blocks", "none"))
 
-    if unexpected_removed:
-        findings.append(
-            finding(
-                "FAIL",
-                "display_regression",
-                "unexpected_removed_blocks",
-                f"{len(unexpected_removed)} unrelated blocks removed; sample {unexpected_removed[:12]}",
-            )
-        )
-    else:
-        findings.append(finding("PASS", "display_regression", "unexpected_removed_blocks", "none"))
+def _check_display_scope_removed(scope: DisplayScope) -> Finding:
+    unexpected_removed = [
+        block_id for block_id in scope.removed if block_id not in scope.allowed_target_ids
+    ]
+    if not unexpected_removed:
+        return finding("PASS", "display_regression", "unexpected_removed_blocks", "none")
+    return finding(
+        "FAIL",
+        "display_regression",
+        "unexpected_removed_blocks",
+        f"{len(unexpected_removed)} unrelated blocks removed; sample {unexpected_removed[:12]}",
+    )
 
+
+def _check_display_scope_common_changes(
+    scope: DisplayScope,
+    baseline_by_id: dict[str, dict[str, Any]],
+    candidate_by_id: dict[str, dict[str, Any]],
+) -> Finding:
+    unexpected_common_changes = _display_scope_unexpected_common_changes(
+        scope, baseline_by_id, candidate_by_id
+    )
+    if not unexpected_common_changes:
+        return finding("PASS", "display_regression", "unexpected_common_block_changes", "none")
+    return finding(
+        "FAIL",
+        "display_regression",
+        "unexpected_common_block_changes",
+        f"sample {unexpected_common_changes[:12]}",
+    )
+
+
+def _display_scope_unexpected_common_changes(
+    scope: DisplayScope,
+    baseline_by_id: dict[str, dict[str, Any]],
+    candidate_by_id: dict[str, dict[str, Any]],
+) -> list[str]:
     unexpected_common_changes: list[str] = []
-    for block_id in sorted(old_ids & new_ids):
-        if block_id in PLAN3_ALLOWED_CHANGED_IDS or block_id in allowed_target_ids:
+    for block_id in sorted(scope.old_ids & scope.new_ids):
+        if _is_display_scope_allowed_common_change(block_id, scope):
             continue
         old_block = baseline_by_id[block_id]
         new_block = candidate_by_id[block_id]
-        changed_fields = {
-            key
-            for key in sorted(set(old_block) | set(new_block))
-            if old_block.get(key) != new_block.get(key)
-        }
-        if not changed_fields:
-            continue
-        old_type = old_block.get("type")
-        new_type = new_block.get("type")
-        attr_only_display_change = (
-            old_type == new_type
-            and old_type in DISPLAY_REFACTOR_ATTR_ONLY_TYPES
-            and changed_fields <= {"attrs"}
-        )
-        if attr_only_display_change:
+        changed_fields = _changed_block_fields(old_block, new_block)
+        if not changed_fields or _is_attr_only_display_change(old_block, new_block, changed_fields):
             continue
         unexpected_common_changes.append(
-            f"{block_id}:{old_type}->{new_type}:{','.join(sorted(changed_fields))}"
+            f"{block_id}:{old_block.get('type')}->{new_block.get('type')}:{','.join(sorted(changed_fields))}"
         )
+    return unexpected_common_changes
 
-    if unexpected_common_changes:
-        findings.append(
-            finding(
-                "FAIL",
-                "display_regression",
-                "unexpected_common_block_changes",
-                f"sample {unexpected_common_changes[:12]}",
-            )
-        )
-    else:
-        findings.append(
-            finding("PASS", "display_regression", "unexpected_common_block_changes", "none")
-        )
 
-    findings.append(
-        finding(
-            "INFO",
-            "display_regression",
-            "scope_summary",
-            (
-                f"target_ids={sorted(allowed_target_ids)} added={len(added)} "
-                f"removed={len(removed)} common={len(old_ids & new_ids)}"
-            ),
-        )
+def _is_display_scope_allowed_common_change(block_id: str, scope: DisplayScope) -> bool:
+    return block_id in PLAN3_ALLOWED_CHANGED_IDS or block_id in scope.allowed_target_ids
+
+
+def _changed_block_fields(old_block: dict[str, Any], new_block: dict[str, Any]) -> set[str]:
+    return {
+        key
+        for key in sorted(set(old_block) | set(new_block))
+        if old_block.get(key) != new_block.get(key)
+    }
+
+
+def _is_attr_only_display_change(
+    old_block: dict[str, Any], new_block: dict[str, Any], changed_fields: set[str]
+) -> bool:
+    old_type = old_block.get("type")
+    return (
+        old_type == new_block.get("type")
+        and old_type in DISPLAY_REFACTOR_ATTR_ONLY_TYPES
+        and changed_fields <= {"attrs"}
     )
-    return findings
+
+
+def _display_scope_summary(scope: DisplayScope) -> Finding:
+    return finding(
+        "INFO",
+        "display_regression",
+        "scope_summary",
+        (
+            f"target_ids={sorted(scope.allowed_target_ids)} added={len(scope.added)} "
+            f"removed={len(scope.removed)} common={len(scope.old_ids & scope.new_ids)}"
+        ),
+    )
 
 
 def _display_target_text_carrier_ids(
