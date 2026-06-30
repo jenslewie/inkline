@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from ...analysis.layout import LayoutStats
@@ -33,47 +34,38 @@ from .helpers import (
 )
 
 
+@dataclass(frozen=True)
+class _LeadingContinuationSources:
+    first_span: Dict[str, Any]
+    rest_spans: List[Dict[str, Any]]
+    first_bbox: BBox
+    rest_bbox: BBox
+
+
+@dataclass(frozen=True)
+class _LeadingContinuationInline:
+    first_runs: List[Dict[str, Any]]
+    rest_runs: List[Dict[str, Any]]
+    first_refs: List[Dict[str, Any]] | None
+    rest_refs: List[Dict[str, Any]] | None
+
+
 def reconcile_display_block_across_footnote_interruptions(
     blocks: List[Dict[str, Any]], layout: LayoutStats
 ) -> None:
     i = 0
     page_widths = _page_coord_widths(blocks)
+    page_heights = _page_coord_heights(blocks)
     while i < len(blocks):
         cur = blocks[i]
-        if cur.get("type") != DISPLAY_BLOCK:
-            i += 1
-            continue
-        page_heights = _page_coord_heights(blocks)
-        spans_multiple_pages = len(_block_pages(cur)) > 1
-        bb = _bbox(cur)
-        page = _block_page(cur)
-        lower_page_display = bool(
-            bb
-            and page is not None
-            and float(bb[3]) >= page_heights.get(page, _DEFAULT_PAGE_HEIGHT) * 0.65
-        )
-        if (
-            not spans_multiple_pages
-            and not lower_page_display
-            and not _is_near_page_bottom(cur, page_heights)
+        if cur.get("type") != DISPLAY_BLOCK or not _is_interrupted_display_candidate(
+            cur, page_heights
         ):
             i += 1
             continue
         cp = max(_block_pages(cur) or [_block_page(cur) or -1])
-        j = i + 1
-        skipped: List[Dict[str, Any]] = []
-        while j < len(blocks) and blocks[j].get("type") == FOOTNOTE:
-            skipped.append(
-                {
-                    "page": _block_page(blocks[j]),
-                    "bbox": _bbox(blocks[j]),
-                    "block_id": blocks[j].get("block_id"),
-                    "type": blocks[j].get("type"),
-                }
-            )
-            j += 1
-        skipped_footnotes = j > i + 1
-        if not skipped_footnotes:
+        j, skipped = _following_footnote_interruptions(blocks, i + 1)
+        if not skipped:
             i += 1
             continue
         while j < len(blocks):
@@ -85,34 +77,20 @@ def reconcile_display_block_across_footnote_interruptions(
                 break
             if (cur.get("attrs") or {}).get("has_attribution_line"):
                 break
-            nxt_is_display_block = nxt.get("type") == DISPLAY_BLOCK
-            nxt_is_paragraph = nxt.get("type") == PARAGRAPH
-            if not nxt_is_display_block and not (
-                nxt_is_paragraph and _display_block_layout(nxt, layout, page_widths.get(np))
-            ):
+            if not _is_continuation_candidate(nxt, layout, page_widths.get(np)):
                 break
             _split_next_page_leading_continuation_line(blocks, j)
             nxt = blocks[j]
-            coord_widths = [
-                width
-                for width in (
-                    page_widths.get(_block_page(cur) or -1),
-                    page_widths.get(np),
-                )
-                if width is not None
-            ]
-            coord_width = max(coord_widths) if coord_widths else None
+            coord_width = _continuation_coord_width(cur, nxt, page_widths)
             lane_compatible = display_lanes_compatible(cur, nxt, layout, coord_width)
             wide_cross_page_continuation = _cross_page_wide_display_lanes_compatible(
                 cur, nxt, layout, coord_width
             )
             if not (lane_compatible or wide_cross_page_continuation):
                 break
-            nbb = _bbox(nxt)
-            body_left, _body_right, body_width = _scaled_body_metrics(layout, page_widths.get(np))
-            nxt_body_indent = nbb and float(nbb[0]) <= body_left + max(48.0, body_width * 0.055)
-            nxt_body_width = nbb and (float(nbb[2]) - float(nbb[0])) >= body_width * 0.88
-            if nxt_is_paragraph and nxt_body_indent and nxt_body_width:
+            if nxt.get("type") == PARAGRAPH and _is_body_width_paragraph(
+                nxt, layout, page_widths.get(np)
+            ):
                 break
             left_id = cur.get("block_id")
             right_id = nxt.get("block_id")
@@ -132,6 +110,75 @@ def reconcile_display_block_across_footnote_interruptions(
         i += 1
 
 
+def _is_interrupted_display_candidate(
+    block: Dict[str, Any], page_heights: Dict[int, float]
+) -> bool:
+    if len(_block_pages(block)) > 1:
+        return True
+    bb = _bbox(block)
+    page = _block_page(block)
+    lower_page_display = bool(
+        bb
+        and page is not None
+        and float(bb[3]) >= page_heights.get(page, _DEFAULT_PAGE_HEIGHT) * 0.65
+    )
+    return lower_page_display or _is_near_page_bottom(block, page_heights)
+
+
+def _following_footnote_interruptions(
+    blocks: List[Dict[str, Any]], start: int
+) -> tuple[int, List[Dict[str, Any]]]:
+    skipped: List[Dict[str, Any]] = []
+    idx = start
+    while idx < len(blocks) and blocks[idx].get("type") == FOOTNOTE:
+        skipped.append(_interruption_summary(blocks[idx]))
+        idx += 1
+    return idx, skipped
+
+
+def _interruption_summary(block: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "page": _block_page(block),
+        "bbox": _bbox(block),
+        "block_id": block.get("block_id"),
+        "type": block.get("type"),
+    }
+
+
+def _is_continuation_candidate(
+    block: Dict[str, Any], layout: LayoutStats, coord_width: float | None
+) -> bool:
+    return block.get("type") == DISPLAY_BLOCK or (
+        block.get("type") == PARAGRAPH and _display_block_layout(block, layout, coord_width)
+    )
+
+
+def _continuation_coord_width(
+    left: Dict[str, Any], right: Dict[str, Any], page_widths: Dict[int, float]
+) -> float | None:
+    widths = [
+        width
+        for width in (
+            page_widths.get(_block_page(left) or -1),
+            page_widths.get(_block_page(right) or -1),
+        )
+        if width is not None
+    ]
+    return max(widths) if widths else None
+
+
+def _is_body_width_paragraph(
+    block: Dict[str, Any], layout: LayoutStats, coord_width: float | None
+) -> bool:
+    bb = _bbox(block)
+    if not bb:
+        return False
+    body_left, _body_right, body_width = _scaled_body_metrics(layout, coord_width)
+    body_indent = float(bb[0]) <= body_left + max(48.0, body_width * 0.055)
+    body_width_match = (float(bb[2]) - float(bb[0])) >= body_width * 0.88
+    return body_indent and body_width_match
+
+
 def _cross_page_wide_display_lanes_compatible(
     left: Dict[str, Any],
     right: Dict[str, Any],
@@ -145,12 +192,8 @@ def _cross_page_wide_display_lanes_compatible(
     if left.get("type") != DISPLAY_BLOCK or right.get("type") != DISPLAY_BLOCK:
         return False
     body_left, _body_right, body_width = _scaled_body_metrics(layout, coord_width)
-    left_x0 = float(lbb[0])
-    right_x0 = float(rbb[0])
-    left_x1 = float(lbb[2])
-    right_x1 = float(rbb[2])
-    left_width = max(0.0, left_x1 - left_x0)
-    right_width = max(0.0, right_x1 - right_x0)
+    left_x0, left_x1, left_width = _horizontal_bbox_metrics(lbb)
+    right_x0, right_x1, right_width = _horizontal_bbox_metrics(rbb)
     left_set_off = (
         left_x0 >= body_left + max(34.0, body_width * 0.045)
         and body_width * 0.45 <= left_width <= body_width * 1.05
@@ -161,6 +204,12 @@ def _cross_page_wide_display_lanes_compatible(
     return left_set_off and right_set_off and right_edges_match and left_edges_near
 
 
+def _horizontal_bbox_metrics(bbox: BBox) -> tuple[float, float, float]:
+    x0 = float(bbox[0])
+    x1 = float(bbox[2])
+    return x0, x1, max(0.0, x1 - x0)
+
+
 def _split_next_page_leading_continuation_line(blocks: List[Dict[str, Any]], idx: int) -> None:
     block = blocks[idx]
     text = str(block.get("text") or "").strip()
@@ -168,37 +217,51 @@ def _split_next_page_leading_continuation_line(blocks: List[Dict[str, Any]], idx
     if len(lines) < 2:
         return
     source = block.get("source") or {}
-    spans = [span for span in source.get("spans") or [] if isinstance(span, dict)]
-    if len(spans) < 2:
+    sources = _leading_continuation_sources(source)
+    if sources is None:
         return
-    first_span = spans[0]
-    rest_spans = spans[1:]
-    first_bbox = _span_bbox(first_span)
-    rest_bbox = union_bbox([bbox for bbox in (_span_bbox(span) for span in rest_spans) if bbox])
-    if not first_bbox or not rest_bbox:
-        return
-
-    attrs = block.get("attrs") or {}
-    first_runs, rest_runs = _split_inline_runs_at_offset(attrs.get("inline_runs"), len(lines[0]))
-    first_refs, rest_refs = _split_note_refs_by_runs(attrs.get("note_refs"), first_runs, rest_runs)
+    inline = _leading_continuation_inline(block.get("attrs") or {}, len(lines[0]))
 
     block["text"] = lines[0]
-    block["source"] = _source_for_spans(source, [first_span], first_bbox)
-    _set_partitioned_inline_attrs(block.setdefault("attrs", {}), first_runs, first_refs)
+    block["source"] = _source_for_spans(source, [sources.first_span], sources.first_bbox)
+    _set_partitioned_inline_attrs(block.setdefault("attrs", {}), inline.first_runs, inline.first_refs)
 
     rest = copy.deepcopy(block)
     rest["block_id"] = f"{block.get('block_id')}_tail"
     rest["type"] = PARAGRAPH
     rest["text"] = "\n".join(lines[1:])
-    rest["source"] = _source_for_spans(source, rest_spans, rest_bbox)
+    rest["source"] = _source_for_spans(source, sources.rest_spans, sources.rest_bbox)
     rest_attrs = rest.setdefault("attrs", {})
     rest_attrs["split_from_display_block_id"] = block.get("block_id")
-    _set_partitioned_inline_attrs(rest_attrs, rest_runs, rest_refs)
+    _set_partitioned_inline_attrs(rest_attrs, inline.rest_runs, inline.rest_refs)
     rest_attrs.pop("merged_from", None)
     rest_attrs.pop("merge_reason", None)
     rest_attrs.pop("merge_evidence", None)
     rest_attrs.pop("interrupted_by", None)
     blocks.insert(idx + 1, rest)
+
+
+def _leading_continuation_sources(source: Dict[str, Any]) -> _LeadingContinuationSources | None:
+    spans = [span for span in source.get("spans") or [] if isinstance(span, dict)]
+    if len(spans) < 2:
+        return None
+    first_span = spans[0]
+    rest_spans = spans[1:]
+    first_bbox = _span_bbox(first_span)
+    rest_bbox = union_bbox([bbox for bbox in (_span_bbox(span) for span in rest_spans) if bbox])
+    if not first_bbox or not rest_bbox:
+        return None
+    return _LeadingContinuationSources(first_span, rest_spans, first_bbox, rest_bbox)
+
+
+def _leading_continuation_inline(
+    attrs: Dict[str, Any], first_line_length: int
+) -> _LeadingContinuationInline:
+    first_runs, rest_runs = _split_inline_runs_at_offset(
+        attrs.get("inline_runs"), first_line_length
+    )
+    first_refs, rest_refs = _split_note_refs_by_runs(attrs.get("note_refs"), first_runs, rest_runs)
+    return _LeadingContinuationInline(first_runs, rest_runs, first_refs, rest_refs)
 
 
 def _source_for_spans(
