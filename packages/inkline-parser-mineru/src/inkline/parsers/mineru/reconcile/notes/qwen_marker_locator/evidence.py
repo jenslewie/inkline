@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, cast
@@ -23,6 +24,52 @@ from . import prompt as qwen_prompt
 from . import types as qwen_types
 
 
+@dataclass
+class _QwenCollectPass:
+    page_list: List[int]
+    footnote_pages: set[int]
+    body_ref_pages: set[int]
+    expected_body_markers_by_page: Dict[int, List[str]]
+    cache: Dict[tuple[int, str], qwen_types.QwenMarkerPageEvidence]
+    use_block_body_refs: bool
+    geometry: PageGeometry | None
+    body_blocks_by_page: Dict[int, List[CanonicalBlock]]
+    body_ref_source: str
+    started_at: str
+    timer: float
+    stats: Dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _QwenPageRender:
+    pdf_page: Any
+    image_path: Path
+    started_at: str
+    timer: float
+    render_duration: float
+
+
+@dataclass
+class _QwenPageCacheState:
+    cached_item: qwen_types.QwenMarkerPageEvidence | None
+    cache_hit: bool
+    raw_parts: Dict[str, Any]
+    footnote_cached: bool
+    body_cached: bool
+    model_calls: List[Dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class _QwenPageResult:
+    item: qwen_types.QwenMarkerPageEvidence
+    cache_hit: bool
+    model_calls: List[Dict[str, Any]]
+    page_started: str
+    page_duration: float
+    render_duration: float
+    image_path: Path
+
+
 def _collect_qwen_marker_evidence(
     blocks: Sequence[CanonicalBlock],
     pages: Sequence[int],
@@ -33,17 +80,50 @@ def _collect_qwen_marker_evidence(
     body_ref_pages: set[int] | None = None,
     expected_body_markers_by_page: Dict[int, List[str]] | None = None,
 ) -> List[qwen_types.QwenMarkerPageEvidence]:
+    fitz = _import_fitz()
+    collect_pass = _start_qwen_collect_pass(
+        blocks,
+        pages,
+        config,
+        pass_name,
+        footnote_pages,
+        body_ref_pages,
+        expected_body_markers_by_page,
+    )
+    evidence: List[qwen_types.QwenMarkerPageEvidence] = []
+    with fitz.open(config.source_pdf) as doc:
+        for page_index, page in enumerate(collect_pass.page_list, start=1):
+            result = _collect_qwen_page_result(doc, page_index, page, config, pass_name, collect_pass)
+            if result is None:
+                continue
+            evidence.append(result.item)
+            _record_qwen_page_result(result, page_index, page, config, pass_name, collect_pass)
+    _finish_qwen_collect_pass(evidence, config, pass_name, collect_pass)
+    return evidence
+
+
+def _import_fitz() -> Any:
     try:
         import fitz  # type: ignore
     except Exception as exc:
         raise RuntimeError("Qwen marker locator page rendering requires PyMuPDF (`fitz`).") from exc
+    return fitz
 
+
+def _start_qwen_collect_pass(
+    blocks: Sequence[CanonicalBlock],
+    pages: Sequence[int],
+    config: qwen_types.QwenMarkerLocatorConfig,
+    pass_name: str,
+    footnote_pages: set[int] | None,
+    body_ref_pages: set[int] | None,
+    expected_body_markers_by_page: Dict[int, List[str]] | None,
+) -> _QwenCollectPass:
     cache = (
         _read_existing_evidence(config.artifact_dir / "qwen_marker_evidence.json")
         if config.reuse_evidence
         else {}
     )
-    evidence: List[qwen_types.QwenMarkerPageEvidence] = []
     use_block_body_refs = config.body_mode == "block"
     geometry = (
         PageGeometry.from_canonical_blocks(cast(Sequence[Dict[str, Any]], blocks))
@@ -52,9 +132,8 @@ def _collect_qwen_marker_evidence(
     )
     body_blocks_by_page = qwen_prompt._body_blocks_by_page(blocks) if use_block_body_refs else {}
     body_ref_source = "paragraph_crops" if use_block_body_refs else "full_page"
-    footnote_pages = set() if footnote_pages is None else footnote_pages
-    body_ref_pages = set(pages) if body_ref_pages is None else body_ref_pages
-    expected_body_markers_by_page = expected_body_markers_by_page or {}
+    resolved_footnote_pages = set() if footnote_pages is None else footnote_pages
+    resolved_body_ref_pages = set(pages) if body_ref_pages is None else body_ref_pages
     page_list = list(pages)
     pass_started = _now_iso()
     pass_timer = time.perf_counter()
@@ -65,8 +144,8 @@ def _collect_qwen_marker_evidence(
         len(page_list),
         config.body_mode,
         config.dpi,
-        len(footnote_pages),
-        len(body_ref_pages),
+        len(resolved_footnote_pages),
+        len(resolved_body_ref_pages),
     )
     _write_timing_event(
         config,
@@ -75,213 +154,359 @@ def _collect_qwen_marker_evidence(
             "pass": pass_name,
             "started_at": pass_started,
             "pages": page_list,
-            "footnote_pages": sorted(footnote_pages),
-            "body_ref_pages": sorted(body_ref_pages),
+            "footnote_pages": sorted(resolved_footnote_pages),
+            "body_ref_pages": sorted(resolved_body_ref_pages),
         },
     )
-    with fitz.open(config.source_pdf) as doc:
-        for page_index, page in enumerate(page_list, start=1):
-            if page < 1 or page > doc.page_count:
-                _log_warning(
-                    "Qwen marker locator pass `{}` page {}/{} skipped: page {} outside PDF page_count={}",
-                    pass_name,
-                    page_index,
-                    len(page_list),
-                    page,
-                    doc.page_count,
-                )
-                _write_timing_event(
-                    config,
-                    {
-                        "event": "page_skipped",
-                        "pass": pass_name,
-                        "page": page,
-                        "reason": "outside_pdf_page_range",
-                        "page_count": doc.page_count,
-                        "finished_at": _now_iso(),
-                    },
-                )
-                continue
-            page_started = _now_iso()
-            page_timer = time.perf_counter()
-            render_timer = time.perf_counter()
-            pdf_page = doc[page - 1]
-            image_path = config.artifact_dir / f"page_{page:04d}_{config.dpi}dpi_qwen_full_page.png"
-            _log_debug(
-                "Qwen marker locator pass `{}` page {}/{} (pdf page {}): footnote_defs={} body_refs={} mode={}",
-                pass_name,
-                page_index,
-                len(page_list),
-                page,
-                page in footnote_pages,
-                page in body_ref_pages,
-                config.body_mode,
-            )
-            try:
-                qwen_prompt._render_full_page(pdf_page, image_path, config)
-            except Exception as exc:
-                _write_timing_event(
-                    config,
-                    {
-                        "event": "page_error",
-                        "pass": pass_name,
-                        "page": page,
-                        "stage": "render",
-                        "started_at": page_started,
-                        "finished_at": _now_iso(),
-                        "duration_seconds": _duration(page_timer),
-                        "render_seconds": _duration(render_timer),
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
-                    },
-                )
-                raise
-            render_duration = _duration(render_timer)
+    return _QwenCollectPass(
+        page_list=page_list,
+        footnote_pages=resolved_footnote_pages,
+        body_ref_pages=resolved_body_ref_pages,
+        expected_body_markers_by_page=expected_body_markers_by_page or {},
+        cache=cache,
+        use_block_body_refs=use_block_body_refs,
+        geometry=geometry,
+        body_blocks_by_page=body_blocks_by_page,
+        body_ref_source=body_ref_source,
+        started_at=pass_started,
+        timer=pass_timer,
+        stats=pass_stats,
+    )
 
-            # Check cache and determine what needs fresh API calls
-            cached_item = cache.get((page, image_path.name))
-            cache_hit = cached_item is not None
-            raw_parts: Dict[str, Any] = (
-                dict(cached_item.raw_json) if cached_item is not None else {}
-            )
-            footnote_cached = cached_item is not None and "footnote_defs" in raw_parts
-            body_cached = (
-                cached_item is not None and raw_parts.get("body_ref_source") == body_ref_source
-            )
-            model_calls: List[Dict[str, Any]] = []
 
-            if (
-                cached_item is None
-                or (page in footnote_pages and not footnote_cached)
-                or (page in body_ref_pages and not body_cached)
-            ):
-                # Footnote defs pass
-                if page in footnote_pages and not footnote_cached:
-                    raw_parts, model_calls = _collect_footnote_defs_for_page(
-                        image_path,
-                        config,
-                        raw_parts,
-                        pass_name,
-                        page,
-                        page_started,
-                        page_timer,
-                        render_duration,
-                        cache_hit,
-                        model_calls,
-                    )
+def _collect_qwen_page_result(
+    doc: Any,
+    page_index: int,
+    page: int,
+    config: qwen_types.QwenMarkerLocatorConfig,
+    pass_name: str,
+    collect_pass: _QwenCollectPass,
+) -> _QwenPageResult | None:
+    if page < 1 or page > doc.page_count:
+        _record_skipped_qwen_page(page_index, page, doc.page_count, config, pass_name, collect_pass)
+        return None
+    render = _render_qwen_page(doc, page_index, page, config, pass_name, collect_pass)
+    state = _qwen_page_cache_state(page, render.image_path, collect_pass)
+    item = _qwen_page_evidence_item(page, render, state, config, pass_name, collect_pass)
+    return _QwenPageResult(
+        item=item,
+        cache_hit=state.cache_hit,
+        model_calls=state.model_calls,
+        page_started=render.started_at,
+        page_duration=_duration(render.timer),
+        render_duration=render.render_duration,
+        image_path=render.image_path,
+    )
 
-                # Body refs pass
-                if page in body_ref_pages and not body_cached:
-                    raw_parts, model_calls = _collect_body_refs_for_page(
-                        image_path,
-                        pdf_page,
-                        page,
-                        config,
-                        raw_parts,
-                        use_block_body_refs,
-                        body_blocks_by_page,
-                        geometry,
-                        expected_body_markers_by_page,
-                        body_ref_source,
-                        pass_name,
-                        page_started,
-                        page_timer,
-                        render_duration,
-                        cache_hit,
-                        model_calls,
-                    )
 
-                # Build evidence item from collected raw data
-                item = qwen_types.QwenMarkerPageEvidence(
-                    page=page,
-                    image=str(image_path),
-                    crop_bbox_pdf=[
-                        float(pdf_page.rect.x0),
-                        float(pdf_page.rect.y0),
-                        float(pdf_page.rect.x1),
-                        float(pdf_page.rect.y1),
-                    ],
-                    dpi=config.dpi,
-                    raw_json=raw_parts,
-                    body_refs=qwen_api._clean_body_refs(raw_parts.get("body_refs")),
-                    footnote_defs=qwen_api._clean_footnote_defs(raw_parts.get("footnote_defs")),
-                )
-            else:
-                # Complete cache hit — reuse cached item directly
-                item = cached_item
-            evidence.append(item)
-            page_duration = _duration(page_timer)
-            _update_collect_stats(
-                pass_stats,
-                cache_hit,
-                model_calls,
-                len(item.footnote_defs),
-                len(item.body_refs),
-                page_duration,
-            )
-            _log_info(
-                "Qwen marker locator pass `{}` page {}/{} done: page={} started_at={} finished_at={} seconds={} render_seconds={} cache_hit={} model_calls={} footnote_defs={} body_refs={}",
-                pass_name,
-                page_index,
-                len(page_list),
-                page,
-                page_started,
-                _now_iso(),
-                page_duration,
-                render_duration,
-                cache_hit,
-                len(model_calls),
-                len(item.footnote_defs),
-                len(item.body_refs),
-            )
-            _write_timing_event(
-                config,
-                {
-                    "event": "page_end",
-                    "pass": pass_name,
-                    "page": page,
-                    "started_at": page_started,
-                    "finished_at": _now_iso(),
-                    "duration_seconds": page_duration,
-                    "render_seconds": render_duration,
-                    "cache_hit": cache_hit,
-                    "image": str(image_path),
-                    "image_bytes": image_path.stat().st_size if image_path.exists() else None,
-                    "requested_footnote_defs": page in footnote_pages,
-                    "requested_body_refs": page in body_ref_pages,
-                    "model_calls": model_calls,
-                    "footnote_def_count": len(item.footnote_defs),
-                    "body_ref_count": len(item.body_refs),
-                },
-            )
-    pass_duration = _duration(pass_timer)
+def _record_skipped_qwen_page(
+    page_index: int,
+    page: int,
+    page_count: int,
+    config: qwen_types.QwenMarkerLocatorConfig,
+    pass_name: str,
+    collect_pass: _QwenCollectPass,
+) -> None:
+    _log_warning(
+        "Qwen marker locator pass `{}` page {}/{} skipped: page {} outside PDF page_count={}",
+        pass_name,
+        page_index,
+        len(collect_pass.page_list),
+        page,
+        page_count,
+    )
+    _write_timing_event(
+        config,
+        {
+            "event": "page_skipped",
+            "pass": pass_name,
+            "page": page,
+            "reason": "outside_pdf_page_range",
+            "page_count": page_count,
+            "finished_at": _now_iso(),
+        },
+    )
+
+
+def _render_qwen_page(
+    doc: Any,
+    page_index: int,
+    page: int,
+    config: qwen_types.QwenMarkerLocatorConfig,
+    pass_name: str,
+    collect_pass: _QwenCollectPass,
+) -> _QwenPageRender:
+    page_started = _now_iso()
+    page_timer = time.perf_counter()
+    render_timer = time.perf_counter()
+    pdf_page = doc[page - 1]
+    image_path = config.artifact_dir / f"page_{page:04d}_{config.dpi}dpi_qwen_full_page.png"
+    _log_qwen_page_start(page_index, page, config, pass_name, collect_pass)
+    try:
+        qwen_prompt._render_full_page(pdf_page, image_path, config)
+    except Exception as exc:
+        _record_qwen_page_render_error(
+            config, pass_name, page, page_started, page_timer, render_timer, exc
+        )
+        raise
+    return _QwenPageRender(
+        pdf_page=pdf_page,
+        image_path=image_path,
+        started_at=page_started,
+        timer=page_timer,
+        render_duration=_duration(render_timer),
+    )
+
+
+def _log_qwen_page_start(
+    page_index: int,
+    page: int,
+    config: qwen_types.QwenMarkerLocatorConfig,
+    pass_name: str,
+    collect_pass: _QwenCollectPass,
+) -> None:
+    _log_debug(
+        "Qwen marker locator pass `{}` page {}/{} (pdf page {}): footnote_defs={} body_refs={} mode={}",
+        pass_name,
+        page_index,
+        len(collect_pass.page_list),
+        page,
+        page in collect_pass.footnote_pages,
+        page in collect_pass.body_ref_pages,
+        config.body_mode,
+    )
+
+
+def _record_qwen_page_render_error(
+    config: qwen_types.QwenMarkerLocatorConfig,
+    pass_name: str,
+    page: int,
+    page_started: str,
+    page_timer: float,
+    render_timer: float,
+    exc: Exception,
+) -> None:
+    _write_timing_event(
+        config,
+        {
+            "event": "page_error",
+            "pass": pass_name,
+            "page": page,
+            "stage": "render",
+            "started_at": page_started,
+            "finished_at": _now_iso(),
+            "duration_seconds": _duration(page_timer),
+            "render_seconds": _duration(render_timer),
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        },
+    )
+
+
+def _qwen_page_cache_state(
+    page: int, image_path: Path, collect_pass: _QwenCollectPass
+) -> _QwenPageCacheState:
+    cached_item = collect_pass.cache.get((page, image_path.name))
+    raw_parts = dict(cached_item.raw_json) if cached_item is not None else {}
+    return _QwenPageCacheState(
+        cached_item=cached_item,
+        cache_hit=cached_item is not None,
+        raw_parts=raw_parts,
+        footnote_cached=cached_item is not None and "footnote_defs" in raw_parts,
+        body_cached=(
+            cached_item is not None
+            and raw_parts.get("body_ref_source") == collect_pass.body_ref_source
+        ),
+        model_calls=[],
+    )
+
+
+def _qwen_page_evidence_item(
+    page: int,
+    render: _QwenPageRender,
+    state: _QwenPageCacheState,
+    config: qwen_types.QwenMarkerLocatorConfig,
+    pass_name: str,
+    collect_pass: _QwenCollectPass,
+) -> qwen_types.QwenMarkerPageEvidence:
+    if not _qwen_page_needs_collection(page, state, collect_pass):
+        assert state.cached_item is not None
+        return state.cached_item
+    _collect_missing_qwen_page_parts(page, render, state, config, pass_name, collect_pass)
+    return qwen_types.QwenMarkerPageEvidence(
+        page=page,
+        image=str(render.image_path),
+        crop_bbox_pdf=[
+            float(render.pdf_page.rect.x0),
+            float(render.pdf_page.rect.y0),
+            float(render.pdf_page.rect.x1),
+            float(render.pdf_page.rect.y1),
+        ],
+        dpi=config.dpi,
+        raw_json=state.raw_parts,
+        body_refs=qwen_api._clean_body_refs(state.raw_parts.get("body_refs")),
+        footnote_defs=qwen_api._clean_footnote_defs(state.raw_parts.get("footnote_defs")),
+    )
+
+
+def _qwen_page_needs_collection(
+    page: int, state: _QwenPageCacheState, collect_pass: _QwenCollectPass
+) -> bool:
+    return (
+        state.cached_item is None
+        or (page in collect_pass.footnote_pages and not state.footnote_cached)
+        or (page in collect_pass.body_ref_pages and not state.body_cached)
+    )
+
+
+def _collect_missing_qwen_page_parts(
+    page: int,
+    render: _QwenPageRender,
+    state: _QwenPageCacheState,
+    config: qwen_types.QwenMarkerLocatorConfig,
+    pass_name: str,
+    collect_pass: _QwenCollectPass,
+) -> None:
+    if page in collect_pass.footnote_pages and not state.footnote_cached:
+        state.raw_parts, state.model_calls = _collect_footnote_defs_for_page(
+            render.image_path,
+            config,
+            state.raw_parts,
+            pass_name,
+            page,
+            render.started_at,
+            render.timer,
+            render.render_duration,
+            state.cache_hit,
+            state.model_calls,
+        )
+    if page in collect_pass.body_ref_pages and not state.body_cached:
+        state.raw_parts, state.model_calls = _collect_body_refs_for_page(
+            render.image_path,
+            render.pdf_page,
+            page,
+            config,
+            state.raw_parts,
+            collect_pass.use_block_body_refs,
+            collect_pass.body_blocks_by_page,
+            collect_pass.geometry,
+            collect_pass.expected_body_markers_by_page,
+            collect_pass.body_ref_source,
+            pass_name,
+            render.started_at,
+            render.timer,
+            render.render_duration,
+            state.cache_hit,
+            state.model_calls,
+        )
+
+
+def _record_qwen_page_result(
+    result: _QwenPageResult,
+    page_index: int,
+    page: int,
+    config: qwen_types.QwenMarkerLocatorConfig,
+    pass_name: str,
+    collect_pass: _QwenCollectPass,
+) -> None:
+    _update_collect_stats(
+        collect_pass.stats,
+        result.cache_hit,
+        result.model_calls,
+        len(result.item.footnote_defs),
+        len(result.item.body_refs),
+        result.page_duration,
+    )
+    _log_qwen_page_end(result, page_index, page, pass_name, collect_pass)
+    _write_qwen_page_end_event(result, page, config, pass_name, collect_pass)
+
+
+def _log_qwen_page_end(
+    result: _QwenPageResult,
+    page_index: int,
+    page: int,
+    pass_name: str,
+    collect_pass: _QwenCollectPass,
+) -> None:
+    _log_info(
+        "Qwen marker locator pass `{}` page {}/{} done: page={} started_at={} finished_at={} seconds={} render_seconds={} cache_hit={} model_calls={} footnote_defs={} body_refs={}",
+        pass_name,
+        page_index,
+        len(collect_pass.page_list),
+        page,
+        result.page_started,
+        _now_iso(),
+        result.page_duration,
+        result.render_duration,
+        result.cache_hit,
+        len(result.model_calls),
+        len(result.item.footnote_defs),
+        len(result.item.body_refs),
+    )
+
+
+def _write_qwen_page_end_event(
+    result: _QwenPageResult,
+    page: int,
+    config: qwen_types.QwenMarkerLocatorConfig,
+    pass_name: str,
+    collect_pass: _QwenCollectPass,
+) -> None:
+    _write_timing_event(
+        config,
+        {
+            "event": "page_end",
+            "pass": pass_name,
+            "page": page,
+            "started_at": result.page_started,
+            "finished_at": _now_iso(),
+            "duration_seconds": result.page_duration,
+            "render_seconds": result.render_duration,
+            "cache_hit": result.cache_hit,
+            "image": str(result.image_path),
+            "image_bytes": result.image_path.stat().st_size if result.image_path.exists() else None,
+            "requested_footnote_defs": page in collect_pass.footnote_pages,
+            "requested_body_refs": page in collect_pass.body_ref_pages,
+            "model_calls": result.model_calls,
+            "footnote_def_count": len(result.item.footnote_defs),
+            "body_ref_count": len(result.item.body_refs),
+        },
+    )
+
+
+def _finish_qwen_collect_pass(
+    evidence: List[qwen_types.QwenMarkerPageEvidence],
+    config: qwen_types.QwenMarkerLocatorConfig,
+    pass_name: str,
+    collect_pass: _QwenCollectPass,
+) -> None:
+    pass_duration = _duration(collect_pass.timer)
     _write_timing_event(
         config,
         {
             "event": "collect_pass_end",
             "pass": pass_name,
-            "started_at": pass_started,
+            "started_at": collect_pass.started_at,
             "finished_at": _now_iso(),
             "duration_seconds": pass_duration,
             "evidence_items": len(evidence),
-            "summary": _collect_summary(pass_stats, pass_duration),
+            "summary": _collect_summary(collect_pass.stats, pass_duration),
         },
     )
     _log_info(
         "Qwen marker locator pass `{}` finished: started_at={} finished_at={} pages={} evidence_items={} cache_hits={} model_calls={} footnote_defs={} body_refs={} seconds={} avg_page_seconds={}",
         pass_name,
-        pass_started,
+        collect_pass.started_at,
         _now_iso(),
-        len(page_list),
+        len(collect_pass.page_list),
         len(evidence),
-        pass_stats["cache_hits"],
-        pass_stats["model_calls"],
-        pass_stats["footnote_defs"],
-        pass_stats["body_refs"],
+        collect_pass.stats["cache_hits"],
+        collect_pass.stats["model_calls"],
+        collect_pass.stats["footnote_defs"],
+        collect_pass.stats["body_refs"],
         pass_duration,
-        _avg_seconds(pass_stats["page_seconds"], pass_stats["pages"]),
+        _avg_seconds(collect_pass.stats["page_seconds"], collect_pass.stats["pages"]),
     )
-    return evidence
 
 
 def _collect_footnote_defs_for_page(
