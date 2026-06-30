@@ -256,12 +256,12 @@ def _render_flow_block(
     if block_type == "heading":
         _render_heading_block(state, block)
     elif block_type == "paragraph":
-        state.append(f"<p>{render_inline_text(resolve_inline_text(block, state.footnote_counter))}</p>")
+        state.append(
+            f"<p>{render_inline_text(resolve_inline_text(block, state.footnote_counter))}</p>"
+        )
     elif block_type == "display_block":
         state.append(
-            render_display_block_html(
-                resolve_display_block_view(block, state.footnote_counter)
-            )
+            render_display_block_html(resolve_display_block_view(block, state.footnote_counter))
         )
     elif block_type == "list_item":
         return _render_list_items(ctx, state, index)
@@ -323,7 +323,9 @@ def _figure_html(
 def _caption_html(block: dict[str, Any], blocks: list[dict[str, Any]], index: int) -> str:
     text = block.get("text", "")
     prev_block = blocks[index - 1] if index > 0 else None
-    return render_caption_block_html(text, follows_figure=bool(prev_block and prev_block["type"] == "figure"))
+    return render_caption_block_html(
+        text, follows_figure=bool(prev_block and prev_block["type"] == "figure")
+    )
 
 
 def _render_footnote_block(state: _RenderState, block: dict[str, Any]) -> None:

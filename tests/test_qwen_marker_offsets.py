@@ -157,8 +157,7 @@ def test_qwen_inserts_ref_without_stripping_marker_that_starts_after_text() -> N
         "block_id": "b000350",
         "type": "paragraph",
         "text": (
-            "让当地统治者学会了在礼物上附上木简。"
-            "14号室出土的三根木简上使用了篡位者王莽的特殊语言。"
+            "让当地统治者学会了在礼物上附上木简。14号室出土的三根木简上使用了篡位者王莽的特殊语言。"
         ),
         "source": {"page": 59},
         "attrs": {
@@ -208,8 +207,7 @@ def test_qwen_inserts_ref_without_stripping_marker_that_starts_after_text() -> N
 
     assert changed is True
     assert block["text"] == (
-        "让当地统治者学会了在礼物上附上木简。"
-        "14号室出土的三根木简上使用了篡位者王莽的特殊语言。"
+        "让当地统治者学会了在礼物上附上木简。14号室出土的三根木简上使用了篡位者王莽的特殊语言。"
     )
     runs = block["attrs"]["inline_runs"]
     assert _inline_runs_text(runs) == block["text"]

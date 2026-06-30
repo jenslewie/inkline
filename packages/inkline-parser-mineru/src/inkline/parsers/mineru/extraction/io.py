@@ -329,23 +329,22 @@ def _looks_like_normalized_content_space(
     max_y = median([sample[1] for sample in samples])
     pdf_width = median([sample[2] for sample in samples])
     pdf_height = median([sample[3] for sample in samples])
-    content_fits_rendered_space = (
-        max_x <= _CONTENT_COORD_SIZE * (1.0 + _COORD_SPACE_TOLERANCE)
-        and max_y <= _CONTENT_COORD_SIZE * (1.0 + _COORD_SPACE_TOLERANCE)
-    )
+    content_fits_rendered_space = max_x <= _CONTENT_COORD_SIZE * (
+        1.0 + _COORD_SPACE_TOLERANCE
+    ) and max_y <= _CONTENT_COORD_SIZE * (1.0 + _COORD_SPACE_TOLERANCE)
     content_uses_rendered_scale = (
         max_x >= _RENDERED_WIDTH_THRESHOLD or max_y >= _RENDERED_HEIGHT_THRESHOLD
     )
-    content_exceeds_pdf_space = (
-        max_x > pdf_width * (1.0 + _COORD_SPACE_TOLERANCE)
-        or max_y > pdf_height * (1.0 + _COORD_SPACE_TOLERANCE)
-    )
-    pdf_larger_than_rendered_space = (
-        pdf_width > _CONTENT_COORD_SIZE * (1.0 + _COORD_SPACE_TOLERANCE)
-        or pdf_height > _CONTENT_COORD_SIZE * (1.0 + _COORD_SPACE_TOLERANCE)
-    )
-    return content_fits_rendered_space and content_uses_rendered_scale and (
-        content_exceeds_pdf_space or pdf_larger_than_rendered_space
+    content_exceeds_pdf_space = max_x > pdf_width * (
+        1.0 + _COORD_SPACE_TOLERANCE
+    ) or max_y > pdf_height * (1.0 + _COORD_SPACE_TOLERANCE)
+    pdf_larger_than_rendered_space = pdf_width > _CONTENT_COORD_SIZE * (
+        1.0 + _COORD_SPACE_TOLERANCE
+    ) or pdf_height > _CONTENT_COORD_SIZE * (1.0 + _COORD_SPACE_TOLERANCE)
+    return (
+        content_fits_rendered_space
+        and content_uses_rendered_scale
+        and (content_exceeds_pdf_space or pdf_larger_than_rendered_space)
     )
 
 

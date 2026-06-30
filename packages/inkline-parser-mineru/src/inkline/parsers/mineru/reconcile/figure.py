@@ -183,7 +183,9 @@ class _FigureCaptionDetector:
             return False
         width = float(cbb[2]) - float(cbb[0])
         gap = float(cbb[1]) - float(context.bbox[3])
-        body_layout = float(cbb[0]) < context.page_width * 0.12 and width > context.page_width * 0.50
+        body_layout = (
+            float(cbb[0]) < context.page_width * 0.12 and width > context.page_width * 0.50
+        )
         heading_continuation = (
             bool(caption_idxs)
             and self.blocks[caption_idxs[-1]].get("type") == HEADING
@@ -480,7 +482,9 @@ def _following_visual_legend_strip_indices(
     context = _legend_strip_context(blocks, figure_idx)
     if context is None:
         return []
-    state = _LegendStripState(out=[], current_bottom=context.max_strip_bottom - context.page_height * 0.14)
+    state = _LegendStripState(
+        out=[], current_bottom=context.max_strip_bottom - context.page_height * 0.14
+    )
     j = figure_idx + 1
     while j < len(blocks):
         candidate = blocks[j]
@@ -570,7 +574,7 @@ def _with_visual_legend_fragment(
         current_bottom=max(state.current_bottom, float(bbox[3])),
         has_visual_fragment=True,
         has_text_fragment=state.has_text_fragment,
-    total_text_chars=state.total_text_chars,
+        total_text_chars=state.total_text_chars,
         rejected=state.rejected,
     )
 
@@ -582,7 +586,9 @@ def _with_text_legend_fragment(
     context: _LegendStripContext,
     state: _LegendStripState,
 ) -> Optional[_LegendStripState]:
-    if not _is_compact_visual_legend_text(candidate, bbox, context.anchor_width, context.page_height):
+    if not _is_compact_visual_legend_text(
+        candidate, bbox, context.anchor_width, context.page_height
+    ):
         return _LegendStripState(out=[], current_bottom=state.current_bottom, rejected=True)
     text_chars = state.total_text_chars + len(str(candidate.get("text", "")).strip())
     if text_chars > 160:
@@ -761,9 +767,7 @@ def _is_side_by_side_fragment(
     )
 
 
-def _is_below_figure_fragment(
-    geometry: _FigurePairGeometry, left_has_caption: bool
-) -> bool:
+def _is_below_figure_fragment(geometry: _FigurePairGeometry, left_has_caption: bool) -> bool:
     small_relative_to_left = geometry.right_height <= geometry.left_height * 0.35
     return (
         geometry.horizontal_overlap >= min(geometry.left_width, geometry.right_width) * 0.40

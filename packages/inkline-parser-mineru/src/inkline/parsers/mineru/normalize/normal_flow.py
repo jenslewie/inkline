@@ -170,9 +170,7 @@ def _is_chapter_title_group(group: List[RawBlock]) -> bool:
     return len(group) > 1 or any(CHAPTER_RE.match(block_text(block)) for block in group)
 
 
-def _append_table_or_continuation(
-    ids: IdFactory, state: _NormalFlowState, block: RawBlock
-) -> None:
+def _append_table_or_continuation(ids: IdFactory, state: _NormalFlowState, block: RawBlock) -> None:
     content = block.raw.get("content", {})
     html = content.get("html", "") if isinstance(content, dict) else ""
     if html.strip():
@@ -253,7 +251,9 @@ def _append_centered_table_heading(
 ) -> bool:
     if not _is_centered_table_heading_continuation(content_blocks, state.i, layout):
         return False
-    state.out.append(make_heading(ids, [content_blocks[state.i]], level=2, role="table_heading_byline"))
+    state.out.append(
+        make_heading(ids, [content_blocks[state.i]], level=2, role="table_heading_byline")
+    )
     state.prev_major_type = HEADING
     state.i += 1
     return True
@@ -384,9 +384,7 @@ def _previous_text_context(state: _NormalFlowState) -> str:
     return ""
 
 
-def _append_plain_paragraph(
-    ids: IdFactory, state: _NormalFlowState, block: RawBlock
-) -> None:
+def _append_plain_paragraph(ids: IdFactory, state: _NormalFlowState, block: RawBlock) -> None:
     boundary_reason = state.display_boundary_attrs.get(id(block))
     extra_attrs = {"display_boundary_before": boundary_reason} if boundary_reason else None
     state.out.append(make_paragraph(ids, block, extra_attrs=extra_attrs))

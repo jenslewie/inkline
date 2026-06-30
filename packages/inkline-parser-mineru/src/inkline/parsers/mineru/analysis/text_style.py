@@ -186,9 +186,7 @@ class TextStyleAnalyzer:
             source="pdf_text",
             line_count=summary.selected_lines,
             font_size=round(median(summary.sizes), 3) if summary.sizes else None,
-            line_height=round(median(summary.line_heights), 3)
-            if summary.line_heights
-            else None,
+            line_height=round(median(summary.line_heights), 3) if summary.line_heights else None,
             fonts=tuple(summary.fonts),
             confidence="high" if summary.sizes else "medium",
         )
@@ -199,7 +197,9 @@ class TextStyleAnalyzer:
         image = self._cache.page_image(page) if page is not None else None
         if page is None or not bb or image is None:
             return None
-        crop_box = _image_crop_box(self._cache.scale_bbox(page, bb), image.size, self._cache.render_zoom)
+        crop_box = _image_crop_box(
+            self._cache.scale_bbox(page, bb), image.size, self._cache.render_zoom
+        )
         if crop_box is None:
             return None
         visual_sizes, line_heights = _visual_line_metrics(
@@ -247,7 +247,9 @@ def _collect_text_layer_summary(
 def _line_overlaps_region(line: Dict[str, Any], region: _ScaledRegion) -> bool:
     lx0, ly0, lx1, ly1 = line["bbox"]
     cy = (ly0 + ly1) / 2.0
-    overlap_x = max(0.0, min(region.x1 + region.margin_x, lx1) - max(region.x0 - region.margin_x, lx0))
+    overlap_x = max(
+        0.0, min(region.x1 + region.margin_x, lx1) - max(region.x0 - region.margin_x, lx0)
+    )
     return region.y0 - region.margin_y <= cy <= region.y1 + region.margin_y and overlap_x > 1.0
 
 
@@ -289,8 +291,7 @@ def _visual_line_metrics(crop: Any, zoom: float) -> Tuple[List[float], List[floa
     width, height = crop.size
     data = list(crop.getdata())
     row_counts = [
-        sum(1 for val in data[y * width : (y + 1) * width] if val < 225)
-        for y in range(height)
+        sum(1 for val in data[y * width : (y + 1) * width] if val < 225) for y in range(height)
     ]
     visual_sizes: List[float] = []
     line_heights: List[float] = []

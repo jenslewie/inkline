@@ -190,9 +190,7 @@ def _run_note_repair_pipeline(
         note_cache = _note_pdf_cache(args, pages, layout)
         try:
             if marker_locator_enabled:
-                marker_locator_evidence = _run_qwen_marker_locator(
-                    blocks, args, layout, note_cache
-                )
+                marker_locator_evidence = _run_qwen_marker_locator(blocks, args, layout, note_cache)
             _recover_and_resolve_note_refs(
                 blocks,
                 args,
@@ -228,14 +226,12 @@ def _run_qwen_marker_locator(
     return run_qwen_marker_locator_repairs(
         blocks,
         marker_locator_config,
-        missing_body_ref_pages_after_page=lambda evidence: (
-            _recover_note_refs_and_missing_pages(
-                blocks,
-                args,
-                layout,
-                note_cache,
-                qwen_marker_pages=evidence,
-            )
+        missing_body_ref_pages_after_page=lambda evidence: _recover_note_refs_and_missing_pages(
+            blocks,
+            args,
+            layout,
+            note_cache,
+            qwen_marker_pages=evidence,
         ),
     )
 
@@ -281,7 +277,9 @@ def _source_files_metadata(
         v = getattr(args, k, None)
         if v:
             source_files[k] = _input_path_relative_to_output_dir(v, output_dir)
-    qwen_marker_evidence_path = _qwen_marker_locator_artifact_dir(args) / "qwen_marker_evidence.json"
+    qwen_marker_evidence_path = (
+        _qwen_marker_locator_artifact_dir(args) / "qwen_marker_evidence.json"
+    )
     if (
         marker_locator_enabled
         and bool(getattr(args, "marker_locator_reuse_evidence", False))
@@ -336,9 +334,7 @@ def _metadata(
     }
 
 
-_AUTHOR_RE = re.compile(
-    r"(?:著者[：:]\s*(.+?)(?:\s|$)|作者[：:]\s*(.+?)(?:\s|$)|(.+?)著(?:\s|$))"
-)
+_AUTHOR_RE = re.compile(r"(?:著者[：:]\s*(.+?)(?:\s|$)|作者[：:]\s*(.+?)(?:\s|$)|(.+?)著(?:\s|$))")
 
 
 def _infer_author(
@@ -410,7 +406,9 @@ def _qwen_marker_locator_metadata(
     marker_locator_enabled: bool,
     marker_locator_evidence: List[Any],
 ) -> Dict[str, Any]:
-    qwen_marker_evidence_path = _qwen_marker_locator_artifact_dir(args) / "qwen_marker_evidence.json"
+    qwen_marker_evidence_path = (
+        _qwen_marker_locator_artifact_dir(args) / "qwen_marker_evidence.json"
+    )
     return {
         "enabled": marker_locator_enabled,
         "repair_enabled": marker_locator_enabled,

@@ -152,8 +152,4 @@ def _trim_inline_text_line(parts: list[InlinePart]) -> list[InlinePart]:
         trimmed[0] = TextSegment(text=trimmed[0].text.lstrip())
     if trimmed and isinstance(trimmed[-1], TextSegment):
         trimmed[-1] = TextSegment(text=trimmed[-1].text.rstrip())
-    return [
-        part
-        for part in trimmed
-        if not isinstance(part, TextSegment) or part.text
-    ]
+    return [part for part in trimmed if not isinstance(part, TextSegment) or part.text]

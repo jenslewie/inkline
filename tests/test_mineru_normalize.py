@@ -126,8 +126,12 @@ def test_small_pdf_page_size_uses_content_coordinate_layout(tmp_path) -> None:
         _text_item("title", "1", [508, 120, 531, 139]),
         _text_item("title", "日本：从战国时代到世界强权", [265, 163, 778, 192]),
         _text_item("paragraph", body_text, [148, 327, 891, 430]),
-        _text_item("paragraph", "这群外来者的首领，是一个叫五峰的中国人。" * 5, [148, 438, 891, 597]),
-        _text_item("paragraph", "随后，长者告诉他们，岛上最大的城镇是赤荻。" * 4, [148, 717, 891, 791]),
+        _text_item(
+            "paragraph", "这群外来者的首领，是一个叫五峰的中国人。" * 5, [148, 438, 891, 597]
+        ),
+        _text_item(
+            "paragraph", "随后，长者告诉他们，岛上最大的城镇是赤荻。" * 4, [148, 717, 891, 791]
+        ),
     ]
     content_list_v2.write_text(json.dumps([[] for _ in range(19)] + [page_20]), encoding="utf-8")
     middle.write_text(
@@ -168,8 +172,16 @@ def test_large_pdf_page_size_uses_content_coordinate_layout_without_silk_regress
     middle = tmp_path / "silk_style_middle.json"
     output = tmp_path / "canonical.json"
     page_20 = [
-        _text_item("paragraph", "近的烽燧报警，这样一直传到最近的可以发兵的军营。" * 5, [113, 104, 887, 212]),
-        _text_item("paragraph", "出土了最大量丝路早期文献的悬泉就是这样一个军营。" * 5, [113, 221, 887, 388]),
+        _text_item(
+            "paragraph",
+            "近的烽燧报警，这样一直传到最近的可以发兵的军营。" * 5,
+            [113, 104, 887, 212],
+        ),
+        _text_item(
+            "paragraph",
+            "出土了最大量丝路早期文献的悬泉就是这样一个军营。" * 5,
+            [113, 221, 887, 388],
+        ),
         _text_item("paragraph", "悬泉还出土了35000多件废弃的文书。" * 6, [114, 396, 886, 475]),
     ]
     content_list_v2.write_text(json.dumps([[] for _ in range(19)] + [page_20]), encoding="utf-8")
@@ -436,13 +448,17 @@ def test_marker_locator_metadata_paths_are_relative(tmp_path) -> None:
     marker_config = document["metadata"]["mineru"]["auxiliary_ocr"]["qwen_marker_locator"]
     assert marker_config["artifact_dir"] == "canonical_qwen_marker_locator"
     assert marker_config["timing_log"] == "canonical_qwen_marker_locator/qwen_marker_timing.jsonl"
-    assert marker_config["evidence_path"] == "canonical_qwen_marker_locator/qwen_marker_evidence.json"
+    assert (
+        marker_config["evidence_path"] == "canonical_qwen_marker_locator/qwen_marker_evidence.json"
+    )
     assert (
         document["metadata"]["source_files"]["qwen_marker_evidence"]
         == "canonical_qwen_marker_locator/qwen_marker_evidence.json"
     )
     assert document["metadata"]["mineru"]["vlm_model"]["local_path"] == "../models/vlm"
-    assert all(not Path(path).is_absolute() for path in document["metadata"]["source_files"].values())
+    assert all(
+        not Path(path).is_absolute() for path in document["metadata"]["source_files"].values()
+    )
 
 
 def test_generated_marker_locator_evidence_is_not_listed_as_source_file(tmp_path) -> None:
@@ -691,10 +707,7 @@ def test_table_first_regular_row_not_marked_center_aligned(tmp_path) -> None:
             [
                 [
                     _table_item(
-                        "<table>"
-                        "<tr><td>A</td><td>B</td></tr>"
-                        "<tr><td>C</td><td>D</td></tr>"
-                        "</table>",
+                        "<table><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></table>",
                         [100, 100, 900, 300],
                     )
                 ]

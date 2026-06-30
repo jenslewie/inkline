@@ -68,7 +68,9 @@ def _merge_pair_source(
     left_source = left.setdefault("source", {})
     right_source = right.get("source", {})
     _merge_source_pages(left_source, right_source)
-    _merge_source_spans(left, right, left_source, right_source, original_left_text, original_right_text)
+    _merge_source_spans(
+        left, right, left_source, right_source, original_left_text, original_right_text
+    )
     if interruptions:
         left_source.setdefault("interruption_spans", []).extend(interruptions)
     left_source["bbox"] = union_bbox([left_source.get("bbox"), right_source.get("bbox")])

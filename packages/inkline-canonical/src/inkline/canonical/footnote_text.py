@@ -58,7 +58,7 @@ def strip_footnote_marker(text: str, attrs: dict[str, Any] | None = None) -> str
                         text,
                     )
                     if delim_m:
-                        rest = text[delim_m.end():]
+                        rest = text[delim_m.end() :]
                         if rest:
                             return rest
             # Literal marker form — must be followed by a required delimiter
@@ -66,7 +66,7 @@ def strip_footnote_marker(text: str, attrs: dict[str, Any] | None = None) -> str
             pattern = rf"^({re.escape(marker_stripped)}){_DELIMITER_PATTERN}"
             m2 = re.match(pattern, text)
             if m2:
-                rest = text[m2.end():]
+                rest = text[m2.end() :]
                 if rest:
                     return rest
     # Fallback (no note_marker attr): strip a leading marker-like prefix.
@@ -82,7 +82,7 @@ def strip_footnote_marker(text: str, attrs: dict[str, Any] | None = None) -> str
         text,
     )
     if m and m.end() > 0:
-        rest = text[m.end():]
+        rest = text[m.end() :]
         if rest:
             return rest
     return text

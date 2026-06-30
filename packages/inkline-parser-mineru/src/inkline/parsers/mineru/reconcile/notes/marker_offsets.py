@@ -189,9 +189,7 @@ def _qwen_normalized_offset_for_after_match(
     quote: str,
     after_index: int,
 ) -> Optional[int]:
-    visible_offset = _qwen_visible_marker_offset_before_after(
-        compact, marker, before, after_index
-    )
+    visible_offset = _qwen_visible_marker_offset_before_after(compact, marker, before, after_index)
     if visible_offset is not None:
         return _raw_offset_from_normalized_index(text, offsets, visible_offset)
     if not before or _qwen_prefix_matches_before(compact[:after_index], before):

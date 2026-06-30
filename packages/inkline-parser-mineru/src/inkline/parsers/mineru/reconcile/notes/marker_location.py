@@ -128,9 +128,8 @@ def _qwen_body_ref_candidate(
 ) -> Optional[Tuple[int, CanonicalBlock, _InlineMarkerLocation]]:
     if block.get("type") not in BODY_TYPES or inputs.page not in context.pages_for(block):
         return None
-    if (
-        not inputs.allow_existing
-        and _existing_ref_marker_on_page(block, inputs.marker, inputs.page, context)
+    if not inputs.allow_existing and _existing_ref_marker_on_page(
+        block, inputs.marker, inputs.page, context
     ):
         return None
     text = str(block.get("text") or "")

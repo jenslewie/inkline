@@ -10,6 +10,7 @@ from inkline.canonical import strip_footnote_marker
 
 # ── note_marker attr present ─────────────────────────────────────────
 
+
 def test_marker_star_with_space():
     """'* note' → 'note' when note_marker='*'"""
     assert strip_footnote_marker("* note", {"note_marker": "*"}) == "note"
@@ -41,6 +42,7 @@ def test_marker_multi_digit_literal():
 
 
 # ── No note_marker attr — heuristic fallback ────────────────────────
+
 
 def test_fallback_digit_with_space():
     """'1 note' → 'note' (heuristic, no note_marker)"""
@@ -79,6 +81,7 @@ def test_fallback_section_sign():
 
 # ── Negative: should NOT strip ──────────────────────────────────────
 
+
 def test_no_strip_3rd_edition():
     """'3rd edition' must NOT be stripped (no delimiter after '3')"""
     assert strip_footnote_marker("3rd edition") == "3rd edition"
@@ -115,6 +118,7 @@ def test_no_strip_three_digit_historical_year():
 
 
 # ── Edge cases ──────────────────────────────────────────────────────
+
 
 def test_empty_marker_attr_falls_to_heuristic():
     """Empty note_marker string triggers heuristic fallback"""
@@ -165,6 +169,7 @@ def test_marker_with_fullwidth_closing_paren():
 
 # ── RAG chunking footnote stripping ─────────────────────────────────
 
+
 def test_rag_footnote_chunk_strips_marker():
     """Footnote block text in RAG chunks should have marker removed."""
     from inkline.canonical import sample_document
@@ -202,9 +207,7 @@ def test_rag_footnote_chunk_strips_marker():
     assert fn_chunks
     # The footnote text in the chunk should NOT start with "1 "
     chunk_text = fn_chunks[0]["text"]
-    footnote_line = next(
-        line for line in chunk_text.split("\n\n") if "脚注内容" in line
-    )
+    footnote_line = next(line for line in chunk_text.split("\n\n") if "脚注内容" in line)
     assert footnote_line == "脚注内容。"
 
 

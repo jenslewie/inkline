@@ -277,8 +277,12 @@ def _merged_table_footnotes(context: _TableMergeContext) -> List[Any]:
 
 
 def _merged_table_notes(context: _TableMergeContext) -> List[Any]:
-    all_notes = list(context.left_attrs.get("table_notes") or context.left_attrs.get("footnotes") or [])
-    right_notes = context.right_attrs.get("table_notes") or context.right_attrs.get("footnotes") or []
+    all_notes = list(
+        context.left_attrs.get("table_notes") or context.left_attrs.get("footnotes") or []
+    )
+    right_notes = (
+        context.right_attrs.get("table_notes") or context.right_attrs.get("footnotes") or []
+    )
     for note in right_notes:
         if note and note not in all_notes and not _is_table_continuation_marker(note):
             all_notes.append(note)

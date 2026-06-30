@@ -836,7 +836,9 @@ class TestDisplayRunStopConditions:
             "特就这么重。或者0.6克？这是当时在撒马尔罕流通的一种银币的重量。"
         )
         assert blocks[2]["source"]["pages"] == [165, 166]
-        assert blocks[2]["attrs"]["merge_reason"] == "cross_page_paragraph_continuation_across_float"
+        assert (
+            blocks[2]["attrs"]["merge_reason"] == "cross_page_paragraph_continuation_across_float"
+        )
 
     def test_tight_body_flow_before_float_body_resume_not_promoted(
         self,
@@ -884,8 +886,7 @@ class TestDisplayRunStopConditions:
         )
         body = _block(
             PARAGRAPH,
-            "这些移民也带来了自己的宗教习俗。城中至少有五座，也许有六座祆祠，"
-            "其中四座在西市附近。",
+            "这些移民也带来了自己的宗教习俗。城中至少有五座，也许有六座祆祠，其中四座在西市附近。",
             page=203,
             bbox=[142, 496, 911, 632],
             attrs={
@@ -903,9 +904,7 @@ class TestDisplayRunStopConditions:
 
         assert body["type"] == PARAGRAPH
         assert not (body.get("attrs") or {}).get("display_boundary_after_float_body_resume")
-        assert (body.get("attrs") or {}).get("classification_evidence") == [
-            "other_layout_signal"
-        ]
+        assert (body.get("attrs") or {}).get("classification_evidence") == ["other_layout_signal"]
 
     def test_cross_page_body_flow_after_float_resume_stays_paragraph(self) -> None:
         before = _block(
