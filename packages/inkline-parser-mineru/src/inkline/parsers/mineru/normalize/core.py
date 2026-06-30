@@ -99,8 +99,33 @@ def build_canonical(
     page_sizes: Dict[int, Tuple[float, float]],
     args: argparse.Namespace,
 ) -> Dict[str, Any]:
-    ids = IdFactory()
     layout = infer_layout_stats(pages, page_sizes)
+    blocks = _build_page_blocks(pages, args, layout)
+    marker_locator_evidence = _run_structural_reconciliation(blocks, pages, args, layout)
+
+    output_dir = Path(getattr(args, "output", "canonical.json")).parent
+    canonical = _assemble_canonical(
+        blocks,
+        pages,
+        args,
+        layout,
+        output_dir,
+        marker_locator_evidence=marker_locator_evidence,
+    )
+    _normalize_qwen_evidence_paths(
+        canonical,
+        output_dir,
+        artifact_dir=_qwen_marker_locator_artifact_dir(args),
+    )
+    return canonical
+
+
+def _build_page_blocks(
+    pages: Dict[int, List[RawBlock]],
+    args: argparse.Namespace,
+    layout: Any,
+) -> List[Dict[str, Any]]:
+    ids = IdFactory()
     blocks: List[Dict[str, Any]] = []
     prev_major_type: Optional[str] = None
     in_toc = False
@@ -124,7 +149,15 @@ def build_canonical(
         reconcile_figure_captions(blocks, text_style=text_style)
     finally:
         text_style.close()
+    return blocks
 
+
+def _run_structural_reconciliation(
+    blocks: List[Dict[str, Any]],
+    pages: Dict[int, List[RawBlock]],
+    args: argparse.Namespace,
+    layout: Any,
+) -> List[Any]:
     reconcile_table_continuations(blocks)
     promote_page_reference_list_footnotes(blocks)
     split_page_footnote_blocks(blocks)
@@ -137,30 +170,28 @@ def build_canonical(
         layout,
         allow_missing_pdf_text=getattr(args, "allow_missing_pdf_text", False),
     )
-    marker_locator_evidence = []
+    marker_locator_evidence = _run_note_repair_pipeline(blocks, pages, args, layout)
+    reconcile_display_blocks(blocks, layout)
+    reconcile_generic_display_block_structures(blocks, layout)
+    normalize_display_blocks_for_layout_schema(blocks)
+    remove_internal_note_ref_indexes(blocks)
+    return marker_locator_evidence
+
+
+def _run_note_repair_pipeline(
+    blocks: List[Dict[str, Any]],
+    pages: Dict[int, List[RawBlock]],
+    args: argparse.Namespace,
+    layout: Any,
+) -> List[Any]:
+    marker_locator_evidence: List[Any] = []
     marker_locator_enabled = bool(getattr(args, "marker_locator_repair", False))
     with trace_note_calls(getattr(args, "note_trace_log", None)):
-        note_cache = PdfPageCache(
-            getattr(args, "source_pdf", None),
-            dict.fromkeys(sorted(pages), (layout.page_width, layout.page_height)),
-            allow_missing=True,
-            render_zoom=3.0,
-        )
+        note_cache = _note_pdf_cache(args, pages, layout)
         try:
             if marker_locator_enabled:
-                marker_locator_config = _qwen_marker_locator_config(args)
-                marker_locator_evidence = run_qwen_marker_locator_repairs(
-                    blocks,
-                    marker_locator_config,
-                    missing_body_ref_pages_after_page=lambda evidence: (
-                        _recover_note_refs_and_missing_pages(
-                            blocks,
-                            args,
-                            layout,
-                            note_cache,
-                            qwen_marker_pages=evidence,
-                        )
-                    ),
+                marker_locator_evidence = _run_qwen_marker_locator(
+                    blocks, args, layout, note_cache
                 )
             _recover_and_resolve_note_refs(
                 blocks,
@@ -171,12 +202,80 @@ def build_canonical(
             )
         finally:
             note_cache.close()
-    reconcile_display_blocks(blocks, layout)
-    reconcile_generic_display_block_structures(blocks, layout)
-    normalize_display_blocks_for_layout_schema(blocks)
-    remove_internal_note_ref_indexes(blocks)
+    return marker_locator_evidence
 
-    output_dir = Path(getattr(args, "output", "canonical.json")).parent
+
+def _note_pdf_cache(
+    args: argparse.Namespace,
+    pages: Dict[int, List[RawBlock]],
+    layout: Any,
+) -> PdfPageCache:
+    return PdfPageCache(
+        getattr(args, "source_pdf", None),
+        dict.fromkeys(sorted(pages), (layout.page_width, layout.page_height)),
+        allow_missing=True,
+        render_zoom=3.0,
+    )
+
+
+def _run_qwen_marker_locator(
+    blocks: List[Dict[str, Any]],
+    args: argparse.Namespace,
+    layout: Any,
+    note_cache: PdfPageCache,
+) -> List[Any]:
+    marker_locator_config = _qwen_marker_locator_config(args)
+    return run_qwen_marker_locator_repairs(
+        blocks,
+        marker_locator_config,
+        missing_body_ref_pages_after_page=lambda evidence: (
+            _recover_note_refs_and_missing_pages(
+                blocks,
+                args,
+                layout,
+                note_cache,
+                qwen_marker_pages=evidence,
+            )
+        ),
+    )
+
+
+def _assemble_canonical(
+    blocks: List[Dict[str, Any]],
+    pages: Dict[int, List[RawBlock]],
+    args: argparse.Namespace,
+    layout: Any,
+    output_dir: Path,
+    *,
+    marker_locator_evidence: List[Any],
+) -> Dict[str, Any]:
+    marker_locator_enabled = bool(getattr(args, "marker_locator_repair", False))
+    page_metadata = build_page_metadata(pages, layout, title=args.title, blocks=blocks)
+    canonical = {
+        "metadata": _metadata(
+            blocks,
+            args,
+            layout,
+            output_dir,
+            page_metadata,
+            marker_locator_enabled=marker_locator_enabled,
+            marker_locator_evidence=marker_locator_evidence,
+        ),
+        "toc": build_toc_from_blocks(blocks),
+        "pages": page_metadata,
+        "blocks": blocks,
+        "assets": {"images": []},
+        "source_map": _source_map(blocks),
+    }
+    return canonical
+
+
+def _source_files_metadata(
+    args: argparse.Namespace,
+    output_dir: Path,
+    *,
+    marker_locator_enabled: bool,
+) -> Dict[str, str]:
     source_files = {}
     for k in ["content_list_v2", "content_list", "middle", "source_pdf"]:
         v = getattr(args, k, None)
@@ -191,7 +290,19 @@ def build_canonical(
         source_files["qwen_marker_evidence"] = _input_path_relative_to_output_dir(
             qwen_marker_evidence_path, output_dir
         )
+    return source_files
 
+
+def _metadata(
+    blocks: List[Dict[str, Any]],
+    args: argparse.Namespace,
+    layout: Any,
+    output_dir: Path,
+    page_metadata: List[Dict[str, Any]],
+    *,
+    marker_locator_enabled: bool,
+    marker_locator_evidence: List[Any],
+) -> Dict[str, Any]:
     source_file = (
         getattr(args, "source_pdf", None)
         or getattr(args, "md", None)
@@ -199,118 +310,145 @@ def build_canonical(
         or getattr(args, "content_list", None)
         or ""
     )
-    page_metadata = build_page_metadata(pages, layout, title=args.title, blocks=blocks)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "doc_id": args.doc_id or infer_doc_id(args),
+        "title": args.title,
+        "author": _infer_author(blocks, page_metadata),
+        "language": args.language,
+        "source_file": _input_path_relative_to_output_dir(source_file, output_dir)
+        if source_file
+        else "",
+        "source_files": _source_files_metadata(
+            args,
+            output_dir,
+            marker_locator_enabled=marker_locator_enabled,
+        ),
+        "parser_name": "mineru",
+        "parser_mode": str(getattr(args, "parser_mode", "vlm")),
+        "mineru": _mineru_metadata(
+            args,
+            layout,
+            output_dir,
+            marker_locator_enabled=marker_locator_enabled,
+            marker_locator_evidence=marker_locator_evidence,
+        ),
+    }
+
+
+_AUTHOR_RE = re.compile(
+    r"(?:著者[：:]\s*(.+?)(?:\s|$)|作者[：:]\s*(.+?)(?:\s|$)|(.+?)著(?:\s|$))"
+)
+
+
+def _infer_author(
+    blocks: List[Dict[str, Any]], page_metadata: List[Dict[str, Any]]
+) -> Optional[str]:
     title_page_nums = {
         p["physical_page"] for p in page_metadata if p.get("page_role") == "title_page"
     }
-    author = None
-    _AUTHOR_RE = re.compile(
-        r"(?:著者[：:]\s*(.+?)(?:\s|$)|作者[：:]\s*(.+?)(?:\s|$)|(.+?)著(?:\s|$))"
-    )
-    for b in blocks:
-        source = b.get("source") or {}
+    for block in blocks:
+        source = block.get("source") or {}
         if source.get("page") not in title_page_nums:
             continue
-        text = str(b.get("text") or "")
-        for m in _AUTHOR_RE.finditer(text):
-            for group in m.groups():
-                if group:
-                    author = group.strip()
-                    break
-            if author:
-                break
+        author = _author_from_text(str(block.get("text") or ""))
         if author:
-            break
-    canonical = {
-        "metadata": {
-            "schema_version": SCHEMA_VERSION,
-            "doc_id": args.doc_id or infer_doc_id(args),
-            "title": args.title,
-            "author": author,
-            "language": args.language,
-            "source_file": _input_path_relative_to_output_dir(source_file, output_dir)
-            if source_file
-            else "",
-            "source_files": source_files,
-            "parser_name": "mineru",
-            "parser_mode": str(getattr(args, "parser_mode", "vlm")),
-            "mineru": {
-                "version": getattr(args, "mineru_version", None),
-                "vlm_utils_version": getattr(args, "mineru_vl_utils_version", None),
-                "vlm_model": _normalize_vlm_model_metadata(
-                    getattr(args, "vlm_model", None), output_dir
-                ),
-                "normalizer": "mineru_to_canonical.py",
-                "normalizer_version": "0.3.0",
-                "layout_stats": {
-                    "page_width": layout.page_width,
-                    "page_height": layout.page_height,
-                    "body_left": layout.body_left,
-                    "body_right": layout.body_right,
-                },
-                "auxiliary_ocr": {
-                    "qwen_marker_locator": {
-                        "enabled": marker_locator_enabled,
-                        "repair_enabled": marker_locator_enabled,
-                        "model": getattr(args, "marker_locator_model", DEFAULT_QWEN_MODEL),
-                        "keep_alive": getattr(
-                            args, "marker_locator_keep_alive", DEFAULT_OLLAMA_KEEP_ALIVE
-                        ),
-                        "body_mode": getattr(args, "marker_locator_body_mode", "page_then_block"),
-                        "page_dpi": _marker_locator_page_dpi(args),
-                        "block_dpi": _marker_locator_block_dpi(args),
-                        "pages": sorted({item.page for item in marker_locator_evidence}),
-                        "evidence": [
-                            {"page": item.page, "kind": item.kind}
-                            for item in marker_locator_evidence
-                        ],
-                        "artifact_dir": _input_path_relative_to_output_dir(
-                            _qwen_marker_locator_artifact_dir(args), output_dir
-                        )
-                        if marker_locator_enabled
-                        else None,
-                        "evidence_path": _input_path_relative_to_output_dir(
-                            qwen_marker_evidence_path, output_dir
-                        )
-                        if marker_locator_enabled
-                        else None,
-                        "timing_log": _input_path_relative_to_output_dir(
-                            _qwen_marker_locator_timing_log_path(args), output_dir
-                        )
-                        if marker_locator_enabled
-                        else None,
-                    }
-                },
-                "note_trace_log": getattr(args, "note_trace_log", None) or None,
-                "note_recovery_mode": str(getattr(args, "note_recovery_mode", "qwen")),
-                "type_system": {
-                    "block_types": list(CANONICAL_BLOCK_TYPES),
-                    "content_forms": [],
-                    "note": "display_block is layout-first; semantic forms are not emitted.",
-                },
-            },
+            return author
+    return None
+
+
+def _author_from_text(text: str) -> Optional[str]:
+    for match in _AUTHOR_RE.finditer(text):
+        for group in match.groups():
+            if group:
+                return group.strip()
+    return None
+
+
+def _mineru_metadata(
+    args: argparse.Namespace,
+    layout: Any,
+    output_dir: Path,
+    *,
+    marker_locator_enabled: bool,
+    marker_locator_evidence: List[Any],
+) -> Dict[str, Any]:
+    return {
+        "version": getattr(args, "mineru_version", None),
+        "vlm_utils_version": getattr(args, "mineru_vl_utils_version", None),
+        "vlm_model": _normalize_vlm_model_metadata(getattr(args, "vlm_model", None), output_dir),
+        "normalizer": "mineru_to_canonical.py",
+        "normalizer_version": "0.3.0",
+        "layout_stats": {
+            "page_width": layout.page_width,
+            "page_height": layout.page_height,
+            "body_left": layout.body_left,
+            "body_right": layout.body_right,
         },
-        "toc": [],
-        "pages": page_metadata,
-        "blocks": blocks,
-        "assets": {"images": []},
-        "source_map": [
-            {
-                "block_id": block["block_id"],
-                "page": (block.get("source") or {}).get("page"),
-                "bbox": (block.get("source") or {}).get("bbox"),
-                "parser_raw_id": (block.get("attrs") or {}).get("parser_raw_id"),
-            }
-            for block in blocks
-        ],
+        "auxiliary_ocr": {
+            "qwen_marker_locator": _qwen_marker_locator_metadata(
+                args,
+                output_dir,
+                marker_locator_enabled=marker_locator_enabled,
+                marker_locator_evidence=marker_locator_evidence,
+            )
+        },
+        "note_trace_log": getattr(args, "note_trace_log", None) or None,
+        "note_recovery_mode": str(getattr(args, "note_recovery_mode", "qwen")),
+        "type_system": {
+            "block_types": list(CANONICAL_BLOCK_TYPES),
+            "content_forms": [],
+            "note": "display_block is layout-first; semantic forms are not emitted.",
+        },
     }
-    canonical["toc"] = build_toc_from_blocks(blocks)
-    _normalize_qwen_evidence_paths(
-        canonical,
-        output_dir,
-        artifact_dir=_qwen_marker_locator_artifact_dir(args),
-    )
-    return canonical
+
+
+def _qwen_marker_locator_metadata(
+    args: argparse.Namespace,
+    output_dir: Path,
+    *,
+    marker_locator_enabled: bool,
+    marker_locator_evidence: List[Any],
+) -> Dict[str, Any]:
+    qwen_marker_evidence_path = _qwen_marker_locator_artifact_dir(args) / "qwen_marker_evidence.json"
+    return {
+        "enabled": marker_locator_enabled,
+        "repair_enabled": marker_locator_enabled,
+        "model": getattr(args, "marker_locator_model", DEFAULT_QWEN_MODEL),
+        "keep_alive": getattr(args, "marker_locator_keep_alive", DEFAULT_OLLAMA_KEEP_ALIVE),
+        "body_mode": getattr(args, "marker_locator_body_mode", "page_then_block"),
+        "page_dpi": _marker_locator_page_dpi(args),
+        "block_dpi": _marker_locator_block_dpi(args),
+        "pages": sorted({item.page for item in marker_locator_evidence}),
+        "evidence": [{"page": item.page, "kind": item.kind} for item in marker_locator_evidence],
+        "artifact_dir": _optional_qwen_path(
+            _qwen_marker_locator_artifact_dir(args), output_dir, marker_locator_enabled
+        ),
+        "evidence_path": _optional_qwen_path(
+            qwen_marker_evidence_path, output_dir, marker_locator_enabled
+        ),
+        "timing_log": _optional_qwen_path(
+            _qwen_marker_locator_timing_log_path(args), output_dir, marker_locator_enabled
+        ),
+    }
+
+
+def _optional_qwen_path(value: Path, output_dir: Path, enabled: bool) -> Optional[str]:
+    if not enabled:
+        return None
+    return _input_path_relative_to_output_dir(value, output_dir)
+
+
+def _source_map(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "block_id": block["block_id"],
+            "page": (block.get("source") or {}).get("page"),
+            "bbox": (block.get("source") or {}).get("bbox"),
+            "parser_raw_id": (block.get("attrs") or {}).get("parser_raw_id"),
+        }
+        for block in blocks
+    ]
 
 
 def _recover_note_refs_and_missing_pages(
