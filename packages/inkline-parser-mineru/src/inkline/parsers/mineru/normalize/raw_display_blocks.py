@@ -129,48 +129,79 @@ def is_page_bottom_set_off_before_footnotes(
     _, page_height = _coord_page_size(page_blocks, layout)
     if b.y1 < page_height * 0.74:
         return False
-    following_same_page = [
-        x
-        for x in blocks[i + 1 :]
-        if x.page == b.page and x.raw_type not in {"page_number", "page_header", "page_footer"}
-    ]
-    if not following_same_page or not all(
-        x.raw_type == "page_footnote" for x in following_same_page
-    ):
+    if not _only_page_footnotes_follow(blocks, i, b.page):
         return False
-    prev = None
-    for candidate in reversed(blocks[:i]):
-        if candidate.page != b.page:
-            break
-        if candidate.raw_type in {"page_number", "page_header", "page_footer"}:
-            continue
-        if candidate.raw_type != "paragraph" or not candidate.bbox or not block_text(candidate):
-            return False
-        prev = candidate
-        break
+    prev = _previous_same_page_paragraph(blocks, i, b.page)
     if prev is None:
         return False
     gap = b.y0 - prev.y1
     if gap < max(12.0, page_height * 0.015):
         return False
+    if not _is_set_off_from_body(b, prev, layout):
+        return False
+    return _matches_body_font_size(b, page_blocks, text_style)
+
+
+def _only_page_footnotes_follow(blocks: Sequence[RawBlock], i: int, page: int) -> bool:
+    following_same_page = [
+        block
+        for block in blocks[i + 1 :]
+        if block.page == page
+        and block.raw_type not in {"page_number", "page_header", "page_footer"}
+    ]
+    return bool(
+        following_same_page
+        and all(block.raw_type == "page_footnote" for block in following_same_page)
+    )
+
+
+def _previous_same_page_paragraph(
+    blocks: Sequence[RawBlock], i: int, page: int
+) -> Optional[RawBlock]:
+    for candidate in reversed(blocks[:i]):
+        if candidate.page != page:
+            return None
+        if candidate.raw_type in {"page_number", "page_header", "page_footer"}:
+            continue
+        if candidate.raw_type != "paragraph" or not candidate.bbox or not block_text(candidate):
+            return None
+        return candidate
+    return None
+
+
+def _is_set_off_from_body(block: RawBlock, prev: RawBlock, layout: LayoutStats) -> bool:
     if prev.width < layout.body_width * 0.84 or prev.x0 > layout.body_left + max(
         55.0, layout.body_width * 0.07
     ):
         return False
-    global_indent = b.x0 - layout.body_left
-    local_indent = b.x0 - prev.x0
-    global_set_off = (
-        global_indent >= max(58.0, layout.body_width * 0.07) and b.width <= layout.body_width * 0.95
+    return _is_global_set_off(block, layout) or _is_local_set_off(block, prev, layout)
+
+
+def _is_global_set_off(block: RawBlock, layout: LayoutStats) -> bool:
+    global_indent = block.x0 - layout.body_left
+    return bool(
+        global_indent >= max(58.0, layout.body_width * 0.07)
+        and block.width <= layout.body_width * 0.95
     )
-    local_set_off = local_indent >= max(
-        36.0, layout.body_width * 0.045
-    ) and b.width <= prev.width - max(24.0, layout.body_width * 0.03)
-    if not (global_set_off or local_set_off):
-        return False
+
+
+def _is_local_set_off(block: RawBlock, prev: RawBlock, layout: LayoutStats) -> bool:
+    local_indent = block.x0 - prev.x0
+    return bool(
+        local_indent >= max(36.0, layout.body_width * 0.045)
+        and block.width <= prev.width - max(24.0, layout.body_width * 0.03)
+    )
+
+
+def _matches_body_font_size(
+    block: RawBlock,
+    page_blocks: Sequence[RawBlock],
+    text_style: Optional[_RawTextStyleProvider],
+) -> bool:
     if text_style is None:
         return True
-    candidate_size = text_style.raw_block_style_size(b)
-    body_size = text_style.raw_page_body_style_size(b.page, page_blocks)
+    candidate_size = text_style.raw_block_style_size(block)
+    body_size = text_style.raw_page_body_style_size(block.page, page_blocks)
     if candidate_size is None or body_size is None:
         return True
     return body_size * 0.84 <= candidate_size <= body_size * 1.12
