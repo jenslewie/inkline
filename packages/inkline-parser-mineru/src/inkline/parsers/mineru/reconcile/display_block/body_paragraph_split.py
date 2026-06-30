@@ -276,51 +276,89 @@ def _split_embedded_paragraph_boundaries_from_display_blocks(
             continue
         prefix_spans, paragraph_spans, display_spans, after_spans = split
         original_source = cur.get("source") or {}
-        original_attrs = cur.get("attrs") or {}
         original_id = cur.get("block_id")
+        merge_attrs = {
+            k: v
+            for k, v in (cur.get("attrs") or {}).items()
+            if k in {"merge_reason", "merge_evidence"}
+        }
 
         cur["text"] = _text_for_spans(prefix_spans)
         _apply_source_from_spans(cur, original_source, prefix_spans)
-
-        inserts: List[Dict[str, Any]] = []
-        paragraph = copy.deepcopy(cur)
-        paragraph["block_id"] = f"{original_id}_paragraph"
-        paragraph["type"] = PARAGRAPH
-        paragraph["text"] = _text_for_spans(paragraph_spans)
-        paragraph_attrs = paragraph.setdefault("attrs", {})
-        _demote_display_attrs(paragraph_attrs)
-        paragraph_attrs["split_from_display_block_id"] = original_id
-        _apply_source_from_spans(paragraph, original_source, paragraph_spans)
-        inserts.append(paragraph)
-
-        display = copy.deepcopy(cur)
-        display["block_id"] = f"{original_id}_display"
-        display["type"] = DISPLAY_BLOCK
-        display["text"] = _text_for_spans(display_spans)
-        display_attrs = display.setdefault("attrs", {})
-        display_attrs["layout_role"] = "inline_display_block"
-        display_attrs["layout_form"] = "short_line_group"
-        display_attrs["line_count"] = len(display_spans)
-        display_attrs["split_from_display_block_id"] = original_id
-        _apply_source_from_spans(display, original_source, display_spans)
-        inserts.append(display)
-
-        if after_spans:
-            after = copy.deepcopy(cur)
-            after["block_id"] = f"{original_id}_after"
-            after["type"] = PARAGRAPH
-            after["text"] = _text_for_spans(after_spans)
-            after_attrs = after.setdefault("attrs", {})
-            _demote_display_attrs(after_attrs)
-            after_attrs["split_from_display_block_id"] = original_id
-            _apply_source_from_spans(after, original_source, after_spans)
-            inserts.append(after)
-
-        cur.setdefault("attrs", {}).update(
-            {k: v for k, v in original_attrs.items() if k in {"merge_reason", "merge_evidence"}}
+        inserts = _embedded_paragraph_boundary_inserts(
+            cur,
+            original_id,
+            original_source,
+            paragraph_spans,
+            display_spans,
+            after_spans,
         )
+        cur.setdefault("attrs", {}).update(merge_attrs)
         blocks[i + 1 : i + 1] = inserts
         i += 1 + len(inserts)
+
+
+def _embedded_paragraph_boundary_inserts(
+    template: Dict[str, Any],
+    original_id: str | None,
+    original_source: Dict[str, Any],
+    paragraph_spans: List[Dict[str, Any]],
+    display_spans: List[Dict[str, Any]],
+    after_spans: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    inserts = [
+        _embedded_paragraph_block(
+            template, f"{original_id}_paragraph", original_id, original_source, paragraph_spans
+        ),
+        _embedded_display_block(
+            template, f"{original_id}_display", original_id, original_source, display_spans
+        ),
+    ]
+    if after_spans:
+        inserts.append(
+            _embedded_paragraph_block(
+                template, f"{original_id}_after", original_id, original_source, after_spans
+            )
+        )
+    return inserts
+
+
+def _embedded_paragraph_block(
+    template: Dict[str, Any],
+    block_id: str,
+    original_id: str | None,
+    original_source: Dict[str, Any],
+    spans: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    block = copy.deepcopy(template)
+    block["block_id"] = block_id
+    block["type"] = PARAGRAPH
+    block["text"] = _text_for_spans(spans)
+    attrs = block.setdefault("attrs", {})
+    _demote_display_attrs(attrs)
+    attrs["split_from_display_block_id"] = original_id
+    _apply_source_from_spans(block, original_source, spans)
+    return block
+
+
+def _embedded_display_block(
+    template: Dict[str, Any],
+    block_id: str,
+    original_id: str | None,
+    original_source: Dict[str, Any],
+    spans: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    block = copy.deepcopy(template)
+    block["block_id"] = block_id
+    block["type"] = DISPLAY_BLOCK
+    block["text"] = _text_for_spans(spans)
+    attrs = block.setdefault("attrs", {})
+    attrs["layout_role"] = "inline_display_block"
+    attrs["layout_form"] = "short_line_group"
+    attrs["line_count"] = len(spans)
+    attrs["split_from_display_block_id"] = original_id
+    _apply_source_from_spans(block, original_source, spans)
+    return block
 
 
 def _split_leading_body_intro_from_display_blocks(
