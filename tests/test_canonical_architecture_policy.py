@@ -12,6 +12,7 @@ def test_bookgraph_contract_does_not_expose_parser_specific_raw_fields() -> None
         ROOT / "packages/inkline-canonical/src/inkline/canonical/bookgraph_projection.py",
         ROOT / "packages/inkline-canonical/src/inkline/canonical/observed.py",
         ROOT / "packages/inkline-canonical/src/inkline/canonical/observed_bookgraph.py",
+        ROOT / "packages/inkline-canonical/src/inkline/canonical/text_unit_layout.py",
         ROOT / "packages/inkline-canonical/src/inkline/canonical/text_units.py",
     ]
     forbidden = ("raw_type", "raw_types", "source_block_id", "inline_display_block")
@@ -31,6 +32,7 @@ def test_canonical_construction_policy_is_non_semantic() -> None:
         ROOT / "packages/inkline-canonical/src/inkline/canonical/bookgraph_projection.py",
         ROOT / "packages/inkline-canonical/src/inkline/canonical/observed.py",
         ROOT / "packages/inkline-canonical/src/inkline/canonical/observed_bookgraph.py",
+        ROOT / "packages/inkline-canonical/src/inkline/canonical/text_unit_layout.py",
         ROOT / "packages/inkline-canonical/src/inkline/canonical/text_units.py",
     ]
     forbidden = ("llm_classify", "semantic_classifier", "looks_like_quote_by_text")

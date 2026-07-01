@@ -6,7 +6,7 @@ from typing import Any
 
 from inkline.canonical.observed import validate_observed_document
 
-TEXT_UNIT_TYPES = {"heading", "paragraph", "list_item", "footnote"}
+TEXT_UNIT_TYPES = {"heading", "paragraph", "display_block", "list_item", "footnote"}
 
 
 def build_text_units(document: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:

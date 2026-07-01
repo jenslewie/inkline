@@ -94,6 +94,42 @@ def _adjacent_body_document() -> dict:
     )
 
 
+def _inset_body_document() -> dict:
+    return make_observed_document(
+        _metadata(),
+        [make_observed_page(1, width=1000, height=1000)],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body before",
+                page=1,
+                bbox=[100, 100, 900, 130],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Inset text",
+                page=1,
+                bbox=[260, 170, 730, 200],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Body after",
+                page=1,
+                bbox=[100, 240, 900, 270],
+                role_hint="body_text",
+                attrs={"reading_order": 3},
+            ),
+        ],
+    )
+
+
 def test_build_bookgraph_from_observed_uses_text_unit_aggregation() -> None:
     graph = build_bookgraph_from_observed(_adjacent_body_document())
 
@@ -110,6 +146,22 @@ def test_build_bookgraph_from_observed_uses_text_unit_aggregation() -> None:
         "observation_ids": ["obs000001", "obs000002"],
         "parser_payloads": [{"raw_type": "paragraph"}, {"raw_type": "paragraph"}],
     }
+
+
+def test_build_bookgraph_from_observed_uses_layout_classification() -> None:
+    graph = build_bookgraph_from_observed(_inset_body_document())
+
+    validate_bookgraph(graph)
+    assert [node["node_type"] for node in graph["nodes"]] == [
+        "paragraph",
+        "display_block",
+        "paragraph",
+    ]
+    assert graph["nodes"][1]["attrs"]["layout_role"] == "set_off"
+    assert graph["nodes"][1]["attrs"]["layout_classification"]["signals"] == [
+        "narrower_than_body_lane",
+        "inset_from_body_lane",
+    ]
 
 
 def test_build_bookgraph_from_observed_maps_explicit_structure_hints() -> None:

@@ -7,6 +7,7 @@ from inkline.canonical import (
     make_observed_document,
     make_observed_page,
 )
+from inkline.canonical.text_unit_layout import classify_text_units_by_layout
 from inkline.canonical.text_units import build_text_units
 
 
@@ -203,3 +204,73 @@ def test_null_bbox_prevents_geometry_merge() -> None:
 
     assert ignored == {}
     assert [unit["text"] for unit in units] == ["First", "Second"]
+
+
+def test_layout_classifier_marks_inset_narrow_body_unit_as_display_block() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body before",
+                page=1,
+                bbox=[100, 100, 900, 130],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Inset text",
+                page=1,
+                bbox=[260, 170, 730, 200],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Body after",
+                page=1,
+                bbox=[100, 240, 900, 270],
+                role_hint="body_text",
+                attrs={"reading_order": 3},
+            ),
+        ]
+    )
+    units, _ = build_text_units(document)
+
+    classified = classify_text_units_by_layout(units, document["pages"])
+
+    assert [unit["unit_type"] for unit in classified] == [
+        "paragraph",
+        "display_block",
+        "paragraph",
+    ]
+    assert classified[1]["attrs"]["layout_role"] == "set_off"
+    assert classified[1]["attrs"]["layout_classification"]["signals"] == [
+        "narrower_than_body_lane",
+        "inset_from_body_lane",
+    ]
+
+
+def test_layout_classifier_keeps_single_body_unit_as_paragraph() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Only body",
+                page=1,
+                bbox=[260, 170, 730, 200],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+        ]
+    )
+    units, _ = build_text_units(document)
+
+    classified = classify_text_units_by_layout(units, document["pages"])
+
+    assert [unit["unit_type"] for unit in classified] == ["paragraph"]
+    assert "layout_classification" not in classified[0]["attrs"]

@@ -12,6 +12,7 @@ from inkline.canonical.bookgraph import (
     make_node,
 )
 from inkline.canonical.observed import validate_observed_document
+from inkline.canonical.text_unit_layout import classify_text_units_by_layout
 from inkline.canonical.text_units import build_text_units
 
 
@@ -24,6 +25,7 @@ def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
     reading_order: list[str] = []
     parser = str(metadata.get("parser_name") or "")
     text_units, ignored_counts = build_text_units(document)
+    text_units = classify_text_units_by_layout(text_units, document["pages"])
 
     for unit in text_units:
         node_id = f"n{len(nodes) + 1:06d}"
@@ -81,6 +83,9 @@ def _node_from_unit(unit: dict[str, Any], node_id: str, evidence_id: str) -> dic
         "role_hints": list(unit["role_hints"]),
     }
     unit_attrs = unit.get("attrs") or {}
+    for key in ("layout_role", "layout_classification"):
+        if key in unit_attrs:
+            attrs[key] = deepcopy(unit_attrs[key])
     inline_runs = unit_attrs.get("inline_runs")
     return make_node(
         node_id,

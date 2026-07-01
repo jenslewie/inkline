@@ -192,6 +192,27 @@ Phase 3.1 只做同页、非语义聚合：
 
 这一步仍然不改变现有 v1 `canonical.json`、EPUB 或 RAG 默认消费路径。它只让 observed shadow path 从“region 级 node”前进到“段落候选级 node”，为后续 display/paragraph 分类和跨页聚合做准备。
 
+### Phase 3.2 TextUnit layout classification
+
+Phase 3.2 在 TextUnit aggregation 之后新增非语义 layout classification：
+
+```text
+ObservedDocument observations
+  -> TextUnit aggregation
+  -> TextUnit layout classification
+  -> BookGraph from classified text units
+```
+
+这一层的职责是把已经聚合好的正文候选，从 `paragraph` 中保守地区分出 `display_block`。它仍然只消费 parser-neutral 字段和版面关系，不读取文本含义：
+
+- 用同页 `paragraph` TextUnits 建立 page-local body lane。
+- 只在同页有足够 body lane 参考时分类。
+- 只把明显窄于 body lane、且左右都相对 body lane 内缩的 `paragraph` TextUnit 标记为 `display_block`。
+- 分类证据进入 node `attrs.layout_classification`，保留可审计 signals。
+- 单个孤立 TextUnit、`bbox = null` TextUnit、heading/list/footnote 不参与 display 分类。
+
+Phase 3.2 仍然不改变 v1 `canonical.json`、EPUB 或 RAG 默认消费路径。它只是让 observed shadow BookGraph 从“段落候选级 node”前进到“版面分类后的文本 node”。
+
 ## display_block 定义
 
 `display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中通过排版和结构证据独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。
