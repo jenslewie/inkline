@@ -21,6 +21,7 @@ def main(argv: list[str] | None = None) -> int:
         args.golden_canonical,
         args.bookgraph,
         min_display_recall=args.min_display_recall,
+        min_display_text_char_recall=args.min_display_text_char_recall,
         max_heading_ratio=args.max_heading_ratio,
     )
     if args.output:
@@ -34,6 +35,7 @@ def check_bookgraph_golden_parity(
     bookgraph_path: Path,
     *,
     min_display_recall: float = 0.5,
+    min_display_text_char_recall: float = 0.5,
     max_heading_ratio: float = 2.0,
 ) -> dict[str, Any]:
     golden = _read_json(golden_path)
@@ -46,7 +48,10 @@ def check_bookgraph_golden_parity(
     errors = _errors(
         golden_counts,
         bookgraph_counts,
+        golden_chars,
+        bookgraph_chars,
         min_display_recall=min_display_recall,
+        min_display_text_char_recall=min_display_text_char_recall,
         max_heading_ratio=max_heading_ratio,
     )
     return {
@@ -57,6 +62,7 @@ def check_bookgraph_golden_parity(
         },
         "thresholds": {
             "min_display_recall": min_display_recall,
+            "min_display_text_char_recall": min_display_text_char_recall,
             "max_heading_ratio": max_heading_ratio,
         },
         "golden_counts": golden_counts,
@@ -69,6 +75,10 @@ def check_bookgraph_golden_parity(
             "display_block_recall": _ratio(
                 bookgraph_counts.get("display_block", 0),
                 golden_counts.get("display_block", 0),
+            ),
+            "display_text_char_recall": _ratio(
+                bookgraph_chars.get("display_block", 0),
+                golden_chars.get("display_block", 0),
             ),
             "heading_count_ratio": _ratio(
                 bookgraph_counts.get("heading", 0),
@@ -87,6 +97,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("bookgraph", type=Path, help="Observed BookGraph shadow JSON")
     parser.add_argument("--output", type=Path, help="Optional JSON report output path")
     parser.add_argument("--min-display-recall", type=float, default=0.5)
+    parser.add_argument("--min-display-text-char-recall", type=float, default=0.5)
     parser.add_argument("--max-heading-ratio", type=float, default=2.0)
     return parser
 
@@ -149,8 +160,11 @@ def _count_deltas(left: dict[str, int], right: dict[str, int]) -> dict[str, int]
 def _errors(
     golden_counts: dict[str, int],
     bookgraph_counts: dict[str, int],
+    golden_chars: dict[str, int],
+    bookgraph_chars: dict[str, int],
     *,
     min_display_recall: float,
+    min_display_text_char_recall: float,
     max_heading_ratio: float,
 ) -> list[str]:
     errors: list[str] = []
@@ -160,6 +174,12 @@ def _errors(
     )
     if display_recall is not None and display_recall < min_display_recall:
         errors.append("display_block_recall_below_threshold")
+    display_text_recall = _ratio(
+        bookgraph_chars.get("display_block", 0),
+        golden_chars.get("display_block", 0),
+    )
+    if display_text_recall is not None and display_text_recall < min_display_text_char_recall:
+        errors.append("display_text_char_recall_below_threshold")
     heading_ratio = _ratio(
         bookgraph_counts.get("heading", 0),
         golden_counts.get("heading", 0),

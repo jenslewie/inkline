@@ -102,6 +102,30 @@ def test_golden_parity_reports_display_recall_and_heading_overcount(tmp_path) ->
     assert "heading_count_above_threshold" in report["errors"]
 
 
+def test_golden_parity_reports_display_text_char_recall(tmp_path) -> None:
+    tool = _load_tool()
+    golden_path = tmp_path / "canonical.json"
+    graph_path = tmp_path / "canonical_v2.json"
+    golden_path.write_text(
+        json.dumps(_golden(["display_block", "display_block"])),
+        encoding="utf-8",
+    )
+    graph = _graph(["display_block", "paragraph"])
+    graph["nodes"][0]["text"] = "x"
+    graph["nodes"][1]["text"] = "display_block 2"
+    graph_path.write_text(json.dumps(graph), encoding="utf-8")
+
+    report = tool.check_bookgraph_golden_parity(
+        golden_path,
+        graph_path,
+        min_display_recall=0.5,
+        min_display_text_char_recall=0.5,
+    )
+
+    assert report["ratios"]["display_text_char_recall"] < 0.5
+    assert "display_text_char_recall_below_threshold" in report["errors"]
+
+
 def test_golden_parity_cli_writes_report_and_returns_success(tmp_path, capsys) -> None:
     tool = _load_tool()
     golden_path = tmp_path / "canonical.json"

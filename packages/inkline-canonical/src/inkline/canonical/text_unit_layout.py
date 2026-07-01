@@ -14,6 +14,7 @@ def audit_text_unit_layout(
     units: list[dict[str, Any]], pages: list[dict[str, Any]]
 ) -> dict[str, Any]:
     page_profiles, profile_quality = _page_profiles(units, pages)
+    page_sizes = _page_sizes(pages)
     unit_records: list[dict[str, Any]] = []
     summary = {
         "pages_with_profiles": len(page_profiles),
@@ -26,7 +27,7 @@ def audit_text_unit_layout(
         if unit.get("unit_type") != "paragraph":
             continue
         summary["paragraph_units"] += 1
-        record = _unit_record(unit, page_profiles)
+        record = _unit_record(unit, page_profiles, page_sizes)
         unit_records.append(record)
         if record["decision"] == "display_block":
             summary["classified_display_blocks"] += 1
@@ -54,6 +55,10 @@ def classify_text_units_by_layout(
             unit["unit_type"] = "display_block"
             attrs = unit.setdefault("attrs", {})
             attrs["layout_role"] = "set_off"
+            if record.get("layout_form"):
+                attrs["layout_form"] = record["layout_form"]
+            if record.get("alignment"):
+                attrs["alignment"] = record["alignment"]
             attrs["layout_classification"] = {
                 "method": "page_body_lane_geometry_v1",
                 "signals": list(record["signals"]),
@@ -108,6 +113,19 @@ def _page_profiles(
         }
         profile_quality["accepted"] += 1
     return profiles, _profile_quality_summary(profile_quality)
+
+
+def _page_sizes(pages: list[dict[str, Any]]) -> dict[int, dict[str, float]]:
+    return {
+        int(page["page"]): {
+            "width": float(page["width"]),
+            "height": float(page["height"]),
+        }
+        for page in pages
+        if isinstance(page.get("page"), int)
+        and isinstance(page.get("width"), int | float)
+        and isinstance(page.get("height"), int | float)
+    }
 
 
 def _profile_quality_summary(profile_quality: Counter[str]) -> dict[str, int]:
@@ -172,7 +190,9 @@ def _span_page(span: dict[str, Any], fallback: int) -> int:
 
 
 def _unit_record(
-    unit: dict[str, Any], page_profiles: dict[int, dict[str, Any]]
+    unit: dict[str, Any],
+    page_profiles: dict[int, dict[str, Any]],
+    page_sizes: dict[int, dict[str, float]],
 ) -> dict[str, Any]:
     bbox = unit.get("bbox")
     base = {
@@ -192,6 +212,22 @@ def _unit_record(
             "left_inset": None,
             "right_inset": None,
             "decision": "skipped_no_bbox",
+        }
+    short_line_group = _short_line_group(unit, page_sizes)
+    if short_line_group:
+        width = _width(bbox)
+        return {
+            **base,
+            "classified_type": "display_block",
+            "width": width,
+            "body_width": None,
+            "width_ratio": None,
+            "left_inset": None,
+            "right_inset": None,
+            "signals": [f"{short_line_group}_aligned_short_line_group"],
+            "layout_form": "short_line_group",
+            "alignment": short_line_group,
+            "decision": "display_block",
         }
     profile = page_profiles.get(int(unit["page"]))
     if not profile:
@@ -240,16 +276,72 @@ def _display_signals(bbox: list[float], profile: dict[str, float]) -> list[str]:
         signals.append("narrower_than_body_lane")
     if left_inset >= body_width * 0.12 and right_inset >= body_width * 0.08:
         signals.append("inset_from_body_lane")
+    elif (
+        _width(bbox) <= body_width * 0.96
+        and left_inset >= body_width * 0.05
+        and right_inset >= body_width * -0.03
+    ):
+        signals.append("left_inset_set_off_text")
     return signals
 
 
 def _is_display_candidate(signals: list[str]) -> bool:
-    return signals == ["narrower_than_body_lane", "inset_from_body_lane"]
+    return signals == ["narrower_than_body_lane", "inset_from_body_lane"] or signals == [
+        "left_inset_set_off_text"
+    ]
+
+
+def _short_line_group(unit: dict[str, Any], page_sizes: dict[int, dict[str, float]]) -> str | None:
+    attrs = unit.get("attrs") if isinstance(unit.get("attrs"), dict) else {}
+    merge_reasons = (
+        attrs.get("merge_reasons") if isinstance(attrs.get("merge_reasons"), list) else []
+    )
+    if "same_page_short_line_group" not in merge_reasons:
+        return None
+    bboxes = _line_bboxes(unit)
+    if len(bboxes) < 2:
+        return None
+    page_width = float(page_sizes.get(int(unit["page"]), {}).get("width") or 0.0)
+    if page_width <= 0:
+        return None
+    if median(_width(bbox) for bbox in bboxes) > page_width * 0.62:
+        return None
+    tolerance = max(24.0, page_width * 0.03)
+    if _spread([bbox[2] for bbox in bboxes]) <= tolerance:
+        return "right"
+    if _spread([bbox[0] for bbox in bboxes]) <= tolerance:
+        return "left"
+    centers = [(bbox[0] + bbox[2]) / 2 for bbox in bboxes]
+    if _spread(centers) <= tolerance:
+        return "center"
+    return None
+
+
+def _line_bboxes(unit: dict[str, Any]) -> list[list[float]]:
+    bboxes = [
+        [float(value) for value in span["bbox"]]
+        for span in unit.get("spans") or []
+        if isinstance(span, dict)
+        and _span_page(span, int(unit["page"])) == int(unit["page"])
+        and _valid_bbox(span.get("bbox"))
+    ]
+    if bboxes:
+        return bboxes
+    bbox = unit.get("bbox")
+    return [[float(value) for value in bbox]] if _valid_bbox(bbox) else []
+
+
+def _spread(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return max(values) - min(values)
 
 
 def _valid_bbox(value: Any) -> bool:
-    return isinstance(value, list) and len(value) == 4 and all(
-        isinstance(number, int | float) for number in value
+    return (
+        isinstance(value, list)
+        and len(value) == 4
+        and all(isinstance(number, int | float) for number in value)
     )
 
 

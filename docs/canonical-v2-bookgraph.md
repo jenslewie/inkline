@@ -316,21 +316,29 @@ Phase 3 的 shadow acceptance 不能只验证 BookGraph 自身结构闭环。对
 UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/check_bookgraph_golden_parity.py \
   data/outputs/golden/丝绸之路新史/canonical.json \
   /tmp/inkline-phase3-canonical_v2_observed.json \
+  --min-display-text-char-recall 0.5 \
   --output /tmp/inkline-phase3-golden-parity.json
 ```
 
 这个 audit 不用于训练分类规则，也不基于文本语义做判断。它只把 verified canonical 当作回归 oracle，检查 supported text classes 的结构性偏差：
 
 - `display_block` recall 不能塌到 0。
+- `display_block` text character recall 不能塌到 0；只看 node 数量会漏掉“少量短块命中、大量 display 文本丢失”的问题。
 - `heading` 数量不能相对 golden 大幅膨胀。
 - text character deltas 用来定位文本流被吸收到哪个 node type。
 
-`丝绸之路新史` 当前 observed shadow path 暴露出两个 Phase 3 质量缺口：
+`丝绸之路新史` 曾经的 observed shadow path 暴露出两个 Phase 3 质量缺口：
 
 - golden `display_block = 47`，observed BookGraph `display_block = 0`。
 - golden `heading = 24`，observed BookGraph `heading = 77`。
 
-因此 Phase 3 不能只按 schema/reading_order/evidence pass 判定完成。display_block recall 和 heading over-promotion 必须在进入 Phase 4 前修正或有明确的 accepted exception。
+修正后的 `/tmp/inkline-phase3-display-fix-silk-canonical_v2_observed.json` 仍然不是 release canonical，但 golden parity 已能捕获并量化这个维度：
+
+- golden `display_block = 47`，observed BookGraph `display_block = 43`，count recall `0.9149`。
+- `display_block` text character recall `0.7464`。
+- golden `heading = 24`，observed BookGraph `heading = 36`，count ratio `1.5`。
+
+因此 Phase 3 不能只按 schema/reading_order/evidence pass 判定完成。display_block recall、display text recall 和 heading over-promotion 必须作为进入 Phase 4 前的结构验收门槛；如果未达标，必须修正或写明 accepted exception。
 
 ## display_block 定义
 

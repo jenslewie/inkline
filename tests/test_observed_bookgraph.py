@@ -162,6 +162,31 @@ def _inset_body_document() -> dict:
     )
 
 
+def _image_title_document() -> dict:
+    return make_observed_document(
+        _metadata(),
+        [make_observed_page(1, width=1000, height=1000)],
+        [
+            make_observation(
+                "obs000001",
+                "image_region",
+                page=1,
+                bbox=[100, 120, 900, 520],
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Image title",
+                page=1,
+                bbox=[300, 540, 700, 570],
+                role_hint="title_text",
+                attrs={"reading_order": 2},
+            ),
+        ],
+    )
+
+
 def test_build_bookgraph_from_observed_uses_text_unit_aggregation() -> None:
     graph = build_bookgraph_from_observed(_adjacent_body_document())
 
@@ -190,9 +215,7 @@ def test_build_bookgraph_from_observed_preserves_cross_page_text_unit_evidence()
         "obs000001",
         "obs000002",
     ]
-    assert graph["nodes"][0]["attrs"]["merge_reasons"] == [
-        "cross_page_boundary_continuation"
-    ]
+    assert graph["nodes"][0]["attrs"]["merge_reasons"] == ["cross_page_boundary_continuation"]
     assert graph["evidence"][0]["pages"] == [1, 2]
     assert graph["evidence"][0]["spans"] == [
         {"page": 1, "bbox": [100, 900, 700, 980]},
@@ -247,6 +270,15 @@ def test_build_bookgraph_from_observed_maps_explicit_structure_hints() -> None:
     ]
     assert graph["nodes"][0]["level"] == 1
     assert graph["nodes"][1]["inline_runs"] == [{"type": "text", "text": "Body"}]
+    assert graph["metadata"]["shadow_ignored_observation_counts"] == {"image_region": 1}
+
+
+def test_build_bookgraph_from_observed_does_not_promote_image_title_to_heading() -> None:
+    graph = build_bookgraph_from_observed(_image_title_document())
+
+    validate_bookgraph(graph)
+    assert [node["node_type"] for node in graph["nodes"]] == ["paragraph"]
+    assert graph["nodes"][0]["attrs"]["layout_role"] == "caption_candidate"
     assert graph["metadata"]["shadow_ignored_observation_counts"] == {"image_region": 1}
 
 

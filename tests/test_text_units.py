@@ -339,6 +339,112 @@ def test_layout_classifier_marks_inset_narrow_body_unit_as_display_block() -> No
     ]
 
 
+def test_layout_classifier_marks_right_aligned_short_line_group_as_display_block() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body before",
+                page=1,
+                bbox=[100, 100, 900, 130],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Attribution",
+                page=1,
+                bbox=[640, 165, 900, 185],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Affiliation",
+                page=1,
+                bbox=[500, 190, 900, 210],
+                role_hint="body_text",
+                attrs={"reading_order": 3},
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="Body after",
+                page=1,
+                bbox=[100, 250, 900, 280],
+                role_hint="body_text",
+                attrs={"reading_order": 4},
+            ),
+        ]
+    )
+    units, _ = build_text_units(document)
+
+    classified = classify_text_units_by_layout(units, document["pages"])
+
+    assert [unit["unit_type"] for unit in classified] == [
+        "paragraph",
+        "display_block",
+        "paragraph",
+    ]
+    assert classified[1]["text"] == "Attribution\nAffiliation"
+    assert classified[1]["attrs"]["layout_role"] == "set_off"
+    assert classified[1]["attrs"]["layout_form"] == "short_line_group"
+    assert classified[1]["attrs"]["alignment"] == "right"
+    assert (
+        "right_aligned_short_line_group"
+        in classified[1]["attrs"]["layout_classification"]["signals"]
+    )
+
+
+def test_layout_classifier_marks_left_inset_set_off_text_as_display_block() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body before",
+                page=1,
+                bbox=[100, 100, 900, 160],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Set off quotation",
+                page=1,
+                bbox=[150, 195, 890, 250],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Body after",
+                page=1,
+                bbox=[100, 285, 900, 345],
+                role_hint="body_text",
+                attrs={"reading_order": 3},
+            ),
+        ]
+    )
+    units, _ = build_text_units(document)
+
+    classified = classify_text_units_by_layout(units, document["pages"])
+
+    assert [unit["unit_type"] for unit in classified] == [
+        "paragraph",
+        "display_block",
+        "paragraph",
+    ]
+    assert classified[1]["text"] == "Set off quotation"
+    assert classified[1]["attrs"]["layout_role"] == "set_off"
+    assert "left_inset_set_off_text" in classified[1]["attrs"]["layout_classification"]["signals"]
+
+
 def test_layout_classifier_keeps_single_body_unit_as_paragraph() -> None:
     document = _document(
         [
