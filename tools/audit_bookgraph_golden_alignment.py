@@ -12,7 +12,12 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
-from inkline.canonical import validate_bookgraph
+from inkline.canonical import (
+    audit_text_unit_layout,
+    build_text_units,
+    validate_bookgraph,
+    validate_observed_document,
+)
 
 DEFAULT_TARGET_TYPES = ("display_block", "heading")
 SUPPORTED_TYPES = {"heading", "paragraph", "display_block", "list_item", "footnote"}
@@ -23,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     report = audit_bookgraph_golden_alignment(
         args.golden_canonical,
         args.bookgraph,
+        observed_path=args.observed_document,
         target_types=tuple(args.target_type or DEFAULT_TARGET_TYPES),
     )
     if args.output:
@@ -36,13 +42,15 @@ def audit_bookgraph_golden_alignment(
     golden_path: Path,
     bookgraph_path: Path,
     *,
+    observed_path: Path | None = None,
     target_types: tuple[str, ...] = DEFAULT_TARGET_TYPES,
 ) -> dict[str, Any]:
     golden = _read_json(golden_path)
     graph = _read_json(bookgraph_path)
     validate_bookgraph(graph)
+    layout_records = _layout_records_by_unit_id(observed_path) if observed_path else {}
     golden_records = _golden_records(golden)
-    observed_records = _observed_records(graph)
+    observed_records = _observed_records(graph, layout_records)
     pairs = _align_records(golden_records, observed_records)
     report = _report(golden, graph, golden_records, observed_records, pairs, target_types)
     return report
@@ -57,6 +65,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("golden_canonical", type=Path, help="Verified canonical.json")
     parser.add_argument("bookgraph", type=Path, help="Observed BookGraph shadow JSON")
+    parser.add_argument(
+        "--observed-document",
+        type=Path,
+        help="Optional ObservedDocument JSON used to add TextUnit layout audit records.",
+    )
     parser.add_argument("--output", type=Path, help="Optional JSON report output path")
     parser.add_argument(
         "--target-type",
@@ -116,7 +129,21 @@ def _golden_records(canonical: dict[str, Any]) -> list[dict[str, Any]]:
     return records
 
 
-def _observed_records(graph: dict[str, Any]) -> list[dict[str, Any]]:
+def _layout_records_by_unit_id(observed_path: Path) -> dict[str, dict[str, Any]]:
+    observed = _read_json(observed_path)
+    validate_observed_document(observed)
+    units, _ignored_counts = build_text_units(observed)
+    audit = audit_text_unit_layout(units, observed["pages"])
+    return {
+        str(record["unit_id"]): record
+        for record in audit.get("unit_records", [])
+        if isinstance(record, dict) and isinstance(record.get("unit_id"), str)
+    }
+
+
+def _observed_records(
+    graph: dict[str, Any], layout_records: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
     evidence_by_id = {
         evidence["evidence_id"]: evidence
         for evidence in graph.get("evidence", [])
@@ -137,6 +164,7 @@ def _observed_records(graph: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         evidence = _first_evidence(node, evidence_by_id)
         attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+        source_text_unit_id = attrs.get("source_text_unit_id")
         records.append(
             {
                 "side": "observed",
@@ -151,6 +179,12 @@ def _observed_records(graph: dict[str, Any]) -> list[dict[str, Any]]:
                 "bbox": evidence.get("bbox"),
                 "spans": evidence.get("spans") or [],
                 "attrs": attrs,
+                "source_text_unit_id": source_text_unit_id,
+                "layout_audit": (
+                    layout_records.get(source_text_unit_id)
+                    if isinstance(source_text_unit_id, str)
+                    else None
+                ),
             }
         )
     return records
@@ -345,6 +379,7 @@ def _public_record(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "record_id": record["record_id"],
         "record_type": record["record_type"],
+        "source_text_unit_id": record.get("source_text_unit_id"),
         "reading_order": record["reading_order"],
         "text_preview": record["text_preview"],
         "page": record.get("page"),
@@ -359,7 +394,32 @@ def _public_record(record: dict[str, Any]) -> dict[str, Any]:
             if isinstance(layout_classification, dict)
             else None
         ),
+        "layout_audit": _public_layout_record(record.get("layout_audit")),
     }
+
+
+def _public_layout_record(record: Any) -> dict[str, Any] | None:
+    if not isinstance(record, dict):
+        return None
+    keys = (
+        "unit_id",
+        "page",
+        "bbox",
+        "signals",
+        "width",
+        "body_width",
+        "width_ratio",
+        "left_inset",
+        "right_inset",
+        "layout_form",
+        "alignment",
+        "decision",
+    )
+    return {key: deepcopy_json_value(record.get(key)) for key in keys if key in record}
+
+
+def deepcopy_json_value(value: Any) -> Any:
+    return json.loads(json.dumps(value, ensure_ascii=False))
 
 
 def _similar_candidates(

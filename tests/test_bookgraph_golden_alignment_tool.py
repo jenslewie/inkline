@@ -5,7 +5,16 @@ import json
 from pathlib import Path
 from typing import Any
 
-from inkline.canonical import make_bookgraph, make_evidence, make_node
+from inkline.canonical import (
+    OBSERVED_SCHEMA_NAME,
+    OBSERVED_SCHEMA_VERSION,
+    make_bookgraph,
+    make_evidence,
+    make_node,
+    make_observation,
+    make_observed_document,
+    make_observed_page,
+)
 
 
 def _load_tool() -> Any:
@@ -86,6 +95,33 @@ def _graph(nodes: list[tuple[str, str]]) -> dict[str, Any]:
         [],
         evidence,
         projections={"reading_order": reading_order, "epub_flow": reading_order, "rag_units": []},
+    )
+
+
+def _observed_document(text: str) -> dict[str, Any]:
+    return make_observed_document(
+        {
+            "schema_name": OBSERVED_SCHEMA_NAME,
+            "schema_version": OBSERVED_SCHEMA_VERSION,
+            "doc_id": "fixture",
+            "title": "Fixture",
+            "language": "zh-CN",
+            "source_file": "fixture.pdf",
+            "parser_name": "parser-neutral",
+            "parser_mode": "shadow",
+        },
+        [make_observed_page(1, width=1000, height=1000)],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text=text,
+                page=1,
+                bbox=[100, 100, 900, 180],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            )
+        ],
     )
 
 
@@ -237,3 +273,32 @@ def test_alignment_audit_reports_near_candidates_for_split_content(tmp_path) -> 
     candidates = report["false_negatives"]["display_block"][0]["observed_candidates"]
     assert candidates[0]["record"]["text_preview"] == "alpha beta"
     assert candidates[0]["text_similarity"] > 0.5
+
+
+def test_alignment_audit_can_include_text_unit_layout_record(tmp_path) -> None:
+    tool = _load_tool()
+    golden_path = tmp_path / "canonical.json"
+    graph_path = tmp_path / "canonical_v2.json"
+    observed_path = tmp_path / "observed.json"
+    golden_path.write_text(
+        json.dumps(_golden([("display_block", "quoted text")])),
+        encoding="utf-8",
+    )
+    graph_path.write_text(
+        json.dumps(_graph([("paragraph", "quoted text")])),
+        encoding="utf-8",
+    )
+    observed_path.write_text(
+        json.dumps(_observed_document("quoted text")),
+        encoding="utf-8",
+    )
+
+    report = tool.audit_bookgraph_golden_alignment(
+        golden_path,
+        graph_path,
+        observed_path=observed_path,
+    )
+
+    observed = report["type_mismatches"]["display_block"][0]["observed"]
+    assert observed["source_text_unit_id"] == "tu000001"
+    assert observed["layout_audit"]["decision"] == "skipped_no_profile"

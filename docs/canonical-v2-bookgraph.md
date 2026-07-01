@@ -348,6 +348,7 @@ Phase 3.10 增加 `tools/audit_bookgraph_golden_alignment.py`，用于把 verifi
 UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_golden_alignment.py \
   data/outputs/golden/丝绸之路新史/canonical.json \
   /tmp/inkline-phase3-display-fix-silk-canonical_v2_observed.json \
+  --observed-document /tmp/inkline-phase3-display-fix-silk-observed.json \
   --summary-only \
   --output /tmp/inkline-phase3-display-fix-silk-golden-alignment.json
 ```
@@ -359,6 +360,7 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_golden_al
 - `false_positive`: observed 是 target type，但 golden 没有同类型对齐。
 - `type_mismatch`: 内容能对齐，但类型不同。
 - `observed_candidates` / `golden_candidates`: exact alignment 失败时的近似候选，用于识别 split/merge，而不是训练语义规则。
+- `--observed-document`: 可选输入 ObservedDocument，用来把 TextUnit layout audit record 附加到 observed 记录上，解释 `skipped_no_profile`、`width_ratio`、`left_inset`、`right_inset` 等版面原因。
 
 在 `/tmp/inkline-phase3-display-fix-silk-canonical_v2_observed.json` 上的当前摘要：
 
@@ -372,6 +374,7 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_golden_al
 - front matter / copyright / CIP 页存在 split/merge 差异，exact alignment 失败但 candidate similarity 较高。
 - 章节标题常被 observed path 拆成章号、主标题、副标题等多个节点，导致 heading false positive 和 false negative 同时出现。
 - 一批长引文 exact 对齐成功，但 observed 仍为 `paragraph`，属于明确的 `display_block -> paragraph` type mismatch。
+- `display_block -> paragraph` 的 9 个 exact type mismatch 中，当前 layout audit 显示 5 个是 `skipped_no_profile`，3 个有 profile 但只呈现约 3% 左缩进、未触发现有 5% inset 阈值，1 个基本贴合 body lane。这说明下一步不能简单放宽阈值；需要先区分“profile 覆盖不足”和“轻微整体内缩 set-off block”两个结构问题。
 
 这些发现只能指导下一轮结构规则设计；最终修复仍必须回到版面和 provenance 信号，不能把正文含义或特定文本写入分类逻辑。
 
