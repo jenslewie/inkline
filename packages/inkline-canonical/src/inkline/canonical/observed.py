@@ -65,6 +65,8 @@ REQUIRED_OBSERVATION_FIELDS = {
     "parser_payload": dict,
 }
 
+REQUIRED_NULLABLE_OBSERVATION_FIELDS = ("bbox",)
+
 
 def make_observed_document(
     metadata: dict[str, Any],
@@ -176,6 +178,9 @@ def _validate_observations(
             value = observation.get(field)
             if not isinstance(value, expected_type):
                 raise ValidationError(f"observations[{index}].{field} is invalid")
+        for field in REQUIRED_NULLABLE_OBSERVATION_FIELDS:
+            if field not in observation:
+                raise ValidationError(f"observations[{index}].{field} is required")
         observation_id = observation["observation_id"]
         if observation_id in observation_ids:
             raise ValidationError(f"duplicate observation_id: {observation_id}")
@@ -188,7 +193,7 @@ def _validate_observations(
             )
         if observation["page"] not in pages:
             raise ValidationError(f"observations[{index}].page does not exist")
-        _validate_bbox(observation.get("bbox"), index)
+        _validate_bbox(observation["bbox"], index)
 
 
 def _validate_bbox(bbox: Any, index: int) -> None:

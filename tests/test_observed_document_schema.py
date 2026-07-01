@@ -92,3 +92,16 @@ def test_bbox_must_be_null_or_four_numbers() -> None:
 
     with pytest.raises(ValidationError, match="bbox"):
         validate_observed_document(document)
+
+
+def test_bbox_field_is_required_but_may_be_null() -> None:
+    document = _document()
+    document["observations"][0].pop("bbox")
+
+    with pytest.raises(ValidationError, match="bbox"):
+        validate_observed_document(document)
+
+    document = _document()
+    document["observations"][0]["bbox"] = None
+
+    validate_observed_document(document)
