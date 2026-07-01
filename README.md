@@ -100,7 +100,10 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_shadow.py
 
 Use this as a pre-release diagnostic gate. For example, the known-bad archived
 `壬辰战争_20260629_134600` canonical trips the structure warning because
-`display_block` nodes outnumber paragraphs; the current golden canonicals do not.
+`display_block` nodes outnumber paragraphs. The `丝绸之路新史` golden canonical is
+the current verified oracle for `display_block` and `heading`; the `壬辰战争`
+golden canonical remains useful for smoke diagnostics, but still has known
+content/classification issues and should not be used as a strict oracle yet.
 
 Phase 2 also supports an ObservedDocument shadow path. This path records
 parser-neutral observations first, then builds an experimental BookGraph from

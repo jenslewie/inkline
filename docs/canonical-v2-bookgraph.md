@@ -119,13 +119,13 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_shadow.py
 
 2026-07-01 的真实书 shadow audit baseline：
 
-| canonical | display_block | paragraph | heading_like_display | body_like_display | structure_warnings | exact_projection |
-| --- | ---: | ---: | ---: | ---: | --- | --- |
-| `data/outputs/golden/丝绸之路新史/canonical.json` | 47 | 837 | 1 | 19 | none | true |
-| `data/outputs/golden/壬辰战争/canonical.json` | 79 | 1522 | 8 | 35 | none | true |
-| `data/outputs/archive/壬辰战争_20260629_134600/canonical.json` | 236 | 10 | 6 | 216 | `display_blocks_outnumber_paragraphs` | true |
+| canonical | status | display_block | paragraph | heading_like_display | body_like_display | structure_warnings | exact_projection |
+| --- | --- | ---: | ---: | ---: | ---: | --- | --- |
+| `data/outputs/golden/丝绸之路新史/canonical.json` | verified oracle for `display_block` / `heading` | 47 | 837 | 1 | 19 | none | true |
+| `data/outputs/golden/壬辰战争/canonical.json` | smoke reference; known issues remain | 79 | 1522 | 8 | 35 | none | true |
+| `data/outputs/archive/壬辰战争_20260629_134600/canonical.json` | known-bad regression sample | 236 | 10 | 6 | 216 | `display_blocks_outnumber_paragraphs` | true |
 
-这个 baseline 不表示这些数字永远不应变化。它的作用是给 Phase 2 提供一个可重复的结构健康度比较面：如果修复 display/paragraph 分类后，golden 的 warning 仍为空、archive 异常能被 audit 抓住，就说明 BookGraph shadow pipeline 已经开始承担架构诊断职责。
+这个 baseline 不表示这些数字永远不应变化，也不表示所有 `golden/` 文件都已经达到同等可信度。当前只有 `data/outputs/golden/丝绸之路新史/canonical.json` 的 `display_block` 和 `heading` 可以作为 Phase 3 golden parity 的硬 oracle。`data/outputs/golden/壬辰战争/canonical.json` 仍有已知问题，只能用于 smoke diagnostics 和结构趋势观察，不能作为 strict pass/fail oracle。archive 异常能被 audit 抓住，则说明 BookGraph shadow pipeline 已经开始承担架构诊断职责。
 
 ### Phase 2 ObservedDocument replay
 
@@ -320,7 +320,7 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/check_bookgraph_golden_pa
   --output /tmp/inkline-phase3-golden-parity.json
 ```
 
-这个 audit 不用于训练分类规则，也不基于文本语义做判断。它只把 verified canonical 当作回归 oracle，检查 supported text classes 的结构性偏差：
+这个 audit 不用于训练分类规则，也不基于文本语义做判断。它只把 verified canonical 中已经确认正确的类型当作回归 oracle，检查 supported text classes 的结构性偏差。当前 `data/outputs/golden/丝绸之路新史/canonical.json` 的 `display_block` 和 `heading` 已可承担这个角色；`data/outputs/golden/壬辰战争/canonical.json` 仍有已知问题，不能作为同等级 oracle：
 
 - `display_block` recall 不能塌到 0。
 - `display_block` text character recall 不能塌到 0；只看 node 数量会漏掉“少量短块命中、大量 display 文本丢失”的问题。
