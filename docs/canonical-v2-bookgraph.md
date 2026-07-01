@@ -288,6 +288,26 @@ acceptance report 只统计 BookGraph 的结构信号：
 
 它不读取正文文本，不做语义判断，也不是 release canonical contract。它的作用是在 Phase 3 期间把“单书 smoke”升级为“多书结构验收”，帮助判断 ObservedDocument -> TextUnit -> BookGraph 的路径是否足够稳定，可以进入后续真实 canonical 切换阶段。
 
+### Phase 3.8 Cross-page merge audit
+
+Phase 3.8 为跨页 TextUnit aggregation 增加专门审计工具：
+
+```bash
+UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_cross_page_text_units.py \
+  /tmp/inkline-phase3-observed.json \
+  --summary-only \
+  --output /tmp/inkline-phase3-cross-page-audit.json
+```
+
+audit report 只记录跨页合并的通用几何信号：
+
+- `from_page` / `to_page`、`previous_bbox` / `next_bbox`。
+- `previous_bottom_ratio` 和 `next_top_ratio`，用于复盘页底/页顶条件。
+- `left_delta` 和 `horizontal_overlap_ratio`，用于复盘左右对齐和水平重叠。
+- `observation_ids`、`unit_pages`、`span_count`，用于追溯来源，但不保存正文文本。
+
+`--summary-only` 只在 stdout 打印 metadata 和 summary；`--output` 始终写出完整 records。这个工具用于解释 Phase 3.7 暴露的多书差异，例如某本书跨页 merge 数明显偏高时，先审计几何分布，再决定是否收紧阈值或引入额外 layout guard。
+
 ## display_block 定义
 
 `display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中通过排版和结构证据独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。
