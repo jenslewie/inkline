@@ -110,6 +110,121 @@ def test_audit_bookgraph_reports_counts_and_health_signals() -> None:
     assert audit["display_blocks"]["source_block_ids"] == ["b000003"]
 
 
+def test_audit_bookgraph_reports_heading_like_display_candidates() -> None:
+    graph = _graph()
+    graph["nodes"].append(
+        make_node(
+            "n000005",
+            "display_block",
+            "This is a full sentence.",
+            attrs={"source_block_id": "b000005", "layout_role": "inline_display_block"},
+            evidence_ids=["ev000005"],
+        )
+    )
+    graph["evidence"].append(
+        make_evidence(
+            "ev000005",
+            "mineru",
+            "b000005",
+            page=3,
+            bbox=[10, 520, 700, 560],
+            raw_type="display_block",
+        )
+    )
+    graph["nodes"].append(
+        make_node(
+            "n000006",
+            "display_block",
+            "Upper page compact title",
+            attrs={"source_block_id": "b000006", "layout_role": "standalone_display_page"},
+            evidence_ids=["ev000006"],
+        )
+    )
+    graph["evidence"].append(
+        make_evidence(
+            "ev000006",
+            "mineru",
+            "b000006",
+            page=4,
+            bbox=[10, 330, 700, 360],
+            raw_type="display_block",
+        )
+    )
+    graph["projections"]["reading_order"].append("n000005")
+    graph["projections"]["reading_order"].append("n000006")
+
+    audit = audit_bookgraph(graph)
+
+    assert audit["heading_like_display_blocks"] == [
+        {
+            "node_id": "n000003",
+            "source_block_id": "b000003",
+            "text": "Quote",
+            "page": 2,
+            "bbox": [10, 20, 100, 120],
+            "layout_role": "indented_quote",
+            "reasons": ["short_text", "top_of_page", "no_sentence_terminal"],
+        },
+        {
+            "node_id": "n000006",
+            "source_block_id": "b000006",
+            "text": "Upper page compact title",
+            "page": 4,
+            "bbox": [10, 330, 700, 360],
+            "layout_role": "standalone_display_page",
+            "reasons": ["short_text", "top_of_page", "no_sentence_terminal"],
+        }
+    ]
+
+
+def test_audit_bookgraph_reports_body_like_display_candidates_and_warnings() -> None:
+    graph = _graph()
+    graph["nodes"].append(
+        make_node(
+            "n000005",
+            "display_block",
+            "This display block is long enough to look more like reading-flow body text "
+            "than a compact quotation or epigraph.",
+            attrs={"source_block_id": "b000005", "layout_role": "inline_display_block"},
+            evidence_ids=["ev000005"],
+        )
+    )
+    graph["evidence"].append(
+        make_evidence(
+            "ev000005",
+            "mineru",
+            "b000005",
+            page=3,
+            bbox=[120, 420, 820, 520],
+            raw_type="display_block",
+        )
+    )
+    graph["projections"]["reading_order"].append("n000005")
+
+    audit = audit_bookgraph(graph)
+
+    assert audit["body_like_display_blocks"] == [
+        {
+            "node_id": "n000005",
+            "source_block_id": "b000005",
+            "text": "This display block is long enough to look more like reading-flow body text "
+            "than a compact quotation or epigraph.",
+            "page": 3,
+            "bbox": [120, 420, 820, 520],
+            "layout_role": "inline_display_block",
+            "text_length": 112,
+            "reasons": ["long_text", "inline_display_block"],
+        }
+    ]
+    assert audit["structure_warnings"] == [
+        {
+            "warning": "display_blocks_outnumber_paragraphs",
+            "display_block_count": 2,
+            "paragraph_count": 1,
+        }
+    ]
+
+
 def test_audit_bookgraph_compares_projection_to_legacy_supported_blocks() -> None:
     legacy = {
         "blocks": [

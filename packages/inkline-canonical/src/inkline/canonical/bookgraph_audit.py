@@ -23,6 +23,9 @@ def audit_bookgraph(
         ),
         "footnotes": _footnote_summary(graph),
         "display_blocks": _display_block_summary(graph),
+        "heading_like_display_blocks": _heading_like_display_blocks(graph),
+        "body_like_display_blocks": _body_like_display_blocks(graph),
+        "structure_warnings": _structure_warnings(graph),
     }
     if legacy_canonical is not None:
         audit["projection_diff"] = _projection_diff(graph, legacy_canonical)
@@ -122,6 +125,110 @@ def _display_block_summary(graph: dict[str, Any]) -> dict[str, Any]:
         "layout_roles": dict(sorted(layout_roles.items())),
         "source_block_ids": source_block_ids,
     }
+
+
+def _heading_like_display_blocks(graph: dict[str, Any]) -> list[dict[str, Any]]:
+    evidence_by_id = {record["evidence_id"]: record for record in graph["evidence"]}
+    candidates: list[dict[str, Any]] = []
+    for node in graph["nodes"]:
+        if node["node_type"] != "display_block":
+            continue
+        evidence = _first_evidence(node, evidence_by_id)
+        reasons = _heading_like_reasons(node, evidence)
+        if len(reasons) < 3:
+            continue
+        candidates.append(
+            {
+                "node_id": node["node_id"],
+                "source_block_id": node.get("attrs", {}).get("source_block_id"),
+                "text": node["text"],
+                "page": evidence.get("page"),
+                "bbox": deepcopy(evidence.get("bbox")),
+                "layout_role": node.get("attrs", {}).get("layout_role"),
+                "reasons": reasons,
+            }
+        )
+    return candidates
+
+
+def _body_like_display_blocks(graph: dict[str, Any]) -> list[dict[str, Any]]:
+    evidence_by_id = {record["evidence_id"]: record for record in graph["evidence"]}
+    candidates: list[dict[str, Any]] = []
+    for node in graph["nodes"]:
+        if node["node_type"] != "display_block":
+            continue
+        reasons = _body_like_display_reasons(node)
+        if len(reasons) < 2:
+            continue
+        evidence = _first_evidence(node, evidence_by_id)
+        text = str(node.get("text") or "")
+        candidates.append(
+            {
+                "node_id": node["node_id"],
+                "source_block_id": node.get("attrs", {}).get("source_block_id"),
+                "text": text,
+                "page": evidence.get("page"),
+                "bbox": deepcopy(evidence.get("bbox")),
+                "layout_role": node.get("attrs", {}).get("layout_role"),
+                "text_length": len(text),
+                "reasons": reasons,
+            }
+        )
+    return candidates
+
+
+def _body_like_display_reasons(node: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    text = str(node.get("text") or "")
+    if len(text) >= 80:
+        reasons.append("long_text")
+    if node.get("attrs", {}).get("layout_role") == "inline_display_block":
+        reasons.append("inline_display_block")
+    return reasons
+
+
+def _structure_warnings(graph: dict[str, Any]) -> list[dict[str, int | str]]:
+    counts = Counter(node["node_type"] for node in graph["nodes"])
+    display_count = counts.get("display_block", 0)
+    paragraph_count = counts.get("paragraph", 0)
+    warnings: list[dict[str, int | str]] = []
+    if display_count > paragraph_count:
+        warnings.append(
+            {
+                "warning": "display_blocks_outnumber_paragraphs",
+                "display_block_count": display_count,
+                "paragraph_count": paragraph_count,
+            }
+        )
+    return warnings
+
+
+def _first_evidence(
+    node: dict[str, Any], evidence_by_id: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    evidence_ids = node.get("evidence_ids") or []
+    if not evidence_ids:
+        return {}
+    return evidence_by_id.get(evidence_ids[0], {})
+
+
+def _heading_like_reasons(node: dict[str, Any], evidence: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    text = str(node.get("text") or "").strip()
+    bbox = evidence.get("bbox")
+    if 0 < len(text) <= 40:
+        reasons.append("short_text")
+    if isinstance(bbox, list) and len(bbox) >= 2 and _as_float(bbox[1]) <= 360:
+        reasons.append("top_of_page")
+    if text and not text.endswith((".", "!", "?", ";", ":", "\u3002", "\uff01", "\uff1f", "\uff1b", "\uff1a")):
+        reasons.append("no_sentence_terminal")
+    return reasons
+
+
+def _as_float(value: Any) -> float:
+    if isinstance(value, int | float):
+        return float(value)
+    return 999999.0
 
 
 def _projection_diff(graph: dict[str, Any], legacy_canonical: dict[str, Any]) -> dict[str, Any]:
