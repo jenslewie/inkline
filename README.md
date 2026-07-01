@@ -61,13 +61,21 @@ uv run --extra mineru mineru-to-canonical \
   --doc-id 丝绸之路新史 \
   --title 丝绸之路新史 \
   --marker-locator-repair \
-  --output data/outputs/丝绸之路新史/canonical.json
+  --output data/outputs/丝绸之路新史/canonical.json \
+  --bookgraph-output data/outputs/丝绸之路新史/canonical_v2.json
 ```
 
 `--source-pdf` is required when `--marker-locator-repair` is enabled because the
 Qwen locator renders PDF pages for visual marker evidence. Marker evidence and
 timing logs default to a sibling directory named after the output stem, such as
 `data/outputs/丝绸之路新史/canonical_qwen_marker_locator/`.
+
+`canonical_v2.json` is a pre-release BookGraph shadow artifact. It validates the
+next canonical shape during development, but it is not a long-term compatibility
+API or release contract. Before the first public release, the goal is still to
+ship one canonical contract rather than v1/v2 side by side. Existing EPUB and
+RAG flows continue to consume `canonical.json` by default until the BookGraph
+projection switch is complete.
 
 RAG chunking, embedding, indexing, and search live in `inkline-rag`. Future
 answer-generation code should use `inkline-llm` for the local model call and
