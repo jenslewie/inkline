@@ -267,6 +267,27 @@ Phase 3.6 为 TextUnit aggregation 增加保守的跨页段落续接：
 
 这一层仍然不读取文本含义，也不基于标点、词语或句意判断段落是否连续。它只表达页边界处排版连续的几何事实。
 
+### Phase 3.7 Multi-book shadow acceptance
+
+Phase 3.7 增加多书 shadow acceptance 报告工具：
+
+```bash
+UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/check_phase3_shadow_acceptance.py \
+  /tmp/book-a-canonical_v2_observed.json \
+  /tmp/book-b-canonical_v2_observed.json \
+  --output /tmp/inkline-phase3-shadow-acceptance.json
+```
+
+acceptance report 只统计 BookGraph 的结构信号：
+
+- 每本书的 `node_counts`、`evidence_count`、`reading_order_count`、`rag_unit_count`。
+- ignored observation counts，例如 `image_region`、`table_region`、`page_marker`。
+- `merge_counts`，例如跨页聚合产生的 `cross_page_boundary_continuation`。
+- `multi_page_evidence_count`，用于确认跨页 evidence 是否被保留。
+- `shadow_text_unit_layout_audit_summary` 和 `shadow_text_unit_layout_profile_quality`。
+
+它不读取正文文本，不做语义判断，也不是 release canonical contract。它的作用是在 Phase 3 期间把“单书 smoke”升级为“多书结构验收”，帮助判断 ObservedDocument -> TextUnit -> BookGraph 的路径是否足够稳定，可以进入后续真实 canonical 切换阶段。
+
 ## display_block 定义
 
 `display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中通过排版和结构证据独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。
