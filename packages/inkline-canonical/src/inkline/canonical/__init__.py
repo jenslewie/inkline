@@ -9,6 +9,14 @@ from inkline.canonical.bookgraph import (
 )
 from inkline.canonical.bookgraph_audit import audit_bookgraph
 from inkline.canonical.footnote_text import strip_footnote_marker
+from inkline.canonical.observed import (
+    OBSERVED_SCHEMA_NAME,
+    OBSERVED_SCHEMA_VERSION,
+    make_observation,
+    make_observed_document,
+    make_observed_page,
+    validate_observed_document,
+)
 from inkline.canonical.schema import (
     BLOCK_TYPES,
     SCHEMA_VERSION,
@@ -27,6 +35,8 @@ __all__ = [
     "BLOCK_TYPES",
     "BOOKGRAPH_SCHEMA_NAME",
     "BOOKGRAPH_SCHEMA_VERSION",
+    "OBSERVED_SCHEMA_NAME",
+    "OBSERVED_SCHEMA_VERSION",
     "SCHEMA_VERSION",
     "CanonicalBlock",
     "CanonicalSource",
@@ -40,10 +50,14 @@ __all__ = [
     "make_edge",
     "make_evidence",
     "make_node",
+    "make_observation",
+    "make_observed_document",
+    "make_observed_page",
     "make_toc_entry",
     "migrate_document",
     "sample_document",
     "strip_footnote_marker",
     "validate_bookgraph",
     "validate_document",
+    "validate_observed_document",
 ]
