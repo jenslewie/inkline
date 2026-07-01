@@ -17,6 +17,7 @@ from inkline.canonical.observed import (
     make_observed_page,
     validate_observed_document,
 )
+from inkline.canonical.observed_bookgraph import build_bookgraph_from_observed
 from inkline.canonical.schema import (
     BLOCK_TYPES,
     SCHEMA_VERSION,
@@ -44,6 +45,7 @@ __all__ = [
     "NoteRef",
     "ValidationError",
     "audit_bookgraph",
+    "build_bookgraph_from_observed",
     "make_block",
     "make_bookgraph",
     "make_document",
