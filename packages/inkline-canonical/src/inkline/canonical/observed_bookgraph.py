@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter
 from copy import deepcopy
 from typing import Any
 
@@ -13,6 +12,7 @@ from inkline.canonical.bookgraph import (
     make_node,
 )
 from inkline.canonical.observed import validate_observed_document
+from inkline.canonical.text_units import build_text_units
 
 
 def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
@@ -22,18 +22,14 @@ def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
     evidence_records: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     reading_order: list[str] = []
-    ignored_counts: Counter[str] = Counter()
     parser = str(metadata.get("parser_name") or "")
+    text_units, ignored_counts = build_text_units(document)
 
-    for observation in document["observations"]:
-        node_type = _node_type(observation)
-        if node_type is None:
-            ignored_counts[str(observation["kind"])] += 1
-            continue
+    for unit in text_units:
         node_id = f"n{len(nodes) + 1:06d}"
         evidence_id = f"ev{len(evidence_records) + 1:06d}"
-        node = _node_from_observation(observation, node_id, evidence_id, node_type)
-        evidence = _evidence_from_observation(observation, evidence_id, parser)
+        node = _node_from_unit(unit, node_id, evidence_id)
+        evidence = _evidence_from_unit(unit, evidence_id, parser)
         nodes.append(node)
         evidence_records.append(evidence)
         reading_order.append(node_id)
@@ -41,12 +37,12 @@ def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
             make_edge(
                 "appears_on_page",
                 node_id,
-                f"page:{observation['page']}",
+                f"page:{unit['page']}",
                 evidence_ids=[evidence_id],
             )
         )
 
-    metadata["shadow_ignored_observation_counts"] = dict(sorted(ignored_counts.items()))
+    metadata["shadow_ignored_observation_counts"] = ignored_counts
     projections = {
         "reading_order": reading_order,
         "epub_flow": list(reading_order),
@@ -77,32 +73,19 @@ def _bookgraph_metadata(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _node_type(observation: dict[str, Any]) -> str | None:
-    role_hint = observation["role_hint"]
-    if role_hint == "title_text":
-        return "heading"
-    if role_hint == "body_text":
-        return "paragraph"
-    if role_hint == "list_text":
-        return "list_item"
-    if observation["kind"] == "footnote_region" or role_hint == "footnote_text":
-        return "footnote"
-    return None
-
-
-def _node_from_observation(
-    observation: dict[str, Any], node_id: str, evidence_id: str, node_type: str
-) -> dict[str, Any]:
+def _node_from_unit(unit: dict[str, Any], node_id: str, evidence_id: str) -> dict[str, Any]:
+    node_type = unit["unit_type"]
     attrs = {
-        "source_observation_id": observation["observation_id"],
-        "role_hint": observation["role_hint"],
+        "source_text_unit_id": unit["unit_id"],
+        "source_observation_ids": list(unit["observation_ids"]),
+        "role_hints": list(unit["role_hints"]),
     }
-    observation_attrs = observation.get("attrs") or {}
-    inline_runs = observation_attrs.get("inline_runs")
+    unit_attrs = unit.get("attrs") or {}
+    inline_runs = unit_attrs.get("inline_runs")
     return make_node(
         node_id,
         node_type,
-        str(observation.get("text") or ""),
+        str(unit.get("text") or ""),
         level=1 if node_type == "heading" else None,
         inline_runs=deepcopy(inline_runs) if isinstance(inline_runs, list) else None,
         attrs=attrs,
@@ -110,18 +93,20 @@ def _node_from_observation(
     )
 
 
-def _evidence_from_observation(
-    observation: dict[str, Any], evidence_id: str, parser: str
-) -> dict[str, Any]:
+def _evidence_from_unit(unit: dict[str, Any], evidence_id: str, parser: str) -> dict[str, Any]:
     return make_evidence(
         evidence_id,
         parser,
-        observation["observation_id"],
-        source_kind="observation",
-        page=observation["page"],
-        bbox=deepcopy(observation.get("bbox")),
-        spans=deepcopy(observation.get("spans") or []),
-        parser_payload=deepcopy(observation.get("parser_payload") or {}),
+        unit["unit_id"],
+        source_kind="text_unit",
+        page=unit["page"],
+        pages=deepcopy(unit.get("pages") or []),
+        bbox=deepcopy(unit.get("bbox")),
+        spans=deepcopy(unit.get("spans") or []),
+        parser_payload={
+            "observation_ids": list(unit["observation_ids"]),
+            "parser_payloads": deepcopy(unit.get("parser_payloads") or []),
+        },
     )
 
 

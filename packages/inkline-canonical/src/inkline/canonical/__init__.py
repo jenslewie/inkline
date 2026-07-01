@@ -30,6 +30,7 @@ from inkline.canonical.schema import (
     sample_document,
     validate_document,
 )
+from inkline.canonical.text_units import TEXT_UNIT_TYPES, build_text_units
 from inkline.canonical.types import CanonicalBlock, CanonicalSource, NoteRef
 
 __all__ = [
@@ -39,6 +40,7 @@ __all__ = [
     "OBSERVED_SCHEMA_NAME",
     "OBSERVED_SCHEMA_VERSION",
     "SCHEMA_VERSION",
+    "TEXT_UNIT_TYPES",
     "CanonicalBlock",
     "CanonicalSource",
     "MigrationError",
@@ -46,6 +48,7 @@ __all__ = [
     "ValidationError",
     "audit_bookgraph",
     "build_bookgraph_from_observed",
+    "build_text_units",
     "make_block",
     "make_bookgraph",
     "make_document",
