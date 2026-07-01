@@ -86,6 +86,22 @@ uv run inkline canonical audit-bookgraph \
   --output data/outputs/丝绸之路新史/bookgraph_audit.json
 ```
 
+For an existing `canonical.json`, the development helper can build the shadow
+BookGraph and audit it in one step without rerunning MinerU:
+
+```bash
+UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_shadow.py \
+  data/outputs/golden/壬辰战争/canonical.json \
+  --bookgraph-output /tmp/inkline-imjin-canonical_v2.json \
+  --audit-output /tmp/inkline-imjin-bookgraph-audit.json \
+  --expect-exact-projection \
+  --fail-on-structure-warnings
+```
+
+Use this as a pre-release diagnostic gate. For example, the known-bad archived
+`壬辰战争_20260629_134600` canonical trips the structure warning because
+`display_block` nodes outnumber paragraphs; the current golden canonicals do not.
+
 RAG chunking, embedding, indexing, and search live in `inkline-rag`. Future
 answer-generation code should use `inkline-llm` for the local model call and
 consume canonical/chunk/search records rather than importing parser-specific
