@@ -213,6 +213,22 @@ def test_colon_intro_does_not_override_single_block_geometry() -> None:
     assert not should_start_display_block(blocks, 1, blocks[0].text, _layout())
 
 
+def test_page_bottom_set_off_uses_content_coordinate_body_lane() -> None:
+    layout = LayoutStats(
+        page_width=1418,
+        page_height=2092,
+        body_left=184.34,
+        body_right=1247.84,
+    )
+    blocks = [
+        _raw("正文段落" * 24, [100, 690, 875, 748], index=1),
+        _raw("页底另起的展示段落。", [235, 790, 640, 820], index=2),
+        _raw("1 页底脚注内容。", [100, 858, 875, 930], index=3, raw_type="page_footnote"),
+    ]
+
+    assert should_start_display_block(blocks, 1, blocks[0].text, layout)
+
+
 def test_tight_body_flow_intro_does_not_start_following_display_group() -> None:
     blocks = [
         _raw("正文段落" * 30, [118, 401, 893, 568], index=1),

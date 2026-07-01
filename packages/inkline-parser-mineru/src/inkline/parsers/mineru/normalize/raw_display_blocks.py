@@ -12,7 +12,7 @@ from typing import List, Optional, Protocol, Sequence, Tuple
 
 from ..extraction.text import block_text, normalize_ws
 from ..schema.models import LayoutStats, RawBlock
-from .display_geometry import collect_geometry_display_group
+from .display_geometry import PageLayoutProfile, collect_geometry_display_group
 from .page_detectors import coord_page_size as _coord_page_size
 
 
@@ -52,8 +52,8 @@ def _body_flow_resumes_after_float(blocks: Sequence[RawBlock], i: int, layout: L
     if nxt is None:
         return False
     body_x0, body_w = _page_body_lane(blocks, cur.page, layout)
-    return _is_body_lane_paragraph(cur, body_x0, body_w, layout) and _is_body_lane_paragraph(
-        nxt, body_x0, body_w, layout
+    return _is_body_lane_paragraph(cur, body_x0, body_w) and _is_body_lane_paragraph(
+        nxt, body_x0, body_w
     )
 
 
@@ -87,33 +87,31 @@ def _next_same_page_paragraph(blocks: Sequence[RawBlock], i: int) -> Optional[Ra
 def _page_body_lane(
     blocks: Sequence[RawBlock], page: int, layout: LayoutStats
 ) -> tuple[float, float]:
+    profile = PageLayoutProfile.from_blocks(blocks, layout, page=page)
     wide_body: list[RawBlock] = []
     for block in blocks:
         if block.page != page or block.raw_type != "paragraph" or not block.bbox:
             continue
         if len(normalize_ws(block_text(block))) < 30:
             continue
-        if block.width < layout.body_width * 0.70:
+        if block.width < profile.body_w * 0.70:
             continue
-        if block.x0 > layout.body_left + max(30.0, layout.body_width * 0.04):
+        if block.x0 > profile.body_x0 + max(30.0, profile.body_w * 0.04):
             continue
         wide_body.append(block)
     if len(wide_body) >= 2:
         return median([block.x0 for block in wide_body]), median(
             [block.width for block in wide_body]
         )
-    return layout.body_left, layout.body_width
+    return profile.body_x0, profile.body_w
 
 
-def _is_body_lane_paragraph(
-    block: RawBlock, body_x0: float, body_w: float, layout: LayoutStats
-) -> bool:
+def _is_body_lane_paragraph(block: RawBlock, body_x0: float, body_w: float) -> bool:
     if not block.bbox:
         return False
     near_page_body_left = block.x0 <= body_x0 + max(24.0, body_w * 0.035)
-    near_global_body_left = block.x0 <= layout.body_left + max(30.0, layout.body_width * 0.04)
     wide = block.width >= body_w * 0.70
-    return near_page_body_left and near_global_body_left and wide
+    return near_page_body_left and wide
 
 
 def is_page_bottom_set_off_before_footnotes(
@@ -137,7 +135,8 @@ def is_page_bottom_set_off_before_footnotes(
     gap = b.y0 - prev.y1
     if gap < max(12.0, page_height * 0.015):
         return False
-    if not _is_set_off_from_body(b, prev, layout):
+    profile = PageLayoutProfile.from_blocks(page_blocks, layout, page=b.page)
+    if not _is_set_off_from_body(b, prev, profile):
         return False
     return _matches_body_font_size(b, page_blocks, text_style)
 
@@ -169,27 +168,27 @@ def _previous_same_page_paragraph(
     return None
 
 
-def _is_set_off_from_body(block: RawBlock, prev: RawBlock, layout: LayoutStats) -> bool:
-    if prev.width < layout.body_width * 0.84 or prev.x0 > layout.body_left + max(
-        55.0, layout.body_width * 0.07
+def _is_set_off_from_body(block: RawBlock, prev: RawBlock, profile: PageLayoutProfile) -> bool:
+    if prev.width < profile.body_w * 0.84 or prev.x0 > profile.body_x0 + max(
+        55.0, profile.body_w * 0.07
     ):
         return False
-    return _is_global_set_off(block, layout) or _is_local_set_off(block, prev, layout)
+    return _is_global_set_off(block, profile) or _is_local_set_off(block, prev, profile)
 
 
-def _is_global_set_off(block: RawBlock, layout: LayoutStats) -> bool:
-    global_indent = block.x0 - layout.body_left
+def _is_global_set_off(block: RawBlock, profile: PageLayoutProfile) -> bool:
+    global_indent = block.x0 - profile.body_x0
     return bool(
-        global_indent >= max(58.0, layout.body_width * 0.07)
-        and block.width <= layout.body_width * 0.95
+        global_indent >= max(58.0, profile.body_w * 0.07)
+        and block.width <= profile.body_w * 0.95
     )
 
 
-def _is_local_set_off(block: RawBlock, prev: RawBlock, layout: LayoutStats) -> bool:
+def _is_local_set_off(block: RawBlock, prev: RawBlock, profile: PageLayoutProfile) -> bool:
     local_indent = block.x0 - prev.x0
     return bool(
-        local_indent >= max(36.0, layout.body_width * 0.045)
-        and block.width <= prev.width - max(24.0, layout.body_width * 0.03)
+        local_indent >= max(36.0, profile.body_w * 0.045)
+        and block.width <= prev.width - max(24.0, profile.body_w * 0.03)
     )
 
 
