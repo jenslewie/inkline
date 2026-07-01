@@ -102,6 +102,27 @@ Use this as a pre-release diagnostic gate. For example, the known-bad archived
 `壬辰战争_20260629_134600` canonical trips the structure warning because
 `display_block` nodes outnumber paragraphs; the current golden canonicals do not.
 
+Phase 2 also supports an ObservedDocument shadow path. This path records
+parser-neutral observations first, then builds an experimental BookGraph from
+those observations:
+
+```bash
+uv run --extra mineru mineru-to-canonical \
+  ...existing args... \
+  --output data/outputs/丝绸之路新史/canonical.json \
+  --observed-output data/outputs/丝绸之路新史/observed_document.json \
+  --bookgraph-from-observed-output data/outputs/丝绸之路新史/canonical_v2_observed.json
+```
+
+To compare the v1-shadow and ObservedDocument-shadow BookGraph paths:
+
+```bash
+UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/compare_bookgraph_shadow_paths.py \
+  data/outputs/丝绸之路新史/canonical.json \
+  data/outputs/丝绸之路新史/observed_document.json \
+  --output data/outputs/丝绸之路新史/bookgraph_shadow_path_compare.json
+```
+
 RAG chunking, embedding, indexing, and search live in `inkline-rag`. Future
 answer-generation code should use `inkline-llm` for the local model call and
 consume canonical/chunk/search records rather than importing parser-specific

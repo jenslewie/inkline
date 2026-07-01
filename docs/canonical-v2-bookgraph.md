@@ -127,6 +127,49 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_shadow.py
 
 这个 baseline 不表示这些数字永远不应变化。它的作用是给 Phase 2 提供一个可重复的结构健康度比较面：如果修复 display/paragraph 分类后，golden 的 warning 仍为空、archive 异常能被 audit 抓住，就说明 BookGraph shadow pipeline 已经开始承担架构诊断职责。
 
+### Phase 2 ObservedDocument replay
+
+Phase 2 新增 ObservedDocument shadow path：
+
+```text
+MinerU raw pages
+  -> observed_document.json
+  -> BookGraph from observed observations
+```
+
+ObservedDocument 的 observation 顶层字段是 parser-neutral 的：
+
+- `observation_id`
+- `kind`
+- `text`
+- `page`
+- `bbox`
+- `spans`
+- `role_hint`
+- `attrs`
+- `parser_payload`
+
+MinerU 的原始标签、raw block payload 等 parser-specific 数据只能进入 `parser_payload`，不能成为 observation 或 BookGraph evidence 顶层 contract。
+
+生成 observed path artifacts：
+
+```bash
+uv run --extra mineru mineru-to-canonical \
+  ...existing args... \
+  --output /tmp/inkline-phase2-canonical.json \
+  --observed-output /tmp/inkline-phase2-observed_document.json \
+  --bookgraph-from-observed-output /tmp/inkline-phase2-canonical_v2_observed.json
+```
+
+比较 v1-shadow path 和 observed-shadow path：
+
+```bash
+UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/compare_bookgraph_shadow_paths.py \
+  /tmp/inkline-phase2-canonical.json \
+  /tmp/inkline-phase2-observed_document.json \
+  --output /tmp/inkline-phase2-bookgraph-path-compare.json
+```
+
 ## display_block 定义
 
 `display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中通过排版和结构证据独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。

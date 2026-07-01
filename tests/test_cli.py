@@ -94,12 +94,21 @@ def test_cli_audits_bookgraph_shadow(tmp_path):
                 "n000001",
                 "paragraph",
                 "Body",
-                attrs={"source_block_id": "b000001"},
+                attrs={"legacy_block_id": "b000001"},
                 evidence_ids=["ev000001"],
             )
         ],
         [],
-        [make_evidence("ev000001", "mineru", "b000001", page=1, raw_type="paragraph")],
+        [
+            make_evidence(
+                "ev000001",
+                "mineru",
+                "b000001",
+                page=1,
+                source_kind="block",
+                parser_payload={"raw_type": "paragraph"},
+            )
+        ],
         projections={"reading_order": ["n000001"], "epub_flow": ["n000001"], "rag_units": []},
     )
     write_canonical(canonical, sample_document())
