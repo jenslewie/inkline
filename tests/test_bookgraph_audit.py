@@ -34,7 +34,7 @@ def _graph() -> dict:
                 "heading",
                 "Chapter 1",
                 level=1,
-                attrs={"source_block_id": "b000001"},
+                attrs={"legacy_block_id": "b000001"},
                 evidence_ids=["ev000001"],
             ),
             make_node(
@@ -45,21 +45,21 @@ def _graph() -> dict:
                     {"type": "text", "text": "Body"},
                     {"type": "note_ref", "marker": "1", "target_note_id": "b000004"},
                 ],
-                attrs={"source_block_id": "b000002", "layout_role": "normal_flow"},
+                attrs={"legacy_block_id": "b000002", "layout_context": "normal_flow"},
                 evidence_ids=["ev000002"],
             ),
             make_node(
                 "n000003",
                 "display_block",
                 "Quote",
-                attrs={"source_block_id": "b000003", "layout_role": "indented_quote"},
+                attrs={"legacy_block_id": "b000003", "layout_context": "set_off"},
                 evidence_ids=["ev000003"],
             ),
             make_node(
                 "n000004",
                 "footnote",
                 "1. Note",
-                attrs={"source_block_id": "b000004"},
+                attrs={"legacy_block_id": "b000004"},
                 evidence_ids=["ev000004"],
             ),
         ],
@@ -71,17 +71,39 @@ def _graph() -> dict:
             make_edge("references_note", "n000002", "n000004", evidence_ids=["ev000002"]),
         ],
         [
-            make_evidence("ev000001", "mineru", "b000001", page=1, raw_type="heading"),
-            make_evidence("ev000002", "mineru", "b000002", page=1, raw_type="paragraph"),
+            make_evidence(
+                "ev000001",
+                "mineru",
+                "b000001",
+                source_kind="legacy_block",
+                page=1,
+                parser_payload={"legacy_type": "heading"},
+            ),
+            make_evidence(
+                "ev000002",
+                "mineru",
+                "b000002",
+                source_kind="legacy_block",
+                page=1,
+                parser_payload={"legacy_type": "paragraph"},
+            ),
             make_evidence(
                 "ev000003",
                 "mineru",
                 "b000003",
+                source_kind="legacy_block",
                 page=2,
                 bbox=[10, 20, 100, 120],
-                raw_type="display_block",
+                parser_payload={"legacy_type": "display_block"},
             ),
-            make_evidence("ev000004", "mineru", "b000004", page=2, raw_type="footnote"),
+            make_evidence(
+                "ev000004",
+                "mineru",
+                "b000004",
+                source_kind="legacy_block",
+                page=2,
+                parser_payload={"legacy_type": "footnote"},
+            ),
         ],
         projections={
             "reading_order": ["n000001", "n000002", "n000003", "n000004"],
@@ -107,7 +129,7 @@ def test_audit_bookgraph_reports_counts_and_health_signals() -> None:
     assert audit["footnotes"]["references_note_edges"] == 1
     assert audit["footnotes"]["resolved_note_ref_ratio"] == 1.0
     assert audit["display_blocks"]["pages"] == {"2": 1}
-    assert audit["display_blocks"]["source_block_ids"] == ["b000003"]
+    assert audit["display_blocks"]["legacy_block_ids"] == ["b000003"]
 
 
 def test_audit_bookgraph_reports_heading_like_display_candidates() -> None:
@@ -117,7 +139,7 @@ def test_audit_bookgraph_reports_heading_like_display_candidates() -> None:
             "n000005",
             "display_block",
             "This is a full sentence.",
-            attrs={"source_block_id": "b000005", "layout_role": "inline_display_block"},
+            attrs={"legacy_block_id": "b000005", "layout_context": "inline_flow"},
             evidence_ids=["ev000005"],
         )
     )
@@ -126,9 +148,10 @@ def test_audit_bookgraph_reports_heading_like_display_candidates() -> None:
             "ev000005",
             "mineru",
             "b000005",
+            source_kind="legacy_block",
             page=3,
             bbox=[10, 520, 700, 560],
-            raw_type="display_block",
+            parser_payload={"legacy_type": "display_block"},
         )
     )
     graph["nodes"].append(
@@ -136,7 +159,7 @@ def test_audit_bookgraph_reports_heading_like_display_candidates() -> None:
             "n000006",
             "display_block",
             "Upper page compact title",
-            attrs={"source_block_id": "b000006", "layout_role": "standalone_display_page"},
+            attrs={"legacy_block_id": "b000006", "layout_context": "standalone"},
             evidence_ids=["ev000006"],
         )
     )
@@ -145,9 +168,10 @@ def test_audit_bookgraph_reports_heading_like_display_candidates() -> None:
             "ev000006",
             "mineru",
             "b000006",
+            source_kind="legacy_block",
             page=4,
             bbox=[10, 330, 700, 360],
-            raw_type="display_block",
+            parser_payload={"legacy_type": "display_block"},
         )
     )
     graph["projections"]["reading_order"].append("n000005")
@@ -158,20 +182,20 @@ def test_audit_bookgraph_reports_heading_like_display_candidates() -> None:
     assert audit["heading_like_display_blocks"] == [
         {
             "node_id": "n000003",
-            "source_block_id": "b000003",
+            "legacy_block_id": "b000003",
             "text": "Quote",
             "page": 2,
             "bbox": [10, 20, 100, 120],
-            "layout_role": "indented_quote",
+            "layout_context": "set_off",
             "reasons": ["short_text", "top_of_page", "no_sentence_terminal"],
         },
         {
             "node_id": "n000006",
-            "source_block_id": "b000006",
+            "legacy_block_id": "b000006",
             "text": "Upper page compact title",
             "page": 4,
             "bbox": [10, 330, 700, 360],
-            "layout_role": "standalone_display_page",
+            "layout_context": "standalone",
             "reasons": ["short_text", "top_of_page", "no_sentence_terminal"],
         }
     ]
@@ -185,7 +209,7 @@ def test_audit_bookgraph_reports_body_like_display_candidates_and_warnings() -> 
             "display_block",
             "This display block is long enough to look more like reading-flow body text "
             "than a compact quotation or epigraph.",
-            attrs={"source_block_id": "b000005", "layout_role": "inline_display_block"},
+            attrs={"legacy_block_id": "b000005", "layout_context": "inline_flow"},
             evidence_ids=["ev000005"],
         )
     )
@@ -194,9 +218,10 @@ def test_audit_bookgraph_reports_body_like_display_candidates_and_warnings() -> 
             "ev000005",
             "mineru",
             "b000005",
+            source_kind="legacy_block",
             page=3,
             bbox=[120, 420, 820, 520],
-            raw_type="display_block",
+            parser_payload={"legacy_type": "display_block"},
         )
     )
     graph["projections"]["reading_order"].append("n000005")
@@ -206,14 +231,14 @@ def test_audit_bookgraph_reports_body_like_display_candidates_and_warnings() -> 
     assert audit["body_like_display_blocks"] == [
         {
             "node_id": "n000005",
-            "source_block_id": "b000005",
+            "legacy_block_id": "b000005",
             "text": "This display block is long enough to look more like reading-flow body text "
             "than a compact quotation or epigraph.",
             "page": 3,
             "bbox": [120, 420, 820, 520],
-            "layout_role": "inline_display_block",
+            "layout_context": "inline_flow",
             "text_length": 112,
-            "reasons": ["long_text", "inline_display_block"],
+            "reasons": ["long_text", "inline_flow"],
         }
     ]
     assert audit["structure_warnings"] == [

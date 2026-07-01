@@ -104,17 +104,17 @@ def _ratio(numerator: int, denominator: int) -> float | None:
 def _display_block_summary(graph: dict[str, Any]) -> dict[str, Any]:
     evidence_by_id = {record["evidence_id"]: record for record in graph["evidence"]}
     pages: Counter[str] = Counter()
-    layout_roles: Counter[str] = Counter()
-    source_block_ids: list[str] = []
+    layout_contexts: Counter[str] = Counter()
+    legacy_block_ids: list[str] = []
     for node in graph["nodes"]:
         if node["node_type"] != "display_block":
             continue
-        source_block_id = node.get("attrs", {}).get("source_block_id")
-        if source_block_id:
-            source_block_ids.append(str(source_block_id))
-        layout_role = node.get("attrs", {}).get("layout_role")
-        if layout_role:
-            layout_roles[str(layout_role)] += 1
+        legacy_block_id = _legacy_block_id(node)
+        if legacy_block_id:
+            legacy_block_ids.append(legacy_block_id)
+        layout_context = node.get("attrs", {}).get("layout_context")
+        if layout_context:
+            layout_contexts[str(layout_context)] += 1
         for evidence_id in node.get("evidence_ids", []):
             page = evidence_by_id.get(evidence_id, {}).get("page")
             if page is not None:
@@ -122,8 +122,8 @@ def _display_block_summary(graph: dict[str, Any]) -> dict[str, Any]:
     return {
         "count": sum(1 for node in graph["nodes"] if node["node_type"] == "display_block"),
         "pages": dict(sorted(pages.items(), key=lambda item: int(item[0]))),
-        "layout_roles": dict(sorted(layout_roles.items())),
-        "source_block_ids": source_block_ids,
+        "layout_contexts": dict(sorted(layout_contexts.items())),
+        "legacy_block_ids": legacy_block_ids,
     }
 
 
@@ -140,11 +140,11 @@ def _heading_like_display_blocks(graph: dict[str, Any]) -> list[dict[str, Any]]:
         candidates.append(
             {
                 "node_id": node["node_id"],
-                "source_block_id": node.get("attrs", {}).get("source_block_id"),
+                "legacy_block_id": _legacy_block_id(node),
                 "text": node["text"],
                 "page": evidence.get("page"),
                 "bbox": deepcopy(evidence.get("bbox")),
-                "layout_role": node.get("attrs", {}).get("layout_role"),
+                "layout_context": node.get("attrs", {}).get("layout_context"),
                 "reasons": reasons,
             }
         )
@@ -165,11 +165,11 @@ def _body_like_display_blocks(graph: dict[str, Any]) -> list[dict[str, Any]]:
         candidates.append(
             {
                 "node_id": node["node_id"],
-                "source_block_id": node.get("attrs", {}).get("source_block_id"),
+                "legacy_block_id": _legacy_block_id(node),
                 "text": text,
                 "page": evidence.get("page"),
                 "bbox": deepcopy(evidence.get("bbox")),
-                "layout_role": node.get("attrs", {}).get("layout_role"),
+                "layout_context": node.get("attrs", {}).get("layout_context"),
                 "text_length": len(text),
                 "reasons": reasons,
             }
@@ -182,9 +182,15 @@ def _body_like_display_reasons(node: dict[str, Any]) -> list[str]:
     text = str(node.get("text") or "")
     if len(text) >= 80:
         reasons.append("long_text")
-    if node.get("attrs", {}).get("layout_role") == "inline_display_block":
-        reasons.append("inline_display_block")
+    if node.get("attrs", {}).get("layout_context") == "inline_flow":
+        reasons.append("inline_flow")
     return reasons
+
+
+def _legacy_block_id(node: dict[str, Any]) -> str | None:
+    attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+    value = attrs.get("legacy_block_id")
+    return str(value) if value else None
 
 
 def _structure_warnings(graph: dict[str, Any]) -> list[dict[str, int | str]]:

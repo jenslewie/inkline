@@ -92,9 +92,9 @@ def _node_from_block(block: dict[str, Any], node_id: str, evidence_id: str) -> d
     block_type = str(block.get("type"))
     block_attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
     attrs = {
-        "source_block_id": str(block.get("block_id") or node_id),
+        "legacy_block_id": str(block.get("block_id") or node_id),
         "logical_role": _logical_role(block_type),
-        "layout_role": block_attrs.get("layout_role") or _layout_role(block_type),
+        "layout_context": _layout_context(block_type, block_attrs),
     }
     if block_type == "footnote" and block_attrs.get("note_id"):
         attrs["note_id"] = str(block_attrs["note_id"])
@@ -118,11 +118,12 @@ def _evidence_from_block(block: dict[str, Any], evidence_id: str, parser: str) -
         evidence_id,
         parser,
         str(block.get("block_id") or evidence_id),
+        source_kind="legacy_block",
         page=page if isinstance(page, int) else None,
         pages=list(pages) if isinstance(pages, list) else None,
         bbox=deepcopy(source.get("bbox")),
         spans=deepcopy(source.get("spans")) if isinstance(source.get("spans"), list) else None,
-        raw_type=block.get("type"),
+        parser_payload={"legacy_type": block.get("type")},
     )
 
 
@@ -136,12 +137,22 @@ def _logical_role(block_type: str) -> str:
     }[block_type]
 
 
-def _layout_role(block_type: str) -> str:
+def _layout_context(block_type: str, block_attrs: dict[str, Any]) -> str:
+    explicit = block_attrs.get("layout_context")
+    if explicit:
+        return str(explicit)
+    legacy_role = str(block_attrs.get("layout_role") or "")
+    if legacy_role in {"inline_display_block", "same_page_display_block_continuation"}:
+        return "inline_flow"
+    if legacy_role in {"standalone_display_page", "standalone_display_group"}:
+        return "standalone"
+    if legacy_role:
+        return "set_off" if block_type == "display_block" else legacy_role
     return {
         "heading": "heading",
         "paragraph": "normal_flow",
         "list_item": "normal_flow",
-        "display_block": "display",
+        "display_block": "set_off",
         "footnote": "footnote",
     }[block_type]
 
@@ -179,12 +190,12 @@ def _footnote_node_aliases(nodes: list[dict[str, Any]]) -> dict[str, str]:
         if node["node_type"] != "footnote":
             continue
         attrs = node.get("attrs") or {}
-        source_block_id = attrs.get("source_block_id")
-        for alias in (source_block_id, attrs.get("note_id")):
+        legacy_block_id = attrs.get("legacy_block_id") or attrs.get("source_block_id")
+        for alias in (legacy_block_id, attrs.get("note_id")):
             if alias:
                 aliases[str(alias)] = node["node_id"]
-        if source_block_id:
-            aliases[f"note_{source_block_id}"] = node["node_id"]
+        if legacy_block_id:
+            aliases[f"note_{legacy_block_id}"] = node["node_id"]
     return aliases
 
 

@@ -16,7 +16,7 @@ def bookgraph_to_blocks(graph: dict[str, Any]) -> list[dict[str, Any]]:
         node = nodes_by_id[node_id]
         attrs = _project_attrs(node)
         block: dict[str, Any] = {
-            "block_id": node["attrs"].get("source_block_id") or node_id,
+            "block_id": _legacy_block_id(node) or node_id,
             "type": node["node_type"],
             "text": node["text"],
             "attrs": attrs,
@@ -32,11 +32,17 @@ def _project_attrs(node: dict[str, Any]) -> dict[str, Any]:
     attrs = {
         key: deepcopy(value)
         for key, value in node.get("attrs", {}).items()
-        if key != "source_block_id"
+        if key != "legacy_block_id"
     }
     if "inline_runs" in node:
         attrs["inline_runs"] = deepcopy(node["inline_runs"])
     return attrs
+
+
+def _legacy_block_id(node: dict[str, Any]) -> str | None:
+    attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+    value = attrs.get("legacy_block_id")
+    return str(value) if value else None
 
 
 def _project_source(

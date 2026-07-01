@@ -52,13 +52,20 @@ Parser adapter
 
 ObservedDocument 负责表达“解析器观察到了什么”。BookGraph 负责表达“这本书的逻辑结构是什么”。projections 负责表达“某个下游如何消费这本书”。这三层必须分开，否则系统会不断把某个下游或某个解析器的局部需要写进 canonical 核心。
 
+所有 canonical 构建阶段都遵守 [Canonical Non-Semantic Construction Policy](canonical-non-semantic-policy.md)。结构判断只能使用 parser explicit structure、geometry、layout、reading order、style、markers、continuity 和 provenance 等可观察证据；不能使用文本含义、关键词语义、书籍主题或 LLM classifier。
+
+Phase 2 在引入 ObservedDocument 前必须先完成两项前置清理：
+
+- neutralize BookGraph contract language: parser-specific raw labels 只能进入 `parser_payload`，迁移期 v1 block id 只能作为 `legacy_block_id`
+- add non-semantic guardrails: canonical builder 和 audit 不能依赖语义分类入口，也不能要求未来 parser 模仿 MinerU/v1 的内部词汇
+
 ## Phase 1 支持范围
 
 Phase 1 是 shadow vertical slice，只打通最小闭环：
 
 - node types: `heading`, `paragraph`, `display_block`, `list_item`, `footnote`
 - edge types: `appears_on_page`, `references_note`
-- evidence records: parser、source block、page/pages、bbox、spans、raw type
+- evidence records: parser、source id/source kind、page/pages、bbox、spans、confidence、parser payload
 - projections: `reading_order`, `epub_flow`, `rag_units`
 - bridge: `BookGraph -> v1-like blocks` projection，用于迁移期比较
 
@@ -122,7 +129,7 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_shadow.py
 
 ## display_block 定义
 
-`display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中被作者或排版语义上独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。
+`display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中通过排版和结构证据独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。
 
 因此 BookGraph 中允许 `display_block` 作为 node type，但它的版面证据必须放在 `attrs` 或 `evidence` 中。不能把“缩进、宽度、lane 偏移”等 bbox 特征当成 node type 的唯一理由。正确方向是：先聚合出稳定文本单元，再结合证据、上下文和规则分类。
 

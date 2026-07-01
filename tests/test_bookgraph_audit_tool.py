@@ -47,7 +47,7 @@ def _canonical() -> dict[str, Any]:
                 "type": "display_block",
                 "text": "展示段落" * 20,
                 "source": {"page": 1, "bbox": [180, 260, 760, 360]},
-                "attrs": {"layout_role": "inline_display_block"},
+                "attrs": {"layout_context": "inline_flow"},
             },
         ],
     }

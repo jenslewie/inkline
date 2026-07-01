@@ -45,7 +45,7 @@ def _canonical() -> dict:
                 "type": "display_block",
                 "text": "Quoted text",
                 "source": {"page": 1, "bbox": [30, 100, 180, 130]},
-                "attrs": {"layout_role": "indented_quote"},
+                "attrs": {"layout_context": "set_off"},
             },
             {
                 "block_id": "b000004",
@@ -77,7 +77,7 @@ def test_build_bookgraph_shadow_converts_supported_text_blocks() -> None:
         "display_block",
         "footnote",
     ]
-    assert [node["attrs"]["source_block_id"] for node in graph["nodes"]] == [
+    assert [node["attrs"]["legacy_block_id"] for node in graph["nodes"]] == [
         "b000001",
         "b000002",
         "b000003",
@@ -99,6 +99,9 @@ def test_build_bookgraph_shadow_preserves_source_and_inline_runs() -> None:
     assert evidence["pages"] == [1]
     assert evidence["bbox"] == [10, 50, 200, 90]
     assert evidence["spans"] == [{"page": 1, "bbox": [10, 50, 200, 90], "block_id": "raw:1:1"}]
+    assert evidence["source_kind"] == "legacy_block"
+    assert evidence["parser_payload"] == {"legacy_type": "paragraph"}
+    assert "raw_type" not in evidence
 
 
 def test_build_bookgraph_shadow_generates_note_reference_and_page_edges() -> None:

@@ -31,12 +31,21 @@ def test_paragraph_node_projects_to_v1_like_block() -> None:
                 "n000001",
                 "paragraph",
                 "Body text",
-                attrs={"source_block_id": "b000010", "logical_role": "body"},
+                attrs={"legacy_block_id": "b000010", "logical_role": "body"},
                 evidence_ids=["ev000001"],
             )
         ],
         [],
-        [make_evidence("ev000001", "mineru", "b000010", page=3, raw_type="paragraph")],
+        [
+            make_evidence(
+                "ev000001",
+                "mineru",
+                "b000010",
+                source_kind="legacy_block",
+                page=3,
+                parser_payload={"legacy_type": "paragraph"},
+            )
+        ],
         projections={"reading_order": ["n000001"], "epub_flow": ["n000001"], "rag_units": []},
     )
 
@@ -86,7 +95,7 @@ def test_inline_runs_return_to_attrs_and_source_restores_evidence_fields() -> No
                 "paragraph",
                 "Body1",
                 inline_runs=inline_runs,
-                attrs={"source_block_id": "b000001", "layout_role": "normal_flow"},
+                attrs={"legacy_block_id": "b000001", "layout_context": "normal_flow"},
                 evidence_ids=["ev000001"],
             )
         ],
@@ -96,11 +105,12 @@ def test_inline_runs_return_to_attrs_and_source_restores_evidence_fields() -> No
                 "ev000001",
                 "mineru",
                 "b000001",
+                source_kind="legacy_block",
                 page=4,
                 pages=[4, 5],
                 bbox=[10, 20, 300, 400],
                 spans=spans,
-                raw_type="paragraph",
+                parser_payload={"legacy_type": "paragraph"},
             )
         ],
         projections={"reading_order": ["n000001"], "epub_flow": [], "rag_units": []},
@@ -109,7 +119,7 @@ def test_inline_runs_return_to_attrs_and_source_restores_evidence_fields() -> No
     block = bookgraph_to_blocks(graph)[0]
 
     assert block["attrs"]["inline_runs"] == inline_runs
-    assert block["attrs"]["layout_role"] == "normal_flow"
+    assert block["attrs"]["layout_context"] == "normal_flow"
     assert block["source"] == {
         "page": 4,
         "bbox": [10, 20, 300, 400],

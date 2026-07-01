@@ -32,16 +32,17 @@ def _minimal_graph() -> dict:
         "n000001",
         "paragraph",
         "A paragraph.",
-        attrs={"source_block_id": "b000001"},
+        attrs={"legacy_block_id": "b000001"},
         evidence_ids=["ev000001"],
     )
     evidence = make_evidence(
         "ev000001",
         "mineru",
         "b000001",
+        source_kind="legacy_block",
         page=1,
         bbox=[10, 20, 100, 120],
-        raw_type="paragraph",
+        parser_payload={"legacy_type": "paragraph"},
     )
     return make_bookgraph(
         _metadata(),
@@ -56,6 +57,15 @@ def test_minimal_valid_graph_passes() -> None:
     graph = _minimal_graph()
 
     validate_bookgraph(graph)
+
+
+def test_evidence_keeps_parser_specific_raw_fields_in_payload() -> None:
+    evidence = _minimal_graph()["evidence"][0]
+
+    assert evidence["source_kind"] == "legacy_block"
+    assert evidence["parser_payload"] == {"legacy_type": "paragraph"}
+    assert "raw_type" not in evidence
+    assert "raw_types" not in evidence
 
 
 def test_missing_top_level_field_fails() -> None:

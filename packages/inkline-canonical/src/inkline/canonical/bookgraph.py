@@ -58,6 +58,7 @@ REQUIRED_EVIDENCE_FIELDS = {
     "evidence_id": str,
     "parser": str,
     "source_id": str,
+    "source_kind": str,
 }
 
 
@@ -132,12 +133,12 @@ def make_evidence(
     parser: str,
     source_id: str,
     *,
+    source_kind: str = "unknown",
     page: int | None = None,
     pages: list[int] | None = None,
     bbox: list[float] | None = None,
     spans: list[dict[str, Any]] | None = None,
-    raw_type: str | None = None,
-    raw_types: list[str] | None = None,
+    parser_payload: dict[str, Any] | None = None,
     confidence: float | None = None,
 ) -> dict[str, Any]:
     resolved_pages = list(pages) if pages is not None else ([page] if page is not None else [])
@@ -146,12 +147,12 @@ def make_evidence(
         "evidence_id": evidence_id,
         "parser": parser,
         "source_id": source_id,
+        "source_kind": source_kind,
         "page": resolved_page,
         "pages": resolved_pages,
         "bbox": deepcopy(bbox),
         "spans": deepcopy(spans) if spans is not None else [],
-        "raw_type": raw_type,
-        "raw_types": list(raw_types) if raw_types is not None else ([raw_type] if raw_type else []),
+        "parser_payload": deepcopy(parser_payload) if parser_payload is not None else {},
         "confidence": confidence,
     }
     return evidence
