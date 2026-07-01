@@ -50,6 +50,7 @@ def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
 
     metadata["shadow_ignored_observation_counts"] = ignored_counts
     metadata["shadow_text_unit_layout_audit_summary"] = layout_audit["summary"]
+    metadata["shadow_text_unit_layout_profile_quality"] = layout_audit["profile_quality"]
     projections = {
         "reading_order": reading_order,
         "epub_flow": list(reading_order),

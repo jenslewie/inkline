@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
 from statistics import median
 from typing import Any
+
+MIN_BODY_WIDTH_RATIO = 0.2
+MAX_BODY_WIDTH_RATIO = 0.92
+MAX_REFERENCE_WIDTH_SPREAD_RATIO = 2.5
 
 
 def audit_text_unit_layout(
     units: list[dict[str, Any]], pages: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    page_profiles = _page_profiles(units, pages)
+    page_profiles, profile_quality = _page_profiles(units, pages)
     unit_records: list[dict[str, Any]] = []
     summary = {
         "pages_with_profiles": len(page_profiles),
@@ -31,6 +36,7 @@ def audit_text_unit_layout(
             summary["skipped_no_profile"] += 1
     return {
         "summary": summary,
+        "profile_quality": profile_quality,
         "page_profiles": _page_profile_records(page_profiles),
         "unit_records": unit_records,
     }
@@ -55,7 +61,9 @@ def classify_text_units_by_layout(
     return classified
 
 
-def _page_profiles(units: list[dict[str, Any]], pages: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+def _page_profiles(
+    units: list[dict[str, Any]], pages: list[dict[str, Any]]
+) -> tuple[dict[int, dict[str, Any]], dict[str, int]]:
     page_sizes = {
         int(page["page"]): {
             "width": float(page["width"]),
@@ -63,6 +71,7 @@ def _page_profiles(units: list[dict[str, Any]], pages: list[dict[str, Any]]) -> 
         }
         for page in pages
     }
+    profile_quality: Counter[str] = Counter()
     grouped: dict[int, list[list[float]]] = {}
     for unit in units:
         if unit.get("unit_type") != "paragraph":
@@ -73,22 +82,57 @@ def _page_profiles(units: list[dict[str, Any]], pages: list[dict[str, Any]]) -> 
     profiles: dict[int, dict[str, Any]] = {}
     for page, bboxes in grouped.items():
         if len(bboxes) < 3:
+            profile_quality["rejected_too_few_references"] += 1
             continue
         left = median(bbox[0] for bbox in bboxes)
         right = median(bbox[2] for bbox in bboxes)
         width = median(_width(bbox) for bbox in bboxes)
         if width <= 0:
+            profile_quality["rejected_invalid_width"] += 1
             continue
         size = page_sizes.get(page, {})
+        page_width = float(size.get("width") or 0.0)
+        if _has_unstable_widths(bboxes):
+            profile_quality["rejected_unstable_widths"] += 1
+            continue
+        if _has_extreme_body_width(width, page_width):
+            profile_quality["rejected_extreme_body_width"] += 1
+            continue
         profiles[page] = {
             "body_left": float(left),
             "body_right": float(right),
             "body_width": float(width),
-            "page_width": float(size.get("width") or 0.0),
+            "page_width": page_width,
             "page_height": float(size.get("height") or 0.0),
             "reference_unit_count": len(bboxes),
         }
-    return profiles
+        profile_quality["accepted"] += 1
+    return profiles, _profile_quality_summary(profile_quality)
+
+
+def _profile_quality_summary(profile_quality: Counter[str]) -> dict[str, int]:
+    keys = (
+        "accepted",
+        "rejected_too_few_references",
+        "rejected_invalid_width",
+        "rejected_unstable_widths",
+        "rejected_extreme_body_width",
+    )
+    return {key: int(profile_quality.get(key, 0)) for key in keys}
+
+
+def _has_unstable_widths(bboxes: list[list[float]]) -> bool:
+    widths = [_width(bbox) for bbox in bboxes if _width(bbox) > 0]
+    if not widths:
+        return True
+    return max(widths) / min(widths) > MAX_REFERENCE_WIDTH_SPREAD_RATIO
+
+
+def _has_extreme_body_width(body_width: float, page_width: float) -> bool:
+    if page_width <= 0:
+        return False
+    ratio = body_width / page_width
+    return ratio < MIN_BODY_WIDTH_RATIO or ratio > MAX_BODY_WIDTH_RATIO
 
 
 def _page_profile_records(page_profiles: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:

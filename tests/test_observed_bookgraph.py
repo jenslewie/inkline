@@ -174,6 +174,13 @@ def test_build_bookgraph_from_observed_records_layout_audit_summary() -> None:
         "skipped_no_bbox": 0,
         "skipped_no_profile": 0,
     }
+    assert graph["metadata"]["shadow_text_unit_layout_profile_quality"] == {
+        "accepted": 1,
+        "rejected_too_few_references": 0,
+        "rejected_invalid_width": 0,
+        "rejected_unstable_widths": 0,
+        "rejected_extreme_body_width": 0,
+    }
     assert "shadow_text_unit_layout_audit" not in graph["metadata"]
 
 

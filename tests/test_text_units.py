@@ -321,6 +321,83 @@ def test_layout_classifier_builds_body_lane_from_text_unit_spans() -> None:
     assert audit["page_profiles"][0]["reference_unit_count"] == 4
 
 
+def test_layout_profile_quality_rejects_unstable_reference_widths() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Unstable layout",
+                page=1,
+                bbox=[100, 100, 900, 220],
+                spans=[
+                    {"page": 1, "bbox": [100, 100, 900, 130]},
+                    {"page": 1, "bbox": [100, 130, 900, 160]},
+                    {"page": 1, "bbox": [100, 160, 280, 190]},
+                    {"page": 1, "bbox": [700, 190, 900, 220]},
+                ],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Inset text",
+                page=1,
+                bbox=[260, 260, 730, 290],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+        ]
+    )
+    units, _ = build_text_units(document)
+
+    classified = classify_text_units_by_layout(units, document["pages"])
+    audit = audit_text_unit_layout(units, document["pages"])
+
+    assert [unit["unit_type"] for unit in classified] == ["paragraph", "paragraph"]
+    assert audit["page_profiles"] == []
+    assert audit["profile_quality"]["rejected_unstable_widths"] == 1
+
+
+def test_layout_profile_quality_rejects_extremely_narrow_body_width() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Narrow page fragment",
+                page=1,
+                bbox=[430, 100, 520, 190],
+                spans=[
+                    {"page": 1, "bbox": [430, 100, 520, 130]},
+                    {"page": 1, "bbox": [430, 130, 520, 160]},
+                    {"page": 1, "bbox": [430, 160, 520, 190]},
+                ],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Inset text",
+                page=1,
+                bbox=[445, 400, 500, 430],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+        ]
+    )
+    units, _ = build_text_units(document)
+
+    classified = classify_text_units_by_layout(units, document["pages"])
+    audit = audit_text_unit_layout(units, document["pages"])
+
+    assert [unit["unit_type"] for unit in classified] == ["paragraph", "paragraph"]
+    assert audit["page_profiles"] == []
+    assert audit["profile_quality"]["rejected_extreme_body_width"] == 1
+
+
 def test_layout_audit_reports_page_profiles_and_candidate_signals_without_text() -> None:
     document = _document(
         [

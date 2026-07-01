@@ -243,6 +243,18 @@ Phase 3.4 改进 TextUnit layout classification 的 body lane 建模：
 
 在 `丝绸之路新史` smoke 中，这一步把 layout profile 覆盖从 12 页提升到 258 页，并把 `skipped_no_profile` 从 307 降到 50。更稳定的 body lane 也让 shadow path 的 display classification 从 4 个收敛到 1 个，说明它减少了旧单元级 bbox profile 带来的误判。
 
+### Phase 3.5 Profile quality guard
+
+Phase 3.5 为 page-local body lane profile 增加质量门槛：
+
+- `reference_unit_count < 3` 的页不建 profile。
+- reference bbox 宽度分布过于不稳定的页不建 profile。
+- `body_width / page_width` 过小或过大的页不建 profile。
+- audit report 增加 `profile_quality`，记录 accepted 和各类 rejected 计数。
+- observed shadow BookGraph metadata 增加 `shadow_text_unit_layout_profile_quality`。
+
+这一层仍然只使用 bbox、spans、page size 和 reference count。它的目标是降低坏 profile 带来的误判，不追求 display_block 召回。在 `丝绸之路新史` smoke 中，accepted profiles 为 217 页，rejected profiles 包含 44 个参考不足、40 个宽度不稳定、1 个极端 body width；shadow path 的 display classification 从 1 个收敛到 0 个。
+
 ## display_block 定义
 
 `display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中通过排版和结构证据独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。
