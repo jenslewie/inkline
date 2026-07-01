@@ -206,7 +206,8 @@ def test_normalize_mineru_outputs_writes_optional_observed_shadow_outputs(tmp_pa
 
     graph = json.loads(observed_bookgraph_output.read_text(encoding="utf-8"))
     validate_bookgraph(graph)
-    assert graph["evidence"][0]["source_kind"] == "observation"
+    assert graph["evidence"][0]["source_kind"] == "text_unit"
+    assert graph["evidence"][0]["parser_payload"]["observation_ids"] == ["obs000001"]
     assert graph["nodes"]
 
 

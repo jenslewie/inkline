@@ -170,6 +170,28 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/compare_bookgraph_shadow_
   --output /tmp/inkline-phase2-bookgraph-path-compare.json
 ```
 
+### Phase 3.1 TextUnit aggregation
+
+Phase 3.1 在 ObservedDocument 和 BookGraph 之间新增内部 shadow 聚合层：
+
+```text
+ObservedDocument observations
+  -> TextUnit aggregation
+  -> BookGraph from text units
+```
+
+`TextUnit` 不是新的 release artifact，也不是下游 API。它是 canonical builder 内部的稳定文本单元，用来把 parser 输出的碎片化 observations 先聚合成段落候选，再进入 BookGraph node 构造。
+
+Phase 3.1 只做同页、非语义聚合：
+
+- 只使用 `kind`、`role_hint`、`page`、`bbox`、`spans`、`reading_order`、垂直间距、左边界对齐和水平重叠。
+- 只合并相邻且几何连续的 `body_text` observations。
+- `bbox = null` 的 observation 可以成为独立 TextUnit，但不会参与几何合并。
+- heading、list item、footnote 暂不跨 observation 合并。
+- image、table、page marker、caption、toc 等非正文 observation 继续计入 ignored counts。
+
+这一步仍然不改变现有 v1 `canonical.json`、EPUB 或 RAG 默认消费路径。它只让 observed shadow path 从“region 级 node”前进到“段落候选级 node”，为后续 display/paragraph 分类和跨页聚合做准备。
+
 ## display_block 定义
 
 `display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中通过排版和结构证据独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。
