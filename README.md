@@ -77,6 +77,15 @@ ship one canonical contract rather than v1/v2 side by side. Existing EPUB and
 RAG flows continue to consume `canonical.json` by default until the BookGraph
 projection switch is complete.
 
+To inspect the shadow output against the current canonical blocks, run:
+
+```bash
+uv run inkline canonical audit-bookgraph \
+  data/outputs/丝绸之路新史/canonical_v2.json \
+  --legacy-canonical data/outputs/丝绸之路新史/canonical.json \
+  --output data/outputs/丝绸之路新史/bookgraph_audit.json
+```
+
 RAG chunking, embedding, indexing, and search live in `inkline-rag`. Future
 answer-generation code should use `inkline-llm` for the local model call and
 consume canonical/chunk/search records rather than importing parser-specific

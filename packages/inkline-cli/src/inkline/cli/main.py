@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Sequence
 
+from inkline.canonical import audit_bookgraph, validate_bookgraph
 from inkline.canonical.io import read_canonical, read_jsonl, write_canonical, write_jsonl
 from inkline.epub import export_epub
 from inkline.parse import ParseRequest, import_epub, parse_document
@@ -24,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_import_commands(subparsers)
     _add_export_commands(subparsers)
     _add_rag_commands(subparsers)
+    _add_canonical_commands(subparsers)
     return parser
 
 
@@ -105,6 +107,21 @@ def _add_rag_commands(subparsers: argparse._SubParsersAction) -> None:
     rag_search.add_argument("--top-k", type=int, default=3)
     rag_search.add_argument("--jsonl", action="store_true")
     rag_search.set_defaults(handler=_rag_search)
+
+
+def _add_canonical_commands(subparsers: argparse._SubParsersAction) -> None:
+    canonical = subparsers.add_parser("canonical", help="Canonical diagnostics and utilities.")
+    canonical_sub = canonical.add_subparsers(dest="canonical_command", required=True)
+    audit = canonical_sub.add_parser(
+        "audit-bookgraph", help="Audit a shadow BookGraph canonical_v2.json."
+    )
+    audit.add_argument("bookgraph", help="BookGraph shadow JSON path.")
+    audit.add_argument(
+        "--legacy-canonical",
+        help="Optional v1 canonical.json path for v2->v1 projection comparison.",
+    )
+    audit.add_argument("--output", help="Optional audit JSON output path; defaults to stdout.")
+    audit.set_defaults(handler=_canonical_audit_bookgraph)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -206,6 +223,30 @@ def _rag_search(args: argparse.Namespace) -> int:
             print(result.text[:500].strip())
             print()
     return 0
+
+
+def _canonical_audit_bookgraph(args: argparse.Namespace) -> int:
+    graph = _read_json(args.bookgraph)
+    validate_bookgraph(graph)
+    legacy = _read_json(args.legacy_canonical) if args.legacy_canonical else None
+    audit = audit_bookgraph(graph, legacy_canonical=legacy)
+    payload = json.dumps(audit, ensure_ascii=False, indent=2)
+    if args.output:
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(payload + "\n", encoding="utf-8")
+        print(f"Wrote BookGraph audit: {output}")
+    else:
+        print(payload)
+    return 0
+
+
+def _read_json(path: str | Path) -> dict:
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected JSON object: {path}")
+    return data
 
 
 if __name__ == "__main__":

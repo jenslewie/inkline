@@ -1,4 +1,3 @@
-from inkline.canonical.footnote_text import strip_footnote_marker
 from inkline.canonical.bookgraph import (
     BOOKGRAPH_SCHEMA_NAME,
     BOOKGRAPH_SCHEMA_VERSION,
@@ -8,6 +7,8 @@ from inkline.canonical.bookgraph import (
     make_node,
     validate_bookgraph,
 )
+from inkline.canonical.bookgraph_audit import audit_bookgraph
+from inkline.canonical.footnote_text import strip_footnote_marker
 from inkline.canonical.schema import (
     BLOCK_TYPES,
     SCHEMA_VERSION,
@@ -32,12 +33,13 @@ __all__ = [
     "MigrationError",
     "NoteRef",
     "ValidationError",
-    "make_bookgraph",
+    "audit_bookgraph",
     "make_block",
+    "make_bookgraph",
+    "make_document",
     "make_edge",
     "make_evidence",
     "make_node",
-    "make_document",
     "make_toc_entry",
     "migrate_document",
     "sample_document",

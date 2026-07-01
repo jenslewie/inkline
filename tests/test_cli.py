@@ -1,7 +1,14 @@
 import json
 import zipfile
 
-from inkline.canonical import sample_document
+from inkline.canonical import (
+    BOOKGRAPH_SCHEMA_NAME,
+    BOOKGRAPH_SCHEMA_VERSION,
+    make_bookgraph,
+    make_evidence,
+    make_node,
+    sample_document,
+)
 from inkline.canonical.io import write_canonical
 from inkline.cli.main import build_parser, main
 
@@ -65,3 +72,54 @@ def test_cli_can_enable_qwen_marker_repair():
     )
 
     assert args.marker_locator_repair is True
+
+
+def test_cli_audits_bookgraph_shadow(tmp_path):
+    canonical = tmp_path / "canonical.json"
+    bookgraph = tmp_path / "canonical_v2.json"
+    audit = tmp_path / "bookgraph_audit.json"
+    graph = make_bookgraph(
+        {
+            "schema_name": BOOKGRAPH_SCHEMA_NAME,
+            "schema_version": BOOKGRAPH_SCHEMA_VERSION,
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "en",
+            "source_file": "sample.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        [
+            make_node(
+                "n000001",
+                "paragraph",
+                "Body",
+                attrs={"source_block_id": "b000001"},
+                evidence_ids=["ev000001"],
+            )
+        ],
+        [],
+        [make_evidence("ev000001", "mineru", "b000001", page=1, raw_type="paragraph")],
+        projections={"reading_order": ["n000001"], "epub_flow": ["n000001"], "rag_units": []},
+    )
+    write_canonical(canonical, sample_document())
+    bookgraph.write_text(json.dumps(graph, ensure_ascii=False), encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "canonical",
+                "audit-bookgraph",
+                str(bookgraph),
+                "--legacy-canonical",
+                str(canonical),
+                "--output",
+                str(audit),
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(audit.read_text(encoding="utf-8"))
+    assert payload["node_counts"] == {"paragraph": 1}
+    assert payload["projection_diff"]["projected_block_count"] == 1
