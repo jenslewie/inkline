@@ -96,6 +96,8 @@ def _node_from_block(block: dict[str, Any], node_id: str, evidence_id: str) -> d
         "logical_role": _logical_role(block_type),
         "layout_role": block_attrs.get("layout_role") or _layout_role(block_type),
     }
+    if block_type == "footnote" and block_attrs.get("note_id"):
+        attrs["note_id"] = str(block_attrs["note_id"])
     inline_runs = block_attrs.get("inline_runs")
     return make_node(
         node_id,
@@ -148,11 +150,7 @@ def _note_reference_edges(
     nodes: list[dict[str, Any]], block_to_node: dict[str, str]
 ) -> list[dict[str, Any]]:
     edges: list[dict[str, Any]] = []
-    footnote_nodes = {
-        node["attrs"]["source_block_id"]: node["node_id"]
-        for node in nodes
-        if node["node_type"] == "footnote"
-    }
+    footnote_nodes = _footnote_node_aliases(nodes)
     for node in nodes:
         if node["node_type"] == "footnote":
             continue
@@ -173,6 +171,21 @@ def _note_reference_edges(
                 )
             )
     return edges
+
+
+def _footnote_node_aliases(nodes: list[dict[str, Any]]) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for node in nodes:
+        if node["node_type"] != "footnote":
+            continue
+        attrs = node.get("attrs") or {}
+        source_block_id = attrs.get("source_block_id")
+        for alias in (source_block_id, attrs.get("note_id")):
+            if alias:
+                aliases[str(alias)] = node["node_id"]
+        if source_block_id:
+            aliases[f"note_{source_block_id}"] = node["node_id"]
+    return aliases
 
 
 def _rag_units(

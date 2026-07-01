@@ -120,6 +120,43 @@ def test_build_bookgraph_shadow_generates_note_reference_and_page_edges() -> Non
     assert {edge["target"] for edge in appears} == {"page:1", "page:2"}
 
 
+def test_build_bookgraph_shadow_resolves_note_ref_to_footnote_note_id_alias() -> None:
+    canonical = _canonical()
+    canonical["blocks"][1]["attrs"]["inline_runs"][1]["target_note_id"] = "note_b000005"
+    canonical["blocks"][4]["attrs"]["note_id"] = "note_b000005"
+
+    graph = build_bookgraph_shadow(canonical)
+
+    references = [edge for edge in graph["edges"] if edge["edge_type"] == "references_note"]
+    assert references == [
+        {
+            "edge_type": "references_note",
+            "source": "n000002",
+            "target": "n000004",
+            "evidence_ids": ["ev000002"],
+            "attrs": {"target_note_id": "note_b000005"},
+        }
+    ]
+
+
+def test_build_bookgraph_shadow_resolves_note_ref_to_note_prefixed_block_id() -> None:
+    canonical = _canonical()
+    canonical["blocks"][1]["attrs"]["inline_runs"][1]["target_note_id"] = "note_b000005"
+
+    graph = build_bookgraph_shadow(canonical)
+
+    references = [edge for edge in graph["edges"] if edge["edge_type"] == "references_note"]
+    assert references == [
+        {
+            "edge_type": "references_note",
+            "source": "n000002",
+            "target": "n000004",
+            "evidence_ids": ["ev000002"],
+            "attrs": {"target_note_id": "note_b000005"},
+        }
+    ]
+
+
 def test_build_bookgraph_shadow_creates_heading_path_aware_rag_units() -> None:
     graph = build_bookgraph_shadow(_canonical())
 
