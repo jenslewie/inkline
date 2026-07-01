@@ -6,13 +6,14 @@ import argparse
 import json
 from pathlib import Path
 
-from inkline.canonical import validate_document
+from inkline.canonical import validate_bookgraph, validate_document
 from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_OLLAMA_KEEP_ALIVE, DEFAULT_QWEN_MODEL
 
 from ..analysis.note_gap_report import write_note_ref_gap_report
 from ..bridge import find_mineru_run_version_info, get_mineru_version_info
 from ..extraction.io import load_inputs
 from ..normalize.assets import materialize_image_assets
+from ..normalize.bookgraph_shadow import build_bookgraph_shadow
 from ..normalize.core import (
     _normalize_qwen_evidence_paths,
     _qwen_marker_locator_artifact_dir,
@@ -115,6 +116,10 @@ def parse_args() -> argparse.Namespace:
         help="Write a summary JSON of reconcile.notes function/method call counts for this normalization run",
     )
     p.add_argument("--output", default="canonical.json", help="Output canonical JSON path")
+    p.add_argument(
+        "--bookgraph-output",
+        help="Optional shadow BookGraph canonical_v2.json output path for development validation",
+    )
     p.add_argument("--doc-id", default=None)
     p.add_argument("--title", default=None)
     p.add_argument("--language", default="zh-CN")
@@ -153,6 +158,13 @@ def main() -> None:
     validate_document(canonical)
     with open(out, "w", encoding="utf-8") as f:
         json.dump(canonical, f, ensure_ascii=False, indent=2)
+    if args.bookgraph_output:
+        bookgraph = build_bookgraph_shadow(canonical)
+        validate_bookgraph(bookgraph)
+        bookgraph_out = Path(args.bookgraph_output)
+        bookgraph_out.parent.mkdir(parents=True, exist_ok=True)
+        with open(bookgraph_out, "w", encoding="utf-8") as f:
+            json.dump(bookgraph, f, ensure_ascii=False, indent=2)
     report_path, report = write_note_ref_gap_report(canonical, out)
     print(
         f"Wrote {out} with {len(canonical['blocks'])} blocks and {len(canonical['toc'])} toc entries"

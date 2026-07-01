@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
-from inkline.canonical import validate_document
+from inkline.canonical import validate_bookgraph, validate_document
 from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_OLLAMA_KEEP_ALIVE, DEFAULT_QWEN_MODEL
 from inkline.parse.state import write_run_state
 from inkline.parse.types import ParseRequest, ParseResult
@@ -42,6 +42,7 @@ class MinerUParser:
         method = str(request.options.get("method", self.method))
         marker_locator_repair = bool(request.options.get("marker_locator_repair", False))
         marker_locator_page_dpi = int(request.options.get("marker_locator_page_dpi", 150))
+        bookgraph_output = request.options.get("bookgraph_output")
         document = ingest_pdf_with_mineru(
             request.input_path,
             backend=backend,
@@ -50,6 +51,7 @@ class MinerUParser:
             language=request.language,
             marker_locator_repair=marker_locator_repair,
             marker_locator_page_dpi=marker_locator_page_dpi,
+            bookgraph_output=Path(bookgraph_output) if bookgraph_output else None,
         )
         return ParseResult(
             document=document,
@@ -74,6 +76,7 @@ def normalize_mineru_outputs(
     vlm_model: dict[str, Any] | None = None,
     marker_locator_repair: bool = False,
     marker_locator_page_dpi: int = 150,
+    bookgraph_output: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run the MinerU normalization pipeline programmatically.
 
@@ -116,6 +119,7 @@ def normalize_mineru_outputs(
         marker_locator_timing_log=None,
         note_recovery_mode="qwen",
         note_trace_log=None,
+        bookgraph_output=str(bookgraph_output) if bookgraph_output else None,
         parser_mode="vlm",
         mineru_version=mineru_version,
         mineru_vl_utils_version=mineru_vl_utils_version,
@@ -136,6 +140,7 @@ def normalize_mineru_outputs(
     import json
 
     out.write_text(json.dumps(canonical, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_bookgraph_shadow_if_requested(canonical, args.bookgraph_output)
     write_note_ref_gap_report(canonical, out)
     return canonical
 
@@ -150,6 +155,7 @@ def ingest_pdf_with_mineru(
     language: str = "zh-CN",
     marker_locator_repair: bool = False,
     marker_locator_page_dpi: int = 150,
+    bookgraph_output: str | Path | None = None,
 ) -> dict[str, Any]:
     if engine != "mineru":
         raise ValueError(f"Unsupported PDF engine: {engine}")
@@ -175,6 +181,7 @@ def ingest_pdf_with_mineru(
         vlm_model=version_info.get("vlm_model"),
         marker_locator_repair=marker_locator_repair,
         marker_locator_page_dpi=marker_locator_page_dpi,
+        bookgraph_output=bookgraph_output,
     )
 
 
@@ -318,6 +325,20 @@ def _single_latest(root: Path, pattern: str, *, required: bool = True) -> Path |
             raise FileNotFoundError(f"MinerU did not produce {pattern} under {root}")
         return None
     return matches[-1]
+
+
+def _write_bookgraph_shadow_if_requested(
+    canonical: dict[str, Any], bookgraph_output: str | Path | None
+) -> None:
+    if not bookgraph_output:
+        return
+    from inkline.parsers.mineru.normalize.bookgraph_shadow import build_bookgraph_shadow
+
+    graph = build_bookgraph_shadow(canonical)
+    validate_bookgraph(graph)
+    out = Path(bookgraph_output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(graph, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _now_iso() -> str:

@@ -5,10 +5,11 @@ import os
 from pathlib import Path
 
 import inkline.parsers.mineru.bridge as mineru_bridge
-from inkline.canonical import BLOCK_TYPES, validate_document
+from inkline.canonical import BLOCK_TYPES, validate_bookgraph, validate_document
 from inkline.llm import DEFAULT_QWEN_MODEL
 from inkline.parse import ParseRequest
 from inkline.parsers.mineru import normalize_mineru_outputs
+from inkline.parsers.mineru.app import cli as mineru_cli
 from inkline.parsers.mineru.bridge import MinerUParser
 
 
@@ -51,11 +52,9 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
         json.dumps(
             [
                 [
-                    {
-                        "type": "paragraph",
-                        "bbox": [100, 100, 900, 180],
-                        "content": {"text": "A minimal MinerU paragraph."},
-                    }
+                    _text_item(
+                        "paragraph", "A minimal MinerU paragraph.", [100, 100, 900, 180]
+                    )
                 ]
             ]
         ),
@@ -115,6 +114,108 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["canonical"] == "canonical.json"
     assert report["summary"]["missing_body_ref_notes"] == 0
+
+
+def test_normalize_mineru_outputs_writes_optional_bookgraph_shadow(tmp_path) -> None:
+    content_list_v2 = tmp_path / "sample_content_list_v2.json"
+    middle = tmp_path / "sample_middle.json"
+    output = tmp_path / "canonical.json"
+    bookgraph_output = tmp_path / "canonical_v2.json"
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    _text_item(
+                        "paragraph", "A minimal MinerU paragraph.", [100, 100, 900, 180]
+                    )
+                ]
+            ]
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(
+        json.dumps({"pdf_info": [{"page_size": [1000, 1400]}]}),
+        encoding="utf-8",
+    )
+
+    normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        model=None,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        bookgraph_output=bookgraph_output,
+        doc_id="sample",
+        title="Sample",
+        language="en",
+    )
+
+    graph = json.loads(bookgraph_output.read_text(encoding="utf-8"))
+    validate_bookgraph(graph)
+    assert graph["metadata"]["schema_name"] == "inkline_bookgraph"
+    assert graph["nodes"]
+
+
+def test_normalize_mineru_outputs_does_not_write_bookgraph_shadow_by_default(tmp_path) -> None:
+    content_list_v2 = tmp_path / "sample_content_list_v2.json"
+    middle = tmp_path / "sample_middle.json"
+    output = tmp_path / "canonical.json"
+    bookgraph_output = tmp_path / "canonical_v2.json"
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    {
+                        "type": "paragraph",
+                        "bbox": [100, 100, 900, 180],
+                        "content": {"text": "A minimal MinerU paragraph."},
+                    }
+                ]
+            ]
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(
+        json.dumps({"pdf_info": [{"page_size": [1000, 1400]}]}),
+        encoding="utf-8",
+    )
+
+    normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        model=None,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        doc_id="sample",
+        title="Sample",
+        language="en",
+    )
+
+    assert not bookgraph_output.exists()
+
+
+def test_mineru_cli_accepts_bookgraph_output_argument(monkeypatch, tmp_path) -> None:
+    bookgraph_output = tmp_path / "canonical_v2.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "mineru-to-canonical",
+            "--content-list-v2",
+            "content_list_v2.json",
+            "--middle",
+            "middle.json",
+            "--output",
+            "canonical.json",
+            "--bookgraph-output",
+            str(bookgraph_output),
+        ],
+    )
+
+    args = mineru_cli.parse_args()
+
+    assert args.bookgraph_output == str(bookgraph_output)
 
 
 def test_small_pdf_page_size_uses_content_coordinate_layout(tmp_path) -> None:
@@ -1077,3 +1178,35 @@ def test_mineru_parser_disables_qwen_marker_repair_at_150_dpi_by_default(
 
     assert captured["marker_locator_repair"] is False
     assert captured["marker_locator_page_dpi"] == 150
+
+
+def test_mineru_parser_passes_optional_bookgraph_output(tmp_path, monkeypatch) -> None:
+    captured = {}
+
+    def fake_ingest(input_pdf, **kwargs):
+        captured.update(kwargs)
+        return {
+            "metadata": {
+                "schema_version": "1.0",
+                "doc_id": "sample",
+                "title": "Sample",
+                "language": "en",
+                "source_file": str(input_pdf),
+                "parser_name": "mineru",
+            },
+            "blocks": [],
+            "toc": [],
+        }
+
+    monkeypatch.setattr(mineru_bridge, "ingest_pdf_with_mineru", fake_ingest)
+    bookgraph_output = tmp_path / "canonical_v2.json"
+    request = ParseRequest(
+        tmp_path / "sample.pdf",
+        tmp_path / "canonical.json",
+        language="en",
+        options={"bookgraph_output": bookgraph_output},
+    )
+
+    MinerUParser().parse(request)
+
+    assert captured["bookgraph_output"] == bookgraph_output
