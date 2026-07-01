@@ -255,6 +255,18 @@ Phase 3.5 为 page-local body lane profile 增加质量门槛：
 
 这一层仍然只使用 bbox、spans、page size 和 reference count。它的目标是降低坏 profile 带来的误判，不追求 display_block 召回。在 `丝绸之路新史` smoke 中，accepted profiles 为 217 页，rejected profiles 包含 44 个参考不足、40 个宽度不稳定、1 个极端 body width；shadow path 的 display classification 从 1 个收敛到 0 个。
 
+### Phase 3.6 Cross-page TextUnit aggregation
+
+Phase 3.6 为 TextUnit aggregation 增加保守的跨页段落续接：
+
+- 只处理相邻页的 `paragraph` TextUnit。
+- 前一页 bbox 必须接近页底，后一页 bbox 必须接近页顶。
+- 左边界必须对齐，水平重叠必须足够高。
+- 合并后 `pages` 和 `spans` 保留多页证据，`bbox` 保留起始页 bbox，不做跨页 bbox union。
+- 合并原因进入 `attrs.merge_reasons = ["cross_page_boundary_continuation"]`，BookGraph node attrs 透传该审计信息。
+
+这一层仍然不读取文本含义，也不基于标点、词语或句意判断段落是否连续。它只表达页边界处排版连续的几何事实。
+
 ## display_block 定义
 
 `display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中通过排版和结构证据独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。

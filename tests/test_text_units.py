@@ -33,6 +33,10 @@ def _document(observations: list[dict]) -> dict:
     )
 
 
+def _document_with_pages(observations: list[dict], pages: list[dict]) -> dict:
+    return make_observed_document(_metadata(), pages, observations)
+
+
 def test_adjacent_body_observations_merge_into_one_text_unit() -> None:
     document = _document(
         [
@@ -205,6 +209,86 @@ def test_null_bbox_prevents_geometry_merge() -> None:
 
     assert ignored == {}
     assert [unit["text"] for unit in units] == ["First", "Second"]
+
+
+def test_page_boundary_body_observations_merge_across_adjacent_pages() -> None:
+    document = _document_with_pages(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Page bottom",
+                page=1,
+                bbox=[100, 900, 700, 980],
+                spans=[{"page": 1, "bbox": [100, 900, 700, 980]}],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Page top",
+                page=2,
+                bbox=[102, 30, 690, 90],
+                spans=[{"page": 2, "bbox": [102, 30, 690, 90]}],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+        ],
+        [
+            make_observed_page(1, width=1000, height=1000),
+            make_observed_page(2, width=1000, height=1000),
+        ],
+    )
+
+    units, ignored = build_text_units(document)
+
+    assert ignored == {}
+    assert len(units) == 1
+    unit = units[0]
+    assert unit["text"] == "Page bottom\nPage top"
+    assert unit["page"] == 1
+    assert unit["pages"] == [1, 2]
+    assert unit["bbox"] == [100, 900, 700, 980]
+    assert unit["spans"] == [
+        {"page": 1, "bbox": [100, 900, 700, 980]},
+        {"page": 2, "bbox": [102, 30, 690, 90]},
+    ]
+    assert unit["attrs"]["merge_reasons"] == ["cross_page_boundary_continuation"]
+
+
+def test_non_boundary_body_observations_do_not_merge_across_pages() -> None:
+    document = _document_with_pages(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Middle of page",
+                page=1,
+                bbox=[100, 500, 700, 580],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Page top",
+                page=2,
+                bbox=[102, 30, 690, 90],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+        ],
+        [
+            make_observed_page(1, width=1000, height=1000),
+            make_observed_page(2, width=1000, height=1000),
+        ],
+    )
+
+    units, ignored = build_text_units(document)
+
+    assert ignored == {}
+    assert [unit["text"] for unit in units] == ["Middle of page", "Page top"]
 
 
 def test_layout_classifier_marks_inset_narrow_body_unit_as_display_block() -> None:

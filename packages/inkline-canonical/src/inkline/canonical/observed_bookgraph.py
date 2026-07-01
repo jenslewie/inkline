@@ -89,7 +89,7 @@ def _node_from_unit(unit: dict[str, Any], node_id: str, evidence_id: str) -> dic
         "role_hints": list(unit["role_hints"]),
     }
     unit_attrs = unit.get("attrs") or {}
-    for key in ("layout_role", "layout_classification"):
+    for key in ("layout_role", "layout_classification", "merge_reasons"):
         if key in unit_attrs:
             attrs[key] = deepcopy(unit_attrs[key])
     inline_runs = unit_attrs.get("inline_runs")

@@ -94,6 +94,38 @@ def _adjacent_body_document() -> dict:
     )
 
 
+def _cross_page_body_document() -> dict:
+    return make_observed_document(
+        _metadata(),
+        [
+            make_observed_page(1, width=1000, height=1000),
+            make_observed_page(2, width=1000, height=1000),
+        ],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Page bottom",
+                page=1,
+                bbox=[100, 900, 700, 980],
+                spans=[{"page": 1, "bbox": [100, 900, 700, 980]}],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Page top",
+                page=2,
+                bbox=[102, 30, 690, 90],
+                spans=[{"page": 2, "bbox": [102, 30, 690, 90]}],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+        ],
+    )
+
+
 def _inset_body_document() -> dict:
     return make_observed_document(
         _metadata(),
@@ -146,6 +178,26 @@ def test_build_bookgraph_from_observed_uses_text_unit_aggregation() -> None:
         "observation_ids": ["obs000001", "obs000002"],
         "parser_payloads": [{"raw_type": "paragraph"}, {"raw_type": "paragraph"}],
     }
+
+
+def test_build_bookgraph_from_observed_preserves_cross_page_text_unit_evidence() -> None:
+    graph = build_bookgraph_from_observed(_cross_page_body_document())
+
+    validate_bookgraph(graph)
+    assert [node["node_type"] for node in graph["nodes"]] == ["paragraph"]
+    assert graph["nodes"][0]["text"] == "Page bottom\nPage top"
+    assert graph["nodes"][0]["attrs"]["source_observation_ids"] == [
+        "obs000001",
+        "obs000002",
+    ]
+    assert graph["nodes"][0]["attrs"]["merge_reasons"] == [
+        "cross_page_boundary_continuation"
+    ]
+    assert graph["evidence"][0]["pages"] == [1, 2]
+    assert graph["evidence"][0]["spans"] == [
+        {"page": 1, "bbox": [100, 900, 700, 980]},
+        {"page": 2, "bbox": [102, 30, 690, 90]},
+    ]
 
 
 def test_build_bookgraph_from_observed_uses_layout_classification() -> None:

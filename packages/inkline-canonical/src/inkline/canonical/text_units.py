@@ -13,14 +13,16 @@ def build_text_units(document: dict[str, Any]) -> tuple[list[dict[str, Any]], di
     validate_observed_document(document)
     units: list[dict[str, Any]] = []
     ignored_counts: Counter[str] = Counter()
+    page_heights = _page_heights(document["pages"])
 
     for observation in _ordered_observations(document["observations"]):
         unit_type = _unit_type(observation)
         if unit_type is None:
             ignored_counts[str(observation["kind"])] += 1
             continue
-        if units and _can_merge(units[-1], observation, unit_type):
-            _merge_observation(units[-1], observation)
+        merge_reason = _merge_reason(units[-1], observation, unit_type, page_heights) if units else None
+        if merge_reason:
+            _merge_observation(units[-1], observation, merge_reason)
             continue
         units.append(_unit_from_observation(observation, len(units) + 1, unit_type))
 
@@ -38,6 +40,14 @@ def _ordered_observations(observations: list[dict[str, Any]]) -> list[dict[str, 
             str(observation["observation_id"]),
         ),
     )
+
+
+def _page_heights(pages: list[dict[str, Any]]) -> dict[int, float]:
+    return {
+        int(page["page"]): float(page["height"])
+        for page in pages
+        if isinstance(page.get("page"), int) and isinstance(page.get("height"), int | float)
+    }
 
 
 def _reading_order(observation: dict[str, Any]) -> int:
@@ -92,13 +102,24 @@ def _unit_attrs(observation: dict[str, Any]) -> dict[str, Any]:
     return attrs
 
 
-def _can_merge(
-    previous_unit: dict[str, Any], observation: dict[str, Any], unit_type: str
-) -> bool:
+def _merge_reason(
+    previous_unit: dict[str, Any],
+    observation: dict[str, Any],
+    unit_type: str,
+    page_heights: dict[int, float],
+) -> str | None:
     if unit_type != "paragraph" or previous_unit["unit_type"] != "paragraph":
-        return False
-    if previous_unit["page"] != observation["page"]:
-        return False
+        return None
+    if previous_unit["page"] == observation["page"]:
+        return "same_page_geometry_continuation" if _same_page_merge(previous_unit, observation) else None
+    return (
+        "cross_page_boundary_continuation"
+        if _cross_page_merge(previous_unit, observation, page_heights)
+        else None
+    )
+
+
+def _same_page_merge(previous_unit: dict[str, Any], observation: dict[str, Any]) -> bool:
     previous_bbox = previous_unit.get("bbox")
     bbox = observation.get("bbox")
     if not _valid_bbox(previous_bbox) or not _valid_bbox(bbox):
@@ -111,18 +132,51 @@ def _can_merge(
     )
 
 
-def _merge_observation(unit: dict[str, Any], observation: dict[str, Any]) -> None:
+def _cross_page_merge(
+    previous_unit: dict[str, Any],
+    observation: dict[str, Any],
+    page_heights: dict[int, float],
+) -> bool:
+    previous_page = _last_page(previous_unit)
+    page = int(observation["page"])
+    if previous_page + 1 != page:
+        return False
+    previous_bbox = _last_bbox_for_page(previous_unit, previous_page)
+    bbox = observation.get("bbox")
+    previous_height = page_heights.get(previous_page)
+    current_height = page_heights.get(page)
+    if (
+        not _valid_bbox(previous_bbox)
+        or not _valid_bbox(bbox)
+        or previous_height is None
+        or current_height is None
+    ):
+        return False
+    return (
+        _near_page_bottom(previous_bbox, previous_height)
+        and _near_page_top(bbox, current_height)
+        and _left_delta(previous_bbox, bbox) <= _max_left_delta(previous_bbox)
+        and _horizontal_overlap_ratio(previous_bbox, bbox) >= 0.6
+    )
+
+
+def _merge_observation(unit: dict[str, Any], observation: dict[str, Any], merge_reason: str) -> None:
     text = str(observation.get("text") or "")
     if text:
         unit["text"] = f"{unit['text']}\n{text}" if unit["text"] else text
     bbox = observation.get("bbox")
-    if _valid_bbox(unit.get("bbox")) and _valid_bbox(bbox):
+    if unit["page"] == observation["page"] and _valid_bbox(unit.get("bbox")) and _valid_bbox(bbox):
         unit["bbox"] = _union_bbox(unit["bbox"], bbox)
+    page = int(observation["page"])
+    if page not in unit["pages"]:
+        unit["pages"].append(page)
     unit["spans"].extend(deepcopy(observation.get("spans") or []))
     unit["observation_ids"].append(observation["observation_id"])
     if observation["role_hint"] not in unit["role_hints"]:
         unit["role_hints"].append(observation["role_hint"])
     unit["parser_payloads"].append(deepcopy(observation.get("parser_payload") or {}))
+    if merge_reason == "cross_page_boundary_continuation":
+        unit["attrs"].setdefault("merge_reasons", []).append(merge_reason)
     _merge_attrs(unit["attrs"], observation)
 
 
@@ -152,6 +206,23 @@ def _bbox_left(value: Any) -> float:
     return float(value[0]) if _valid_bbox(value) else 999999.0
 
 
+def _last_page(unit: dict[str, Any]) -> int:
+    return int(unit.get("pages", [unit["page"]])[-1])
+
+
+def _last_bbox_for_page(unit: dict[str, Any], page: int) -> Any:
+    for span in reversed(unit.get("spans") or []):
+        if (
+            isinstance(span, dict)
+            and int(span.get("page", page)) == page
+            and _valid_bbox(span.get("bbox"))
+        ):
+            return span["bbox"]
+    if int(unit["page"]) == page:
+        return unit.get("bbox")
+    return None
+
+
 def _vertical_gap(left: list[float], right: list[float]) -> float:
     return float(right[1]) - float(left[3])
 
@@ -166,6 +237,14 @@ def _left_delta(left: list[float], right: list[float]) -> float:
 
 def _max_left_delta(bbox: list[float]) -> float:
     return max(24.0, (float(bbox[2]) - float(bbox[0])) * 0.08)
+
+
+def _near_page_bottom(bbox: list[float], page_height: float) -> bool:
+    return float(bbox[3]) >= page_height * 0.88
+
+
+def _near_page_top(bbox: list[float], page_height: float) -> bool:
+    return float(bbox[1]) <= page_height * 0.15
 
 
 def _horizontal_overlap_ratio(left: list[float], right: list[float]) -> float:
