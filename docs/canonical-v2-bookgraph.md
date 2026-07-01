@@ -334,11 +334,11 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/check_bookgraph_golden_pa
 
 修正后的 `/tmp/inkline-phase3-display-fix-silk-canonical_v2_observed.json` 仍然不是 release canonical，但 golden parity 已能捕获并量化这个维度：
 
-- golden `display_block = 47`，observed BookGraph `display_block = 43`，count recall `0.9149`。
+- golden `display_block = 47`，observed BookGraph `display_block = 43`，net count delta `-4`，count recall `0.9149`。
 - `display_block` text character recall `0.7464`。
-- golden `heading = 24`，observed BookGraph `heading = 36`，count ratio `1.5`。
+- golden `heading = 24`，observed BookGraph `heading = 36`，net count delta `+12`，count ratio `1.5`。
 
-因此 Phase 3 不能只按 schema/reading_order/evidence pass 判定完成。display_block recall、display text recall 和 heading over-promotion 必须作为进入 Phase 4 前的结构验收门槛；如果未达标，必须修正或写明 accepted exception。
+这些 net count deltas 只能说明结构健康风险，不能证明具体内容差异。例如 observed `display_block` 比 golden 少 4 个，可能是少识别 4 个，也可能是误把 2 个 paragraph 识别成 display_block、同时漏掉 6 个真正 display_block。`heading` 同理。因此 Phase 3 不能只按 schema/reading_order/evidence 或总量统计 pass 判定完成。进入 Phase 4 前还需要 golden-guided content alignment audit，把 matched、false positive、false negative 和 type mismatch 分开统计；最终修复仍只能使用 bbox、spans、page、reading_order、role_hint、page profile、observation kind 和 provenance 等结构信号，不能引入文本语义规则。
 
 ## display_block 定义
 
