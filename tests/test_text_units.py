@@ -277,6 +277,50 @@ def test_layout_classifier_keeps_single_body_unit_as_paragraph() -> None:
     assert "layout_classification" not in classified[0]["attrs"]
 
 
+def test_layout_classifier_builds_body_lane_from_text_unit_spans() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body paragraph",
+                page=1,
+                bbox=[100, 100, 900, 190],
+                spans=[
+                    {"page": 1, "bbox": [100, 100, 900, 130]},
+                    {"page": 1, "bbox": [100, 130, 900, 160]},
+                    {"page": 1, "bbox": [100, 160, 900, 190]},
+                ],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Inset text",
+                page=1,
+                bbox=[260, 230, 730, 260],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+        ]
+    )
+    units, _ = build_text_units(document)
+
+    classified = classify_text_units_by_layout(units, document["pages"])
+    audit = audit_text_unit_layout(units, document["pages"])
+
+    assert [unit["unit_type"] for unit in classified] == ["paragraph", "display_block"]
+    assert audit["summary"] == {
+        "pages_with_profiles": 1,
+        "paragraph_units": 2,
+        "classified_display_blocks": 1,
+        "skipped_no_bbox": 0,
+        "skipped_no_profile": 0,
+    }
+    assert audit["page_profiles"][0]["reference_unit_count"] == 4
+
+
 def test_layout_audit_reports_page_profiles_and_candidate_signals_without_text() -> None:
     document = _document(
         [

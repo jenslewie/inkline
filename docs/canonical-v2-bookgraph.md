@@ -232,6 +232,17 @@ audit report 只包含 parser-neutral 的结构和几何证据：
 
 report 不保存正文文本，也不把 parser-specific raw label 暴露为顶层字段。observed shadow BookGraph 只保留 `metadata.shadow_text_unit_layout_audit_summary`，完整 audit JSON 是开发期验收 artifact，不是 release canonical contract。
 
+### Phase 3.4 Span-first body lane profiles
+
+Phase 3.4 改进 TextUnit layout classification 的 body lane 建模：
+
+- 建立 page-local body lane 时，优先使用 `TextUnit.spans[*].bbox` 作为参考片段。
+- 如果 TextUnit 没有可用 spans，再回退到 TextUnit 自身 `bbox`。
+- 这允许一个被聚合后的长 paragraph TextUnit 贡献多条行级 bbox，从而避免“同页 TextUnit 数不足 3 就无法建 profile”的问题。
+- 这仍然只使用通用几何字段，不依赖 parser 名称、raw label 或文本语义。
+
+在 `丝绸之路新史` smoke 中，这一步把 layout profile 覆盖从 12 页提升到 258 页，并把 `skipped_no_profile` 从 307 降到 50。更稳定的 body lane 也让 shadow path 的 display classification 从 4 个收敛到 1 个，说明它减少了旧单元级 bbox profile 带来的误判。
+
 ## display_block 定义
 
 `display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中通过排版和结构证据独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。

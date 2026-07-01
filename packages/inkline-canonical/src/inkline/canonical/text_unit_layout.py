@@ -67,10 +67,8 @@ def _page_profiles(units: list[dict[str, Any]], pages: list[dict[str, Any]]) -> 
     for unit in units:
         if unit.get("unit_type") != "paragraph":
             continue
-        bbox = unit.get("bbox")
-        if not _valid_bbox(bbox):
-            continue
-        grouped.setdefault(int(unit["page"]), []).append([float(value) for value in bbox])
+        page = int(unit["page"])
+        grouped.setdefault(page, []).extend(_reference_bboxes(unit, page))
 
     profiles: dict[int, dict[str, Any]] = {}
     for page, bboxes in grouped.items():
@@ -106,6 +104,27 @@ def _page_profile_records(page_profiles: dict[int, dict[str, Any]]) -> list[dict
         }
         for page, profile in sorted(page_profiles.items())
     ]
+
+
+def _reference_bboxes(unit: dict[str, Any], page: int) -> list[list[float]]:
+    span_bboxes = [
+        [float(value) for value in span["bbox"]]
+        for span in unit.get("spans") or []
+        if isinstance(span, dict)
+        and _span_page(span, page) == page
+        and _valid_bbox(span.get("bbox"))
+    ]
+    if span_bboxes:
+        return span_bboxes
+    bbox = unit.get("bbox")
+    if _valid_bbox(bbox):
+        return [[float(value) for value in bbox]]
+    return []
+
+
+def _span_page(span: dict[str, Any], fallback: int) -> int:
+    value = span.get("page")
+    return int(value) if isinstance(value, int) else fallback
 
 
 def _unit_record(
