@@ -5,7 +5,12 @@ import os
 from pathlib import Path
 
 import inkline.parsers.mineru.bridge as mineru_bridge
-from inkline.canonical import BLOCK_TYPES, validate_bookgraph, validate_document
+from inkline.canonical import (
+    BLOCK_TYPES,
+    validate_bookgraph,
+    validate_document,
+    validate_observed_document,
+)
 from inkline.llm import DEFAULT_QWEN_MODEL
 from inkline.parse import ParseRequest
 from inkline.parsers.mineru import normalize_mineru_outputs
@@ -157,6 +162,54 @@ def test_normalize_mineru_outputs_writes_optional_bookgraph_shadow(tmp_path) -> 
     assert graph["nodes"]
 
 
+def test_normalize_mineru_outputs_writes_optional_observed_shadow_outputs(tmp_path) -> None:
+    content_list_v2 = tmp_path / "sample_content_list_v2.json"
+    middle = tmp_path / "sample_middle.json"
+    output = tmp_path / "canonical.json"
+    observed_output = tmp_path / "observed_document.json"
+    observed_bookgraph_output = tmp_path / "canonical_v2_observed.json"
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    _text_item(
+                        "paragraph", "A minimal MinerU paragraph.", [100, 100, 900, 180]
+                    )
+                ]
+            ]
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(
+        json.dumps({"pdf_info": [{"page_size": [1000, 1400]}]}),
+        encoding="utf-8",
+    )
+
+    normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        model=None,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        observed_output=observed_output,
+        bookgraph_from_observed_output=observed_bookgraph_output,
+        doc_id="sample",
+        title="Sample",
+        language="en",
+    )
+
+    observed = json.loads(observed_output.read_text(encoding="utf-8"))
+    validate_observed_document(observed)
+    assert observed["observations"][0]["kind"] == "text_region"
+    assert "raw_type" not in observed["observations"][0]
+
+    graph = json.loads(observed_bookgraph_output.read_text(encoding="utf-8"))
+    validate_bookgraph(graph)
+    assert graph["evidence"][0]["source_kind"] == "observation"
+    assert graph["nodes"]
+
+
 def test_normalize_mineru_outputs_does_not_write_bookgraph_shadow_by_default(tmp_path) -> None:
     content_list_v2 = tmp_path / "sample_content_list_v2.json"
     middle = tmp_path / "sample_middle.json"
@@ -198,6 +251,8 @@ def test_normalize_mineru_outputs_does_not_write_bookgraph_shadow_by_default(tmp
 
 def test_mineru_cli_accepts_bookgraph_output_argument(monkeypatch, tmp_path) -> None:
     bookgraph_output = tmp_path / "canonical_v2.json"
+    observed_output = tmp_path / "observed_document.json"
+    observed_bookgraph_output = tmp_path / "canonical_v2_observed.json"
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -210,12 +265,18 @@ def test_mineru_cli_accepts_bookgraph_output_argument(monkeypatch, tmp_path) -> 
             "canonical.json",
             "--bookgraph-output",
             str(bookgraph_output),
+            "--observed-output",
+            str(observed_output),
+            "--bookgraph-from-observed-output",
+            str(observed_bookgraph_output),
         ],
     )
 
     args = mineru_cli.parse_args()
 
     assert args.bookgraph_output == str(bookgraph_output)
+    assert args.observed_output == str(observed_output)
+    assert args.bookgraph_from_observed_output == str(observed_bookgraph_output)
 
 
 def test_small_pdf_page_size_uses_content_coordinate_layout(tmp_path) -> None:
@@ -1200,13 +1261,21 @@ def test_mineru_parser_passes_optional_bookgraph_output(tmp_path, monkeypatch) -
 
     monkeypatch.setattr(mineru_bridge, "ingest_pdf_with_mineru", fake_ingest)
     bookgraph_output = tmp_path / "canonical_v2.json"
+    observed_output = tmp_path / "observed_document.json"
+    observed_bookgraph_output = tmp_path / "canonical_v2_observed.json"
     request = ParseRequest(
         tmp_path / "sample.pdf",
         tmp_path / "canonical.json",
         language="en",
-        options={"bookgraph_output": bookgraph_output},
+        options={
+            "bookgraph_output": bookgraph_output,
+            "observed_output": observed_output,
+            "bookgraph_from_observed_output": observed_bookgraph_output,
+        },
     )
 
     MinerUParser().parse(request)
 
     assert captured["bookgraph_output"] == bookgraph_output
+    assert captured["observed_output"] == observed_output
+    assert captured["bookgraph_from_observed_output"] == observed_bookgraph_output

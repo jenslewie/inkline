@@ -6,7 +6,12 @@ import argparse
 import json
 from pathlib import Path
 
-from inkline.canonical import validate_bookgraph, validate_document
+from inkline.canonical import (
+    build_bookgraph_from_observed,
+    validate_bookgraph,
+    validate_document,
+    validate_observed_document,
+)
 from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_OLLAMA_KEEP_ALIVE, DEFAULT_QWEN_MODEL
 
 from ..analysis.note_gap_report import write_note_ref_gap_report
@@ -19,6 +24,7 @@ from ..normalize.core import (
     _qwen_marker_locator_artifact_dir,
     build_canonical,
 )
+from ..normalize.observed_shadow import build_observed_document_shadow
 from ..reconcile import resolve_source_pdf_path
 
 
@@ -120,6 +126,14 @@ def parse_args() -> argparse.Namespace:
         "--bookgraph-output",
         help="Optional shadow BookGraph canonical_v2.json output path for development validation",
     )
+    p.add_argument(
+        "--observed-output",
+        help="Optional parser-neutral observed_document.json shadow output path",
+    )
+    p.add_argument(
+        "--bookgraph-from-observed-output",
+        help="Optional BookGraph output built from observed_document shadow data",
+    )
     p.add_argument("--doc-id", default=None)
     p.add_argument("--title", default=None)
     p.add_argument("--language", default="zh-CN")
@@ -165,6 +179,26 @@ def main() -> None:
         bookgraph_out.parent.mkdir(parents=True, exist_ok=True)
         with open(bookgraph_out, "w", encoding="utf-8") as f:
             json.dump(bookgraph, f, ensure_ascii=False, indent=2)
+    if args.observed_output or args.bookgraph_from_observed_output:
+        observed = build_observed_document_shadow(
+            pages=pages,
+            page_sizes=page_sizes,
+            metadata=canonical["metadata"],
+            assets=canonical.get("assets") or {},
+        )
+        validate_observed_document(observed)
+        if args.observed_output:
+            observed_out = Path(args.observed_output)
+            observed_out.parent.mkdir(parents=True, exist_ok=True)
+            with open(observed_out, "w", encoding="utf-8") as f:
+                json.dump(observed, f, ensure_ascii=False, indent=2)
+        if args.bookgraph_from_observed_output:
+            observed_bookgraph = build_bookgraph_from_observed(observed)
+            validate_bookgraph(observed_bookgraph)
+            observed_bookgraph_out = Path(args.bookgraph_from_observed_output)
+            observed_bookgraph_out.parent.mkdir(parents=True, exist_ok=True)
+            with open(observed_bookgraph_out, "w", encoding="utf-8") as f:
+                json.dump(observed_bookgraph, f, ensure_ascii=False, indent=2)
     report_path, report = write_note_ref_gap_report(canonical, out)
     print(
         f"Wrote {out} with {len(canonical['blocks'])} blocks and {len(canonical['toc'])} toc entries"
