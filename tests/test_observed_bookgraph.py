@@ -164,6 +164,19 @@ def test_build_bookgraph_from_observed_uses_layout_classification() -> None:
     ]
 
 
+def test_build_bookgraph_from_observed_records_layout_audit_summary() -> None:
+    graph = build_bookgraph_from_observed(_inset_body_document())
+
+    assert graph["metadata"]["shadow_text_unit_layout_audit_summary"] == {
+        "pages_with_profiles": 1,
+        "paragraph_units": 3,
+        "classified_display_blocks": 1,
+        "skipped_no_bbox": 0,
+        "skipped_no_profile": 0,
+    }
+    assert "shadow_text_unit_layout_audit" not in graph["metadata"]
+
+
 def test_build_bookgraph_from_observed_maps_explicit_structure_hints() -> None:
     graph = build_bookgraph_from_observed(_observed_document())
 

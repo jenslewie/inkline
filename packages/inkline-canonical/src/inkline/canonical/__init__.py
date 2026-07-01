@@ -30,7 +30,10 @@ from inkline.canonical.schema import (
     sample_document,
     validate_document,
 )
-from inkline.canonical.text_unit_layout import classify_text_units_by_layout
+from inkline.canonical.text_unit_layout import (
+    audit_text_unit_layout,
+    classify_text_units_by_layout,
+)
 from inkline.canonical.text_units import TEXT_UNIT_TYPES, build_text_units
 from inkline.canonical.types import CanonicalBlock, CanonicalSource, NoteRef
 
@@ -48,6 +51,7 @@ __all__ = [
     "NoteRef",
     "ValidationError",
     "audit_bookgraph",
+    "audit_text_unit_layout",
     "build_bookgraph_from_observed",
     "build_text_units",
     "classify_text_units_by_layout",

@@ -213,6 +213,25 @@ ObservedDocument observations
 
 Phase 3.2 仍然不改变 v1 `canonical.json`、EPUB 或 RAG 默认消费路径。它只是让 observed shadow BookGraph 从“段落候选级 node”前进到“版面分类后的文本 node”。
 
+### Phase 3.3 Layout audit harness
+
+Phase 3.3 为 TextUnit layout classification 增加审计和验收工具：
+
+```bash
+UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_text_unit_layout.py \
+  /tmp/inkline-phase3-observed.json \
+  --output /tmp/inkline-phase3-layout-audit.json
+```
+
+audit report 只包含 parser-neutral 的结构和几何证据：
+
+- `page_profiles`: 每页 body lane、page size、参考 TextUnit 数。
+- `unit_records`: 每个 paragraph TextUnit 的 bbox、width ratio、left/right inset、signals、decision。
+- `summary`: profile 覆盖数、paragraph 数、classified display block 数、跳过原因计数。
+- `ignored_observation_counts`: image/table/page marker 等未进入 TextUnit 的 observation 计数。
+
+report 不保存正文文本，也不把 parser-specific raw label 暴露为顶层字段。observed shadow BookGraph 只保留 `metadata.shadow_text_unit_layout_audit_summary`，完整 audit JSON 是开发期验收 artifact，不是 release canonical contract。
+
 ## display_block 定义
 
 `display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中通过排版和结构证据独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。

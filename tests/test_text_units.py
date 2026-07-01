@@ -3,6 +3,7 @@ from __future__ import annotations
 from inkline.canonical import (
     OBSERVED_SCHEMA_NAME,
     OBSERVED_SCHEMA_VERSION,
+    audit_text_unit_layout,
     make_observation,
     make_observed_document,
     make_observed_page,
@@ -274,3 +275,74 @@ def test_layout_classifier_keeps_single_body_unit_as_paragraph() -> None:
 
     assert [unit["unit_type"] for unit in classified] == ["paragraph"]
     assert "layout_classification" not in classified[0]["attrs"]
+
+
+def test_layout_audit_reports_page_profiles_and_candidate_signals_without_text() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body before",
+                page=1,
+                bbox=[100, 100, 900, 130],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Inset text",
+                page=1,
+                bbox=[260, 170, 730, 200],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Body after",
+                page=1,
+                bbox=[100, 240, 900, 270],
+                role_hint="body_text",
+                attrs={"reading_order": 3},
+            ),
+        ]
+    )
+    units, _ = build_text_units(document)
+
+    audit = audit_text_unit_layout(units, document["pages"])
+
+    assert audit["summary"] == {
+        "pages_with_profiles": 1,
+        "paragraph_units": 3,
+        "classified_display_blocks": 1,
+        "skipped_no_bbox": 0,
+        "skipped_no_profile": 0,
+    }
+    assert audit["page_profiles"] == [
+        {
+            "page": 1,
+            "page_width": 1000.0,
+            "page_height": 1000.0,
+            "body_left": 100.0,
+            "body_right": 900.0,
+            "body_width": 800.0,
+            "reference_unit_count": 3,
+        }
+    ]
+    assert audit["unit_records"][1] == {
+        "unit_id": "tu000002",
+        "page": 1,
+        "original_type": "paragraph",
+        "classified_type": "display_block",
+        "bbox": [260, 170, 730, 200],
+        "width": 470.0,
+        "body_width": 800.0,
+        "width_ratio": 0.5875,
+        "left_inset": 160.0,
+        "right_inset": 170.0,
+        "signals": ["narrower_than_body_lane", "inset_from_body_lane"],
+        "decision": "display_block",
+    }
+    assert "text" not in audit["unit_records"][1]
