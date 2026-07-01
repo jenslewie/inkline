@@ -340,6 +340,41 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/check_bookgraph_golden_pa
 
 这些 net count deltas 只能说明结构健康风险，不能证明具体内容差异。例如 observed `display_block` 比 golden 少 4 个，可能是少识别 4 个，也可能是误把 2 个 paragraph 识别成 display_block、同时漏掉 6 个真正 display_block。`heading` 同理。因此 Phase 3 不能只按 schema/reading_order/evidence 或总量统计 pass 判定完成。进入 Phase 4 前还需要 golden-guided content alignment audit，把 matched、false positive、false negative 和 type mismatch 分开统计；最终修复仍只能使用 bbox、spans、page、reading_order、role_hint、page profile、observation kind 和 provenance 等结构信号，不能引入文本语义规则。
 
+### Phase 3.10 Golden-guided content alignment audit
+
+Phase 3.10 增加 `tools/audit_bookgraph_golden_alignment.py`，用于把 verified golden canonical 和 observed BookGraph 做内容级对齐审计：
+
+```bash
+UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_golden_alignment.py \
+  data/outputs/golden/丝绸之路新史/canonical.json \
+  /tmp/inkline-phase3-display-fix-silk-canonical_v2_observed.json \
+  --summary-only \
+  --output /tmp/inkline-phase3-display-fix-silk-golden-alignment.json
+```
+
+这个工具允许用 normalized text 做审计对齐，因为它只服务人工定位和报告，不参与 runtime 分类。报告会按 target type 输出：
+
+- `matched`: golden 和 observed 内容对齐且类型一致。
+- `false_negative`: golden 是 target type，但 observed 没有同类型对齐。
+- `false_positive`: observed 是 target type，但 golden 没有同类型对齐。
+- `type_mismatch`: 内容能对齐，但类型不同。
+- `observed_candidates` / `golden_candidates`: exact alignment 失败时的近似候选，用于识别 split/merge，而不是训练语义规则。
+
+在 `/tmp/inkline-phase3-display-fix-silk-canonical_v2_observed.json` 上的当前摘要：
+
+| target type | golden | observed | net delta | matched | false negative | false positive | type mismatch |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `display_block` | 47 | 43 | -4 | 21 | 26 | 22 | 9 |
+| `heading` | 24 | 36 | +12 | 14 | 10 | 22 | 2 |
+
+这说明 Phase 3 的剩余问题不是简单的“补 4 个 display”或“删 12 个 heading”。目前看到的主要结构模式包括：
+
+- front matter / copyright / CIP 页存在 split/merge 差异，exact alignment 失败但 candidate similarity 较高。
+- 章节标题常被 observed path 拆成章号、主标题、副标题等多个节点，导致 heading false positive 和 false negative 同时出现。
+- 一批长引文 exact 对齐成功，但 observed 仍为 `paragraph`，属于明确的 `display_block -> paragraph` type mismatch。
+
+这些发现只能指导下一轮结构规则设计；最终修复仍必须回到版面和 provenance 信号，不能把正文含义或特定文本写入分类逻辑。
+
 ## display_block 定义
 
 `display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中通过排版和结构证据独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。
