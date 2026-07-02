@@ -15,13 +15,17 @@ def build_text_units(document: dict[str, Any]) -> tuple[list[dict[str, Any]], di
     ignored_counts: Counter[str] = Counter()
     page_sizes = _page_sizes(document["pages"])
     visual_bboxes = _visual_bboxes(document["observations"])
+    image_bboxes = _region_bboxes(document["observations"], {"image_region"})
+    table_bboxes = _region_bboxes(document["observations"], {"table_region"})
+    ordered_observations = _ordered_observations(document["observations"])
+    caption_title_ids = _visual_caption_title_ids(
+        ordered_observations, image_bboxes, page_sizes
+    )
 
-    for observation in _ordered_observations(document["observations"]):
+    for observation in ordered_observations:
         layout_role = None
-        unit_type = _unit_type(observation, visual_bboxes)
-        if observation["role_hint"] == "title_text" and _near_visual_region(
-            observation, visual_bboxes
-        ):
+        unit_type = _unit_type(observation, caption_title_ids)
+        if observation["observation_id"] in caption_title_ids:
             layout_role = "caption_candidate"
         if unit_type is None:
             ignored_counts[str(observation["kind"])] += 1
@@ -34,6 +38,7 @@ def build_text_units(document: dict[str, Any]) -> tuple[list[dict[str, Any]], di
             continue
         units.append(_unit_from_observation(observation, len(units) + 1, unit_type, layout_role))
 
+    _promote_table_heading_fragments(units, page_sizes, table_bboxes)
     _merge_heading_cluster_fragments(units, page_sizes, visual_bboxes)
     _renumber_units(units)
     return units, dict(sorted(ignored_counts.items()))
@@ -63,9 +68,15 @@ def _page_sizes(pages: list[dict[str, Any]]) -> dict[int, dict[str, float]]:
 
 
 def _visual_bboxes(observations: list[dict[str, Any]]) -> dict[int, list[list[float]]]:
+    return _region_bboxes(observations, {"image_region", "table_region"})
+
+
+def _region_bboxes(
+    observations: list[dict[str, Any]], kinds: set[str]
+) -> dict[int, list[list[float]]]:
     grouped: dict[int, list[list[float]]] = {}
     for observation in observations:
-        if observation.get("kind") not in {"image_region", "table_region"}:
+        if observation.get("kind") not in kinds:
             continue
         bbox = observation.get("bbox")
         if _valid_bbox(bbox):
@@ -75,18 +86,93 @@ def _visual_bboxes(observations: list[dict[str, Any]]) -> dict[int, list[list[fl
     return grouped
 
 
+def _visual_caption_title_ids(
+    observations: list[dict[str, Any]],
+    visual_bboxes: dict[int, list[list[float]]],
+    page_sizes: dict[int, dict[str, float]],
+) -> set[str]:
+    ids: set[str] = set()
+    text_observations_by_page: dict[int, list[dict[str, Any]]] = {}
+    for observation in observations:
+        if observation.get("kind") in {"text_region", "footnote_region"}:
+            text_observations_by_page.setdefault(int(observation["page"]), []).append(
+                observation
+            )
+
+    for page, text_observations in text_observations_by_page.items():
+        visuals = visual_bboxes.get(page) or []
+        if not visuals:
+            continue
+        page_size = page_sizes.get(page, {})
+        for index, observation in enumerate(text_observations[:-1]):
+            if observation.get("role_hint") != "title_text":
+                continue
+            if _near_visual_region(observation, visual_bboxes) and len(text_observations) > 1:
+                ids.add(str(observation["observation_id"]))
+                continue
+            following = text_observations[index + 1]
+            if following.get("role_hint") != "body_text":
+                continue
+            if not _caption_text_group(observation, following):
+                continue
+            if _visual_text_group(observation, following, visuals) or (
+                _visual_dominant_annotation_page(text_observations, visuals, page_size)
+            ):
+                ids.add(str(observation["observation_id"]))
+    return ids
+
+
+def _caption_text_group(title: dict[str, Any], following: dict[str, Any]) -> bool:
+    title_bbox = title.get("bbox")
+    following_bbox = following.get("bbox")
+    if not _valid_bbox(title_bbox) or not _valid_bbox(following_bbox):
+        return False
+    return (
+        0 <= _vertical_gap(title_bbox, following_bbox) <= max(40.0, _height(title_bbox) * 2.0)
+        and (
+            _horizontal_overlap_ratio(title_bbox, following_bbox) >= 0.5
+            or _left_delta(title_bbox, following_bbox) <= 32.0
+        )
+    )
+
+
+def _visual_text_group(
+    title: dict[str, Any],
+    following: dict[str, Any],
+    visual_bboxes: list[list[float]],
+) -> bool:
+    group_bbox = _union_bbox(title["bbox"], following["bbox"])
+    return any(_near_visual_bbox(group_bbox, visual_bbox) for visual_bbox in visual_bboxes)
+
+
+def _visual_dominant_annotation_page(
+    text_observations: list[dict[str, Any]],
+    visual_bboxes: list[list[float]],
+    page_size: dict[str, float],
+) -> bool:
+    if len(visual_bboxes) >= 3:
+        return True
+    page_width = float(page_size.get("width") or 0.0)
+    if page_width <= 0:
+        return False
+    body_widths = [
+        _width(observation["bbox"])
+        for observation in text_observations
+        if observation.get("role_hint") == "body_text" and _valid_bbox(observation.get("bbox"))
+    ]
+    return bool(body_widths) and max(body_widths) <= page_width * 0.45
+
+
 def _reading_order(observation: dict[str, Any]) -> int:
     attrs = observation.get("attrs") if isinstance(observation.get("attrs"), dict) else {}
     value = attrs.get("reading_order")
     return int(value) if isinstance(value, int) else 999999
 
 
-def _unit_type(
-    observation: dict[str, Any], visual_bboxes: dict[int, list[list[float]]]
-) -> str | None:
+def _unit_type(observation: dict[str, Any], caption_title_ids: set[str]) -> str | None:
     role_hint = observation["role_hint"]
     if role_hint == "title_text":
-        if _near_visual_region(observation, visual_bboxes):
+        if observation["observation_id"] in caption_title_ids:
             return "paragraph"
         return "heading"
     if role_hint == "body_text":
@@ -96,6 +182,56 @@ def _unit_type(
     if observation["kind"] == "footnote_region" or role_hint == "footnote_text":
         return "footnote"
     return None
+
+
+def _promote_table_heading_fragments(
+    units: list[dict[str, Any]],
+    page_sizes: dict[int, dict[str, float]],
+    table_bboxes: dict[int, list[list[float]]],
+) -> None:
+    units_by_page: dict[int, list[dict[str, Any]]] = {}
+    for unit in units:
+        units_by_page.setdefault(int(unit["page"]), []).append(unit)
+
+    for page, page_units in units_by_page.items():
+        tables = table_bboxes.get(page) or []
+        if not tables:
+            continue
+        table_top = min(float(bbox[1]) for bbox in tables)
+        page_size = page_sizes.get(page, {})
+        page_width = float(page_size.get("width") or 0.0)
+        if page_width <= 0:
+            continue
+        for index, unit in enumerate(page_units[1:], start=1):
+            previous = page_units[index - 1]
+            if _table_heading_fragment(unit, previous, table_top, page_width):
+                unit["unit_type"] = "heading"
+                unit["attrs"]["structure_promotion"] = "table_heading"
+
+
+def _table_heading_fragment(
+    unit: dict[str, Any],
+    previous: dict[str, Any],
+    table_top: float,
+    page_width: float,
+) -> bool:
+    bbox = unit.get("bbox")
+    previous_bbox = previous.get("bbox")
+    if (
+        unit.get("unit_type") != "paragraph"
+        or previous.get("unit_type") != "heading"
+        or not _valid_bbox(bbox)
+        or not _valid_bbox(previous_bbox)
+    ):
+        return False
+    page_center = page_width / 2.0
+    unit_center = (float(bbox[0]) + float(bbox[2])) / 2.0
+    return (
+        float(bbox[3]) <= table_top
+        and 0 <= _vertical_gap(previous_bbox, bbox) <= max(40.0, _height(previous_bbox) * 2.0)
+        and _width(bbox) <= page_width * 0.35
+        and abs(unit_center - page_center) <= page_width * 0.12
+    )
 
 
 def _merge_heading_cluster_fragments(
@@ -142,7 +278,6 @@ def _text_only_heading_cluster_page(page_units: list[dict[str, Any]]) -> bool:
     return (
         2 <= len(page_units) <= 4
         and "heading" in unit_types
-        and "paragraph" in unit_types
         and unit_types <= {"heading", "paragraph"}
     )
 
@@ -464,14 +599,29 @@ def _near_visual_region(
         return False
     text_bbox = [float(value) for value in bbox]
     for visual_bbox in visual_bboxes.get(int(observation["page"]), []):
-        vertical_gap = max(
-            float(visual_bbox[1]) - float(text_bbox[3]),
-            float(text_bbox[1]) - float(visual_bbox[3]),
-            0.0,
-        )
-        if vertical_gap <= 64.0 and _horizontal_overlap_ratio(text_bbox, visual_bbox) >= 0.5:
+        if _near_visual_bbox(text_bbox, visual_bbox):
             return True
     return False
+
+
+def _near_visual_bbox(text_bbox: list[float], visual_bbox: list[float]) -> bool:
+    vertical_gap = max(
+        float(visual_bbox[1]) - float(text_bbox[3]),
+        float(text_bbox[1]) - float(visual_bbox[3]),
+        0.0,
+    )
+    horizontal_gap = max(
+        float(visual_bbox[0]) - float(text_bbox[2]),
+        float(text_bbox[0]) - float(visual_bbox[2]),
+        0.0,
+    )
+    return (
+        vertical_gap <= 64.0
+        and (
+            _horizontal_overlap_ratio(text_bbox, visual_bbox) >= 0.5
+            or horizontal_gap <= 96.0
+        )
+    )
 
 
 def _union_bbox(left: list[float], right: list[float]) -> list[float]:

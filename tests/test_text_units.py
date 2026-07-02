@@ -256,6 +256,149 @@ def test_image_text_heading_page_does_not_promote_map_labels_to_heading() -> Non
     assert [unit["unit_type"] for unit in units] == ["paragraph"]
 
 
+def test_visual_page_caption_title_group_does_not_become_heading() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "image_region",
+                page=1,
+                bbox=[100, 100, 450, 400],
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Image title",
+                page=1,
+                bbox=[520, 260, 700, 280],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Image description",
+                page=1,
+                bbox=[520, 285, 880, 340],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="Body text",
+                page=1,
+                bbox=[100, 470, 880, 530],
+                role_hint="body_text",
+                attrs={"reading_order": 3},
+            ),
+        ]
+    )
+
+    units, _ = build_text_units(document)
+
+    assert [unit["unit_type"] for unit in units] == ["paragraph", "paragraph"]
+    assert units[0]["text"] == "Image title\nImage description"
+    assert units[0]["attrs"]["layout_role"] == "caption_candidate"
+
+
+def test_standalone_visual_page_title_remains_heading() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Chronology",
+                page=1,
+                bbox=[100, 70, 200, 95],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "image_region",
+                page=1,
+                bbox=[130, 120, 950, 920],
+            ),
+        ]
+    )
+
+    units, _ = build_text_units(document)
+
+    assert [unit["unit_type"] for unit in units] == ["heading"]
+    assert units[0]["text"] == "Chronology"
+
+
+def test_title_only_heading_page_fragments_merge_into_one_heading() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Conclusion",
+                page=1,
+                bbox=[420, 360, 590, 400],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Subtitle",
+                page=1,
+                bbox=[355, 425, 660, 455],
+                role_hint="title_text",
+                attrs={"reading_order": 2},
+            ),
+        ]
+    )
+
+    units, ignored = build_text_units(document)
+
+    assert ignored == {}
+    assert [unit["unit_type"] for unit in units] == ["heading"]
+    assert units[0]["text"] == "Conclusion\nSubtitle"
+    assert units[0]["attrs"]["structure_promotion"] == "heading_cluster"
+
+
+def test_table_page_heading_and_byline_remain_headings() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Table title",
+                page=1,
+                bbox=[250, 140, 750, 170],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Byline",
+                page=1,
+                bbox=[465, 185, 530, 205],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000003",
+                "table_region",
+                page=1,
+                bbox=[110, 275, 880, 920],
+            ),
+        ]
+    )
+
+    units, ignored = build_text_units(document)
+
+    assert ignored == {"table_region": 1}
+    assert [unit["unit_type"] for unit in units] == ["heading", "heading"]
+    assert [unit["text"] for unit in units] == ["Table title", "Byline"]
+    assert units[1]["attrs"]["structure_promotion"] == "table_heading"
+
+
 def test_non_text_observations_are_ignored_with_counts() -> None:
     document = _document(
         [
@@ -552,6 +695,62 @@ def test_layout_classifier_marks_left_inset_set_off_text_as_display_block() -> N
     assert classified[1]["text"] == "Set off quotation"
     assert classified[1]["attrs"]["layout_role"] == "set_off"
     assert "left_inset_set_off_text" in classified[1]["attrs"]["layout_classification"]["signals"]
+
+
+def test_layout_classifier_keeps_caption_candidates_out_of_display_blocks() -> None:
+    units = [
+        {
+            "unit_id": "tu000001",
+            "unit_type": "paragraph",
+            "text": "Body before",
+            "page": 1,
+            "pages": [1],
+            "bbox": [100, 100, 900, 130],
+            "spans": [{"page": 1, "bbox": [100, 100, 900, 130]}],
+            "observation_ids": ["obs000001"],
+            "role_hints": ["body_text"],
+            "attrs": {},
+            "parser_payloads": [],
+        },
+        {
+            "unit_id": "tu000002",
+            "unit_type": "paragraph",
+            "text": "Caption title\nCaption body",
+            "page": 1,
+            "pages": [1],
+            "bbox": [550, 170, 760, 230],
+            "spans": [{"page": 1, "bbox": [550, 170, 760, 230]}],
+            "observation_ids": ["obs000002", "obs000003"],
+            "role_hints": ["title_text", "body_text"],
+            "attrs": {"layout_role": "caption_candidate"},
+            "parser_payloads": [],
+        },
+        {
+            "unit_id": "tu000003",
+            "unit_type": "paragraph",
+            "text": "Body after",
+            "page": 1,
+            "pages": [1],
+            "bbox": [100, 260, 900, 290],
+            "spans": [{"page": 1, "bbox": [100, 260, 900, 290]}],
+            "observation_ids": ["obs000004"],
+            "role_hints": ["body_text"],
+            "attrs": {},
+            "parser_payloads": [],
+        },
+    ]
+
+    classified = classify_text_units_by_layout(
+        units,
+        [make_observed_page(1, width=1000, height=1000)],
+    )
+
+    assert [unit["unit_type"] for unit in classified] == [
+        "paragraph",
+        "paragraph",
+        "paragraph",
+    ]
+    assert classified[1]["attrs"]["layout_role"] == "caption_candidate"
 
 
 def test_layout_classifier_keeps_single_body_unit_as_paragraph() -> None:

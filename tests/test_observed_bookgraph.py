@@ -42,7 +42,7 @@ def _observed_document() -> dict:
                 "text_region",
                 text="Body",
                 page=1,
-                bbox=[10, 70, 200, 120],
+                bbox=[10, 70, 900, 120],
                 role_hint="body_text",
                 attrs={"inline_runs": [{"type": "text", "text": "Body"}]},
                 parser_payload={"raw_type": "paragraph"},
@@ -183,6 +183,15 @@ def _image_title_document() -> dict:
                 role_hint="title_text",
                 attrs={"reading_order": 2},
             ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Image description",
+                page=1,
+                bbox=[300, 575, 700, 620],
+                role_hint="body_text",
+                attrs={"reading_order": 3},
+            ),
         ],
     )
 
@@ -304,7 +313,7 @@ def test_build_bookgraph_from_observed_preserves_observation_provenance() -> Non
     assert evidence["source_id"] == "tu000002"
     assert evidence["source_kind"] == "text_unit"
     assert evidence["parser"] == "sample_parser"
-    assert evidence["bbox"] == [10, 70, 200, 120]
+    assert evidence["bbox"] == [10, 70, 900, 120]
     assert evidence["parser_payload"] == {
         "observation_ids": ["obs000002"],
         "parser_payloads": [{"raw_type": "paragraph"}],

@@ -358,6 +358,18 @@ def _unit_record(
         "bbox": deepcopy(bbox),
         "signals": [],
     }
+    if _is_caption_candidate(unit):
+        width = _width(bbox) if _valid_bbox(bbox) else None
+        return {
+            **base,
+            "width": width,
+            "body_width": None,
+            "width_ratio": None,
+            "left_inset": None,
+            "right_inset": None,
+            "signals": ["caption_candidate"],
+            "decision": "paragraph",
+        }
     if not _valid_bbox(bbox):
         return {
             **base,
@@ -411,6 +423,11 @@ def _unit_record(
         "signals": signals,
         "decision": decision,
     }
+
+
+def _is_caption_candidate(unit: dict[str, Any]) -> bool:
+    attrs = unit.get("attrs")
+    return isinstance(attrs, dict) and attrs.get("layout_role") == "caption_candidate"
 
 
 def _unit_metrics(bbox: list[float], profile: dict[str, Any]) -> dict[str, float]:
