@@ -18,6 +18,7 @@ from inkline.canonical.observed import (
     validate_observed_document,
 )
 from inkline.canonical.observed_bookgraph import build_bookgraph_from_observed
+from inkline.canonical.page_roles import classify_observed_page_roles
 from inkline.canonical.schema import (
     BLOCK_TYPES,
     SCHEMA_VERSION,
@@ -54,6 +55,7 @@ __all__ = [
     "audit_text_unit_layout",
     "build_bookgraph_from_observed",
     "build_text_units",
+    "classify_observed_page_roles",
     "classify_text_units_by_layout",
     "make_block",
     "make_bookgraph",

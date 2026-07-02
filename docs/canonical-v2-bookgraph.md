@@ -378,6 +378,36 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_golden_al
 
 这些发现只能指导下一轮结构规则设计；最终修复仍必须回到版面和 provenance 信号，不能把正文含义或特定文本写入分类逻辑。
 
+### Page scope and RAG gating
+
+Observed shadow BookGraph 在 TextUnit 进入 node 之后记录 page-level scope：
+
+- `metadata.shadow_page_roles`: 每个物理页的结构候选角色、flow scope、EPUB/RAG inclusion 和 signals。
+- node `attrs.page_role` / `attrs.flow_scope`: 该 node 所在物理页的页面作用域。
+- node `attrs.include_in_epub`: 当前 shadow projection 是否应保留给 EPUB flow。
+- node `attrs.include_in_rag`: 当前 shadow RAG units 是否应包含该 node。
+
+这一层只使用 parser-neutral 的结构信号：
+
+- `observation.kind`: text/image/table/page marker/footnote region。
+- `role_hint`: body/title/list/footnote/page_number/header/footer 等显式结构提示。
+- `bbox`、page width/height、区域面积占比、文本区域居中程度。
+- `layout_audit.page_profiles`: 是否存在稳定 body lane。
+- 物理页序，以及首个 `page_number` marker 之前的 unnumbered prelude。
+
+它不读取页面文字含义，也不根据 `目录`、`ISBN`、`版权`、`前言`、`附录` 等关键词分类。因此当前角色名应理解为结构候选，而不是最终语义标签：
+
+- `cover_page` / `cover_spread`: 早期或 unnumbered prelude 中带视觉内容的页面。
+- `front_matter_page`: 首个印刷页码之前的文本页，即使存在稳定 body profile，也默认不进入 RAG。
+- `title_like_page`: 早期稀疏居中文本页，无 body profile。
+- `bibliographic_like_page`: 边缘页的文本页候选，无 body profile；名称表示迁移期候选，不表示已抽取出版语义。
+- `visual_page`: 正文中的视觉占优插页。
+- `blank_page`: 无有效 content observation 的空白页。
+- `unknown`: 缺少 body profile 且无法用结构信号归类的页，保守地 `include_in_rag = false`。
+- `body` / `body_candidate`: 可进入正文 RAG flow 的页面。
+
+这一层不会从 `reading_order` 或 `epub_flow` 删除节点；它只影响 shadow `rag_units`。这让 EPUB 仍可保留封面、扉页、版权页、护封展开页、图版页等视觉或前后置材料，同时避免这些材料在 release canonical 切换前污染正文 RAG chunk。
+
 ## display_block 定义
 
 `display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中通过排版和结构证据独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。

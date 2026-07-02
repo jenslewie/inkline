@@ -12,6 +12,7 @@ from inkline.canonical.bookgraph import (
     make_node,
 )
 from inkline.canonical.observed import validate_observed_document
+from inkline.canonical.page_roles import classify_observed_page_roles, page_roles_by_page
 from inkline.canonical.text_unit_layout import (
     audit_text_unit_layout,
     classify_text_units_by_layout,
@@ -28,18 +29,16 @@ def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
     reading_order: list[str] = []
     parser = str(metadata.get("parser_name") or "")
     text_units, ignored_counts = build_text_units(document)
-    layout_audit = audit_text_unit_layout(
-        text_units, document["pages"], document["observations"]
-    )
+    layout_audit = audit_text_unit_layout(text_units, document["pages"], document["observations"])
+    page_role_records = classify_observed_page_roles(document, layout_audit=layout_audit)
+    roles_by_page = page_roles_by_page(page_role_records)
     text_units = classify_text_units_by_layout(text_units, document["pages"])
 
     for unit in text_units:
         node_id = f"n{len(nodes) + 1:06d}"
         evidence_id = f"ev{len(evidence_records) + 1:06d}"
-        node = _node_from_unit(unit, node_id, evidence_id)
-        evidence = _evidence_from_unit(unit, evidence_id, parser)
-        nodes.append(node)
-        evidence_records.append(evidence)
+        nodes.append(_node_from_unit(unit, node_id, evidence_id, roles_by_page))
+        evidence_records.append(_evidence_from_unit(unit, evidence_id, parser))
         reading_order.append(node_id)
         edges.append(
             make_edge(
@@ -54,6 +53,7 @@ def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
     metadata["shadow_text_unit_layout_audit_summary"] = layout_audit["summary"]
     metadata["shadow_text_unit_layout_page_coverage"] = layout_audit["page_coverage"]
     metadata["shadow_text_unit_layout_profile_quality"] = layout_audit["profile_quality"]
+    metadata["shadow_page_roles"] = page_role_records
     projections = {
         "reading_order": reading_order,
         "epub_flow": list(reading_order),
@@ -84,7 +84,12 @@ def _bookgraph_metadata(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _node_from_unit(unit: dict[str, Any], node_id: str, evidence_id: str) -> dict[str, Any]:
+def _node_from_unit(
+    unit: dict[str, Any],
+    node_id: str,
+    evidence_id: str,
+    roles_by_page: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
     node_type = unit["unit_type"]
     attrs = {
         "source_text_unit_id": unit["unit_id"],
@@ -95,6 +100,13 @@ def _node_from_unit(unit: dict[str, Any], node_id: str, evidence_id: str) -> dic
     for key in ("layout_role", "layout_classification", "merge_reasons"):
         if key in unit_attrs:
             attrs[key] = deepcopy(unit_attrs[key])
+    page_role = roles_by_page.get(int(unit["page"]))
+    if page_role:
+        attrs["page_role"] = page_role["page_role"]
+        attrs["flow_scope"] = page_role["flow_scope"]
+        attrs["include_in_epub"] = page_role["include_in_epub"]
+        attrs["include_in_rag"] = page_role["include_in_rag"]
+        attrs["page_role_signals"] = list(page_role["signals"])
     inline_runs = unit_attrs.get("inline_runs")
     return make_node(
         node_id,
@@ -132,6 +144,8 @@ def _rag_units(
     current_heading_node_id: str | None = None
     units: list[dict[str, Any]] = []
     for node in nodes:
+        if node.get("attrs", {}).get("include_in_rag") is False:
+            continue
         if node["node_type"] == "heading":
             heading_path = [node["text"]] if node["text"] else []
             current_heading_node_id = node["node_id"]
@@ -150,9 +164,7 @@ def _rag_units(
     return units
 
 
-def _source_pages(
-    node: dict[str, Any], evidence_by_id: dict[str, dict[str, Any]]
-) -> list[int]:
+def _source_pages(node: dict[str, Any], evidence_by_id: dict[str, dict[str, Any]]) -> list[int]:
     pages: list[int] = []
     for evidence_id in node.get("evidence_ids", []):
         evidence = evidence_by_id.get(evidence_id)

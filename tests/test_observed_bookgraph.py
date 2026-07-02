@@ -196,6 +196,44 @@ def _image_title_document() -> dict:
     )
 
 
+def _front_matter_then_body_document() -> dict:
+    return make_observed_document(
+        _metadata(),
+        [
+            make_observed_page(1, width=1000, height=1000),
+            make_observed_page(2, width=1000, height=1000),
+        ],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Display title",
+                page=1,
+                bbox=[360, 300, 640, 350],
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Body line one",
+                page=2,
+                bbox=[100, 100, 900, 130],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Body line two",
+                page=2,
+                bbox=[100, 150, 900, 180],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+        ],
+    )
+
+
 def test_build_bookgraph_from_observed_uses_text_unit_aggregation() -> None:
     graph = build_bookgraph_from_observed(_adjacent_body_document())
 
@@ -346,4 +384,46 @@ def test_build_bookgraph_from_observed_creates_reading_order_and_rag_units() -> 
             "source_pages": [1],
             "evidence_ids": ["ev000003"],
         },
+    ]
+
+
+def test_build_bookgraph_from_observed_records_page_roles_and_excludes_paratext_from_rag() -> None:
+    graph = build_bookgraph_from_observed(_front_matter_then_body_document())
+
+    validate_bookgraph(graph)
+    assert graph["metadata"]["shadow_page_roles"] == [
+        {
+            "page": 1,
+            "page_role": "title_like_page",
+            "flow_scope": "front_matter",
+            "include_in_epub": True,
+            "include_in_rag": False,
+            "signals": ["early_page", "sparse_centered_text", "no_body_profile"],
+        },
+        {
+            "page": 2,
+            "page_role": "body",
+            "flow_scope": "body",
+            "include_in_epub": True,
+            "include_in_rag": True,
+            "signals": ["body_profile"],
+        },
+    ]
+    assert graph["nodes"][0]["attrs"]["page_role"] == "title_like_page"
+    assert graph["nodes"][0]["attrs"]["flow_scope"] == "front_matter"
+    assert graph["nodes"][0]["attrs"]["include_in_rag"] is False
+    assert graph["nodes"][1]["attrs"]["page_role"] == "body"
+    assert graph["nodes"][1]["attrs"]["include_in_rag"] is True
+    assert graph["projections"]["reading_order"] == ["n000001", "n000002"]
+    assert graph["projections"]["epub_flow"] == ["n000001", "n000002"]
+    assert graph["projections"]["rag_units"] == [
+        {
+            "unit_id": "ru000001",
+            "node_id": "n000002",
+            "text": "Body line one\nBody line two",
+            "heading_path": [],
+            "parent_node_ids": [],
+            "source_pages": [2],
+            "evidence_ids": ["ev000002"],
+        }
     ]
