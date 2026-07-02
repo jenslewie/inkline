@@ -125,6 +125,39 @@ def _observed_document(text: str) -> dict[str, Any]:
     )
 
 
+def _image_text_observed_document(text: str) -> dict[str, Any]:
+    return make_observed_document(
+        {
+            "schema_name": OBSERVED_SCHEMA_NAME,
+            "schema_version": OBSERVED_SCHEMA_VERSION,
+            "doc_id": "fixture",
+            "title": "Fixture",
+            "language": "zh-CN",
+            "source_file": "fixture.pdf",
+            "parser_name": "parser-neutral",
+            "parser_mode": "shadow",
+        },
+        [make_observed_page(1, width=1000, height=1000)],
+        [
+            make_observation(
+                "obs000001",
+                "image_region",
+                page=1,
+                bbox=[100, 100, 900, 700],
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text=text,
+                page=1,
+                bbox=[300, 760, 500, 790],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+        ],
+    )
+
+
 def test_alignment_audit_finds_display_fp_and_fn_hidden_by_equal_counts(tmp_path) -> None:
     tool = _load_tool()
     golden_path = tmp_path / "canonical.json"
@@ -302,3 +335,35 @@ def test_alignment_audit_can_include_text_unit_layout_record(tmp_path) -> None:
     observed = report["type_mismatches"]["display_block"][0]["observed"]
     assert observed["source_text_unit_id"] == "tu000001"
     assert observed["layout_audit"]["decision"] == "skipped_no_profile"
+
+
+def test_alignment_audit_breaks_down_misses_by_page_bucket(tmp_path) -> None:
+    tool = _load_tool()
+    golden_path = tmp_path / "canonical.json"
+    graph_path = tmp_path / "canonical_v2.json"
+    observed_path = tmp_path / "observed.json"
+    golden_path.write_text(
+        json.dumps(_golden([("paragraph", "map label")])),
+        encoding="utf-8",
+    )
+    graph_path.write_text(
+        json.dumps(_graph([("display_block", "map label")])),
+        encoding="utf-8",
+    )
+    observed_path.write_text(
+        json.dumps(_image_text_observed_document("map label")),
+        encoding="utf-8",
+    )
+
+    report = tool.audit_bookgraph_golden_alignment(
+        golden_path,
+        graph_path,
+        observed_path=observed_path,
+    )
+
+    observed = report["false_positives"]["display_block"][0]["observed"]
+    assert observed["page_buckets"] == ["image_with_text_units", "paragraph_without_profile"]
+    assert report["summary"]["display_block"]["page_bucket_breakdown"]["false_positive"] == {
+        "image_with_text_units": 1,
+        "paragraph_without_profile": 1,
+    }

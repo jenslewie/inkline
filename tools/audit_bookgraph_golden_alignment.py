@@ -7,7 +7,7 @@ import argparse
 import json
 import re
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -48,9 +48,11 @@ def audit_bookgraph_golden_alignment(
     golden = _read_json(golden_path)
     graph = _read_json(bookgraph_path)
     validate_bookgraph(graph)
-    layout_records = _layout_records_by_unit_id(observed_path) if observed_path else {}
+    layout_records, page_buckets = (
+        _observed_layout_context(observed_path) if observed_path else ({}, {})
+    )
     golden_records = _golden_records(golden)
-    observed_records = _observed_records(graph, layout_records)
+    observed_records = _observed_records(graph, layout_records, page_buckets)
     pairs = _align_records(golden_records, observed_records)
     report = _report(golden, graph, golden_records, observed_records, pairs, target_types)
     return report
@@ -129,20 +131,25 @@ def _golden_records(canonical: dict[str, Any]) -> list[dict[str, Any]]:
     return records
 
 
-def _layout_records_by_unit_id(observed_path: Path) -> dict[str, dict[str, Any]]:
+def _observed_layout_context(
+    observed_path: Path,
+) -> tuple[dict[str, dict[str, Any]], dict[int, list[str]]]:
     observed = _read_json(observed_path)
     validate_observed_document(observed)
     units, _ignored_counts = build_text_units(observed)
     audit = audit_text_unit_layout(units, observed["pages"], observed["observations"])
-    return {
+    layout_records = {
         str(record["unit_id"]): record
         for record in audit.get("unit_records", [])
         if isinstance(record, dict) and isinstance(record.get("unit_id"), str)
     }
+    return layout_records, _page_buckets(audit.get("page_coverage") or {})
 
 
 def _observed_records(
-    graph: dict[str, Any], layout_records: dict[str, dict[str, Any]]
+    graph: dict[str, Any],
+    layout_records: dict[str, dict[str, Any]],
+    page_buckets: dict[int, list[str]],
 ) -> list[dict[str, Any]]:
     evidence_by_id = {
         evidence["evidence_id"]: evidence
@@ -185,6 +192,7 @@ def _observed_records(
                     if isinstance(source_text_unit_id, str)
                     else None
                 ),
+                "page_buckets": page_buckets.get(evidence.get("page"), ["normal_text_flow"]),
             }
         )
     return records
@@ -304,6 +312,13 @@ def _report(
             "false_negative": len(false_negatives[target]),
             "false_positive": len(false_positives[target]),
             "type_mismatch": len(type_mismatches[target]),
+            "page_bucket_breakdown_counting": "non_exclusive_memberships",
+            "page_bucket_breakdown": _page_bucket_breakdown(
+                matched[target],
+                false_negatives[target],
+                false_positives[target],
+                type_mismatches[target],
+            ),
         }
         for target in target_types
     }
@@ -395,7 +410,66 @@ def _public_record(record: dict[str, Any]) -> dict[str, Any]:
             else None
         ),
         "layout_audit": _public_layout_record(record.get("layout_audit")),
+        "page_buckets": list(record.get("page_buckets") or []),
     }
+
+
+def _page_buckets(page_coverage: dict[str, Any]) -> dict[int, list[str]]:
+    buckets: defaultdict[int, list[str]] = defaultdict(list)
+    for record in page_coverage.get("pages_without_profiles") or []:
+        if isinstance(record, dict) and isinstance(record.get("page"), int):
+            buckets[record["page"]].append(str(record.get("reason") or "without_profile"))
+    mixed_pages = page_coverage.get("mixed_pages") if isinstance(page_coverage, dict) else {}
+    if isinstance(mixed_pages, dict):
+        for bucket, pages in mixed_pages.items():
+            if not isinstance(pages, list):
+                continue
+            for page in pages:
+                if isinstance(page, int):
+                    buckets[page].append(str(bucket))
+    return {page: sorted(set(values)) for page, values in buckets.items()}
+
+
+def _page_bucket_breakdown(
+    matched: list[dict[str, Any]],
+    false_negatives: list[dict[str, Any]],
+    false_positives: list[dict[str, Any]],
+    type_mismatches: list[dict[str, Any]],
+) -> dict[str, dict[str, int]]:
+    return {
+        "matched": _count_pair_buckets(matched),
+        "false_negative": _count_miss_buckets(false_negatives),
+        "false_positive": _count_miss_buckets(false_positives),
+        "type_mismatch": _count_pair_buckets(type_mismatches),
+    }
+
+
+def _count_pair_buckets(records: list[dict[str, Any]]) -> dict[str, int]:
+    counter: Counter[str] = Counter()
+    for record in records:
+        observed = record.get("observed") if isinstance(record, dict) else None
+        if isinstance(observed, dict):
+            counter.update(_record_buckets(observed))
+    return dict(sorted(counter.items()))
+
+
+def _count_miss_buckets(records: list[dict[str, Any]]) -> dict[str, int]:
+    counter: Counter[str] = Counter()
+    for record in records:
+        observed = record.get("observed") if isinstance(record, dict) else None
+        golden = record.get("golden") if isinstance(record, dict) else None
+        if isinstance(observed, dict):
+            counter.update(_record_buckets(observed))
+        elif isinstance(golden, dict):
+            counter.update(_record_buckets(golden))
+    return dict(sorted(counter.items()))
+
+
+def _record_buckets(record: dict[str, Any]) -> list[str]:
+    buckets = record.get("page_buckets")
+    if isinstance(buckets, list) and buckets:
+        return [str(bucket) for bucket in buckets]
+    return ["normal_text_flow"]
 
 
 def _public_layout_record(record: Any) -> dict[str, Any] | None:
