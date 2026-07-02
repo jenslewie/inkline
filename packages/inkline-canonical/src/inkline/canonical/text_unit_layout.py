@@ -459,13 +459,20 @@ def _display_signals(bbox: list[float], profile: dict[str, float]) -> list[str]:
         and right_inset >= body_width * -0.03
     ):
         signals.append("left_inset_set_off_text")
+    elif (
+        body_width * 0.94 <= _width(bbox) <= body_width * 0.98
+        and left_inset >= max(24.0, body_width * 0.03)
+        and right_inset >= body_width * -0.03
+        and _height(bbox) >= 80.0
+    ):
+        signals.append("slightly_inset_tall_block")
     return signals
 
 
 def _is_display_candidate(signals: list[str]) -> bool:
     return signals == ["narrower_than_body_lane", "inset_from_body_lane"] or signals == [
         "left_inset_set_off_text"
-    ]
+    ] or signals == ["slightly_inset_tall_block"]
 
 
 def _short_line_group(unit: dict[str, Any], page_sizes: dict[int, dict[str, float]]) -> str | None:
@@ -524,3 +531,7 @@ def _valid_bbox(value: Any) -> bool:
 
 def _width(bbox: list[float]) -> float:
     return float(bbox[2]) - float(bbox[0])
+
+
+def _height(bbox: list[float]) -> float:
+    return float(bbox[3]) - float(bbox[1])

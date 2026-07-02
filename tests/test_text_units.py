@@ -753,6 +753,52 @@ def test_layout_classifier_keeps_caption_candidates_out_of_display_blocks() -> N
     assert classified[1]["attrs"]["layout_role"] == "caption_candidate"
 
 
+def test_layout_classifier_marks_tall_slightly_inset_block_as_display_block() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body before",
+                page=1,
+                bbox=[100, 100, 900, 180],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Slightly inset tall block",
+                page=1,
+                bbox=[126, 220, 890, 360],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Body after",
+                page=1,
+                bbox=[100, 400, 900, 480],
+                role_hint="body_text",
+                attrs={"reading_order": 3},
+            ),
+        ]
+    )
+    units, _ = build_text_units(document)
+
+    classified = classify_text_units_by_layout(units, document["pages"])
+
+    assert [unit["unit_type"] for unit in classified] == [
+        "paragraph",
+        "display_block",
+        "paragraph",
+    ]
+    assert "slightly_inset_tall_block" in classified[1]["attrs"]["layout_classification"][
+        "signals"
+    ]
+
+
 def test_layout_classifier_keeps_single_body_unit_as_paragraph() -> None:
     document = _document(
         [
