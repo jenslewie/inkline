@@ -508,7 +508,116 @@ def test_layout_classifier_builds_body_lane_from_text_unit_spans() -> None:
         "skipped_no_bbox": 0,
         "skipped_no_profile": 0,
     }
-    assert audit["page_profiles"][0]["reference_unit_count"] == 4
+    assert audit["page_profiles"][0]["reference_unit_count"] == 3
+
+
+def test_layout_profile_ignores_short_line_outliers_when_estimating_body_lane() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body paragraph with short carryover",
+                page=1,
+                bbox=[100, 100, 900, 220],
+                spans=[
+                    {"page": 1, "bbox": [100, 100, 180, 130]},
+                    {"page": 1, "bbox": [100, 140, 900, 170]},
+                    {"page": 1, "bbox": [100, 180, 900, 220]},
+                ],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Inset text",
+                page=1,
+                bbox=[150, 260, 870, 310],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Body after",
+                page=1,
+                bbox=[100, 350, 900, 410],
+                role_hint="body_text",
+                attrs={"reading_order": 3},
+            ),
+        ]
+    )
+    units, _ = build_text_units(document)
+
+    classified = classify_text_units_by_layout(units, document["pages"])
+    audit = audit_text_unit_layout(units, document["pages"])
+
+    assert [unit["unit_type"] for unit in classified] == [
+        "paragraph",
+        "display_block",
+        "paragraph",
+    ]
+    assert audit["summary"]["skipped_no_profile"] == 0
+    assert audit["profile_quality"]["accepted"] == 1
+    assert audit["profile_quality"]["rejected_unstable_widths"] == 0
+    assert audit["page_profiles"][0]["body_left"] == 100.0
+    assert audit["page_profiles"][0]["body_right"] == 900.0
+    assert audit["page_profiles"][0]["body_width"] == 800.0
+
+
+def test_layout_profile_uses_nearest_stable_profile_for_sparse_page() -> None:
+    document = _document_with_pages(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body before",
+                page=1,
+                bbox=[100, 100, 900, 250],
+                spans=[
+                    {"page": 1, "bbox": [100, 100, 900, 130]},
+                    {"page": 1, "bbox": [100, 160, 900, 190]},
+                    {"page": 1, "bbox": [100, 220, 900, 250]},
+                ],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Sparse page inset text",
+                page=2,
+                bbox=[150, 100, 870, 150],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+        ],
+        [
+            make_observed_page(1, width=1000, height=1000),
+            make_observed_page(2, width=1000, height=1000),
+        ],
+    )
+    units, _ = build_text_units(document)
+
+    classified = classify_text_units_by_layout(units, document["pages"])
+    audit = audit_text_unit_layout(units, document["pages"])
+
+    assert [unit["unit_type"] for unit in classified] == ["paragraph", "display_block"]
+    assert audit["summary"]["skipped_no_profile"] == 0
+    assert audit["profile_quality"]["accepted"] == 1
+    assert audit["profile_quality"]["filled_from_nearest_profile"] == 1
+    assert audit["page_profiles"][1] == {
+        "page": 2,
+        "page_width": 1000.0,
+        "page_height": 1000.0,
+        "body_left": 100.0,
+        "body_right": 900.0,
+        "body_width": 800.0,
+        "reference_unit_count": 1,
+        "profile_source": "nearest_page",
+        "profile_source_page": 1,
+    }
 
 
 def test_layout_profile_quality_rejects_unstable_reference_widths() -> None:
@@ -522,9 +631,9 @@ def test_layout_profile_quality_rejects_unstable_reference_widths() -> None:
                 bbox=[100, 100, 900, 220],
                 spans=[
                     {"page": 1, "bbox": [100, 100, 900, 130]},
-                    {"page": 1, "bbox": [100, 130, 900, 160]},
-                    {"page": 1, "bbox": [100, 160, 280, 190]},
-                    {"page": 1, "bbox": [700, 190, 900, 220]},
+                    {"page": 1, "bbox": [100, 130, 750, 160]},
+                    {"page": 1, "bbox": [100, 160, 600, 190]},
+                    {"page": 1, "bbox": [100, 190, 400, 220]},
                 ],
                 role_hint="body_text",
                 attrs={"reading_order": 1},
@@ -639,7 +748,7 @@ def test_layout_audit_reports_page_profiles_and_candidate_signals_without_text()
             "body_left": 100.0,
             "body_right": 900.0,
             "body_width": 800.0,
-            "reference_unit_count": 3,
+            "reference_unit_count": 2,
         }
     ]
     assert audit["unit_records"][1] == {

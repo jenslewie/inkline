@@ -36,7 +36,8 @@ def _metadata(doc_id: str = "sample") -> dict[str, Any]:
         },
         "shadow_text_unit_layout_profile_quality": {
             "accepted": 1,
-            "rejected_too_few_references": 0,
+            "filled_from_nearest_profile": 0,
+            "rejected_no_stable_profile": 0,
             "rejected_invalid_width": 0,
             "rejected_unstable_widths": 0,
             "rejected_extreme_body_width": 0,

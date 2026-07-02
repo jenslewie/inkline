@@ -7,7 +7,9 @@ from typing import Any
 
 MIN_BODY_WIDTH_RATIO = 0.2
 MAX_BODY_WIDTH_RATIO = 0.92
-MAX_REFERENCE_WIDTH_SPREAD_RATIO = 2.5
+MIN_LOCAL_PROFILE_REFERENCES = 2
+MIN_DOMINANT_REFERENCE_RATIO = 0.65
+MAX_DOMINANT_WIDTH_SPREAD_RATIO = 1.5
 
 
 def audit_text_unit_layout(
@@ -85,34 +87,80 @@ def _page_profiles(
         grouped.setdefault(page, []).extend(_reference_bboxes(unit, page))
 
     profiles: dict[int, dict[str, Any]] = {}
+    deferred_pages: dict[int, list[list[float]]] = {}
     for page, bboxes in grouped.items():
-        if len(bboxes) < 3:
-            profile_quality["rejected_too_few_references"] += 1
+        profile, rejection_reason = _local_page_profile(page, bboxes, page_sizes)
+        if profile:
+            profiles[page] = profile
+            profile_quality["accepted"] += 1
             continue
-        left = median(bbox[0] for bbox in bboxes)
-        right = median(bbox[2] for bbox in bboxes)
-        width = median(_width(bbox) for bbox in bboxes)
-        if width <= 0:
-            profile_quality["rejected_invalid_width"] += 1
+        if rejection_reason == "needs_fallback":
+            deferred_pages[page] = bboxes
+            continue
+        profile_quality[f"rejected_{rejection_reason}"] += 1
+
+    for page, bboxes in deferred_pages.items():
+        source_page = _nearest_profile_page(page, profiles)
+        if source_page is None:
+            profile_quality["rejected_no_stable_profile"] += 1
             continue
         size = page_sizes.get(page, {})
-        page_width = float(size.get("width") or 0.0)
-        if _has_unstable_widths(bboxes):
-            profile_quality["rejected_unstable_widths"] += 1
-            continue
-        if _has_extreme_body_width(width, page_width):
-            profile_quality["rejected_extreme_body_width"] += 1
-            continue
+        source = profiles[source_page]
         profiles[page] = {
-            "body_left": float(left),
-            "body_right": float(right),
-            "body_width": float(width),
-            "page_width": page_width,
-            "page_height": float(size.get("height") or 0.0),
+            "body_left": source["body_left"],
+            "body_right": source["body_right"],
+            "body_width": source["body_width"],
+            "page_width": float(size.get("width") or source["page_width"]),
+            "page_height": float(size.get("height") or source["page_height"]),
             "reference_unit_count": len(bboxes),
+            "profile_source": "nearest_page",
+            "profile_source_page": source_page,
         }
-        profile_quality["accepted"] += 1
+        profile_quality["filled_from_nearest_profile"] += 1
     return profiles, _profile_quality_summary(profile_quality)
+
+
+def _local_page_profile(
+    page: int,
+    bboxes: list[list[float]],
+    page_sizes: dict[int, dict[str, float]],
+) -> tuple[dict[str, Any] | None, str]:
+    dominant_bboxes = _dominant_reference_bboxes(bboxes)
+    if not dominant_bboxes:
+        return None, "needs_fallback"
+    if _has_unstable_dominant_widths(dominant_bboxes):
+        return None, "unstable_widths"
+    left = median(bbox[0] for bbox in dominant_bboxes)
+    right = median(bbox[2] for bbox in dominant_bboxes)
+    width = median(_width(bbox) for bbox in dominant_bboxes)
+    if width <= 0:
+        return None, "invalid_width"
+    size = page_sizes.get(page, {})
+    page_width = float(size.get("width") or 0.0)
+    if _has_extreme_body_width(width, page_width):
+        return None, "extreme_body_width"
+    return {
+        "body_left": float(left),
+        "body_right": float(right),
+        "body_width": float(width),
+        "page_width": page_width,
+        "page_height": float(size.get("height") or 0.0),
+        "reference_unit_count": len(dominant_bboxes),
+    }, ""
+
+
+def _dominant_reference_bboxes(bboxes: list[list[float]]) -> list[list[float]]:
+    valid_bboxes = [bbox for bbox in bboxes if _width(bbox) > 0]
+    if len(valid_bboxes) < MIN_LOCAL_PROFILE_REFERENCES:
+        return []
+    widths = sorted((_width(bbox) for bbox in valid_bboxes), reverse=True)
+    anchor_count = max(MIN_LOCAL_PROFILE_REFERENCES, len(widths) // 2)
+    anchor = median(widths[:anchor_count])
+    threshold = anchor * MIN_DOMINANT_REFERENCE_RATIO
+    dominant_bboxes = [bbox for bbox in valid_bboxes if _width(bbox) >= threshold]
+    if len(dominant_bboxes) < MIN_LOCAL_PROFILE_REFERENCES:
+        return []
+    return dominant_bboxes
 
 
 def _page_sizes(pages: list[dict[str, Any]]) -> dict[int, dict[str, float]]:
@@ -131,7 +179,8 @@ def _page_sizes(pages: list[dict[str, Any]]) -> dict[int, dict[str, float]]:
 def _profile_quality_summary(profile_quality: Counter[str]) -> dict[str, int]:
     keys = (
         "accepted",
-        "rejected_too_few_references",
+        "filled_from_nearest_profile",
+        "rejected_no_stable_profile",
         "rejected_invalid_width",
         "rejected_unstable_widths",
         "rejected_extreme_body_width",
@@ -139,11 +188,11 @@ def _profile_quality_summary(profile_quality: Counter[str]) -> dict[str, int]:
     return {key: int(profile_quality.get(key, 0)) for key in keys}
 
 
-def _has_unstable_widths(bboxes: list[list[float]]) -> bool:
+def _has_unstable_dominant_widths(bboxes: list[list[float]]) -> bool:
     widths = [_width(bbox) for bbox in bboxes if _width(bbox) > 0]
     if not widths:
         return True
-    return max(widths) / min(widths) > MAX_REFERENCE_WIDTH_SPREAD_RATIO
+    return max(widths) / min(widths) > MAX_DOMINANT_WIDTH_SPREAD_RATIO
 
 
 def _has_extreme_body_width(body_width: float, page_width: float) -> bool:
@@ -154,8 +203,9 @@ def _has_extreme_body_width(body_width: float, page_width: float) -> bool:
 
 
 def _page_profile_records(page_profiles: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
+    records = []
+    for page, profile in sorted(page_profiles.items()):
+        record = {
             "page": page,
             "page_width": profile["page_width"],
             "page_height": profile["page_height"],
@@ -164,8 +214,17 @@ def _page_profile_records(page_profiles: dict[int, dict[str, Any]]) -> list[dict
             "body_width": profile["body_width"],
             "reference_unit_count": profile["reference_unit_count"],
         }
-        for page, profile in sorted(page_profiles.items())
-    ]
+        if profile.get("profile_source"):
+            record["profile_source"] = profile["profile_source"]
+            record["profile_source_page"] = profile["profile_source_page"]
+        records.append(record)
+    return records
+
+
+def _nearest_profile_page(page: int, page_profiles: dict[int, dict[str, Any]]) -> int | None:
+    if not page_profiles:
+        return None
+    return min(page_profiles, key=lambda candidate: (abs(candidate - page), candidate))
 
 
 def _reference_bboxes(unit: dict[str, Any], page: int) -> list[list[float]]:
