@@ -69,8 +69,8 @@ def process_normal_flow(
         if _handle_known_non_paragraph_block(ids, content_blocks, state, block):
             continue
         if block_text(block):
-            state.out.append(make_paragraph(ids, block, block_type=block.raw_type))
-            state.prev_major_type = block.raw_type
+            state.out.append(make_paragraph(ids, block))
+            state.prev_major_type = PARAGRAPH
         state.i += 1
 
     return state.out, state.prev_major_type, state.in_toc

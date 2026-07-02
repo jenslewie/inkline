@@ -55,13 +55,7 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     output = tmp_path / "canonical.json"
     content_list_v2.write_text(
         json.dumps(
-            [
-                [
-                    _text_item(
-                        "paragraph", "A minimal MinerU paragraph.", [100, 100, 900, 180]
-                    )
-                ]
-            ]
+            [[_text_item("paragraph", "A minimal MinerU paragraph.", [100, 100, 900, 180])]]
         ),
         encoding="utf-8",
     )
@@ -121,6 +115,44 @@ def test_normalize_mineru_outputs_produces_valid_canonical(tmp_path) -> None:
     assert report["summary"]["missing_body_ref_notes"] == 0
 
 
+def test_unknown_text_raw_type_falls_back_to_paragraph(tmp_path) -> None:
+    content_list_v2 = tmp_path / "sample_content_list_v2.json"
+    middle = tmp_path / "sample_middle.json"
+    output = tmp_path / "canonical.json"
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    _text_item(
+                        "page_aside_text",
+                        "A text region from a parser-specific type.",
+                        [80, 120, 760, 180],
+                    )
+                ]
+            ]
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(
+        json.dumps({"pdf_info": [{"page_size": [1000, 1400]}]}),
+        encoding="utf-8",
+    )
+
+    document = normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        doc_id="sample",
+        title="Sample",
+        language="en",
+    )
+
+    assert document["blocks"][0]["type"] == "paragraph"
+    assert document["blocks"][0]["attrs"]["raw_type"] == "page_aside_text"
+
+
 def test_normalize_mineru_outputs_writes_optional_bookgraph_shadow(tmp_path) -> None:
     content_list_v2 = tmp_path / "sample_content_list_v2.json"
     middle = tmp_path / "sample_middle.json"
@@ -128,13 +160,7 @@ def test_normalize_mineru_outputs_writes_optional_bookgraph_shadow(tmp_path) -> 
     bookgraph_output = tmp_path / "canonical_v2.json"
     content_list_v2.write_text(
         json.dumps(
-            [
-                [
-                    _text_item(
-                        "paragraph", "A minimal MinerU paragraph.", [100, 100, 900, 180]
-                    )
-                ]
-            ]
+            [[_text_item("paragraph", "A minimal MinerU paragraph.", [100, 100, 900, 180])]]
         ),
         encoding="utf-8",
     )
@@ -170,13 +196,7 @@ def test_normalize_mineru_outputs_writes_optional_observed_shadow_outputs(tmp_pa
     observed_bookgraph_output = tmp_path / "canonical_v2_observed.json"
     content_list_v2.write_text(
         json.dumps(
-            [
-                [
-                    _text_item(
-                        "paragraph", "A minimal MinerU paragraph.", [100, 100, 900, 180]
-                    )
-                ]
-            ]
+            [[_text_item("paragraph", "A minimal MinerU paragraph.", [100, 100, 900, 180])]]
         ),
         encoding="utf-8",
     )
