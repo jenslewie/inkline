@@ -41,6 +41,17 @@ uv run inkline export epub data/outputs/sample/canonical.json --output data/outp
 uv run inkline rag chunk data/outputs/sample/canonical.json --output data/outputs/sample/chunks.jsonl
 ```
 
+During BookGraph shadow development, `inkline ingest pdf` can also write parser-neutral
+ObservedDocument and observed BookGraph artifacts:
+
+```bash
+uv run --extra mineru inkline ingest pdf data/samples/丝绸之路新史.pdf \
+  --parser mineru \
+  --output data/outputs/丝绸之路新史/canonical.json \
+  --observed-output data/outputs/丝绸之路新史/observed_document.json \
+  --bookgraph-from-observed-output data/outputs/丝绸之路新史/canonical_v2_observed.json
+```
+
 MinerU ingestion keeps Qwen visual marker repair disabled by default. Enable it
 with `--marker-locator-repair`; it uses `qwen3.6:35b-a3b` at 150 DPI for full
 pages and 200 DPI for paragraph-block retries. The shared Ollama/Qwen client

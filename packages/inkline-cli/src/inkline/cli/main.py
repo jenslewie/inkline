@@ -49,6 +49,21 @@ def _add_ingest_commands(subparsers: argparse._SubParsersAction) -> None:
         default=150,
         help="DPI for Qwen full-page marker location.",
     )
+    ingest_pdf.add_argument(
+        "--bookgraph-output",
+        type=Path,
+        help="Optional shadow BookGraph canonical_v2.json output path.",
+    )
+    ingest_pdf.add_argument(
+        "--observed-output",
+        type=Path,
+        help="Optional parser-neutral observed_document.json shadow output path.",
+    )
+    ingest_pdf.add_argument(
+        "--bookgraph-from-observed-output",
+        type=Path,
+        help="Optional BookGraph output built from observed_document shadow data.",
+    )
     ingest_pdf.add_argument("--output", required=True)
     ingest_pdf.set_defaults(handler=_ingest_pdf)
 
@@ -139,6 +154,9 @@ def _ingest_pdf(args: argparse.Namespace) -> int:
             "method": args.method,
             "marker_locator_repair": args.marker_locator_repair,
             "marker_locator_page_dpi": args.marker_locator_page_dpi,
+            "bookgraph_output": args.bookgraph_output,
+            "observed_output": args.observed_output,
+            "bookgraph_from_observed_output": args.bookgraph_from_observed_output,
         },
     )
     result = parse_document(request, args.parser_name)
