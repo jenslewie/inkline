@@ -8,7 +8,7 @@ from typing import Any
 MIN_BODY_WIDTH_RATIO = 0.2
 MAX_BODY_WIDTH_RATIO = 0.92
 MIN_LOCAL_PROFILE_REFERENCES = 2
-MIN_DOMINANT_REFERENCE_RATIO = 0.65
+MIN_DOMINANT_REFERENCE_RATIO = 0.7
 MAX_DOMINANT_WIDTH_SPREAD_RATIO = 1.5
 
 
@@ -87,22 +87,22 @@ def _page_profiles(
         grouped.setdefault(page, []).extend(_reference_bboxes(unit, page))
 
     profiles: dict[int, dict[str, Any]] = {}
-    deferred_pages: dict[int, list[list[float]]] = {}
+    deferred_pages: dict[int, tuple[list[list[float]], str]] = {}
     for page, bboxes in grouped.items():
         profile, rejection_reason = _local_page_profile(page, bboxes, page_sizes)
         if profile:
             profiles[page] = profile
             profile_quality["accepted"] += 1
             continue
-        if rejection_reason == "needs_fallback":
-            deferred_pages[page] = bboxes
-            continue
-        profile_quality[f"rejected_{rejection_reason}"] += 1
+        deferred_pages[page] = (bboxes, rejection_reason)
 
-    for page, bboxes in deferred_pages.items():
+    for page, (bboxes, rejection_reason) in deferred_pages.items():
         source_page = _nearest_profile_page(page, profiles)
         if source_page is None:
-            profile_quality["rejected_no_stable_profile"] += 1
+            if rejection_reason == "needs_fallback":
+                profile_quality["rejected_no_stable_profile"] += 1
+            else:
+                profile_quality[f"rejected_{rejection_reason}"] += 1
             continue
         size = page_sizes.get(page, {})
         source = profiles[source_page]
@@ -153,10 +153,8 @@ def _dominant_reference_bboxes(bboxes: list[list[float]]) -> list[list[float]]:
     valid_bboxes = [bbox for bbox in bboxes if _width(bbox) > 0]
     if len(valid_bboxes) < MIN_LOCAL_PROFILE_REFERENCES:
         return []
-    widths = sorted((_width(bbox) for bbox in valid_bboxes), reverse=True)
-    anchor_count = max(MIN_LOCAL_PROFILE_REFERENCES, len(widths) // 2)
-    anchor = median(widths[:anchor_count])
-    threshold = anchor * MIN_DOMINANT_REFERENCE_RATIO
+    widest = max(_width(bbox) for bbox in valid_bboxes)
+    threshold = widest * MIN_DOMINANT_REFERENCE_RATIO
     dominant_bboxes = [bbox for bbox in valid_bboxes if _width(bbox) >= threshold]
     if len(dominant_bboxes) < MIN_LOCAL_PROFILE_REFERENCES:
         return []
@@ -272,22 +270,6 @@ def _unit_record(
             "right_inset": None,
             "decision": "skipped_no_bbox",
         }
-    short_line_group = _short_line_group(unit, page_sizes)
-    if short_line_group:
-        width = _width(bbox)
-        return {
-            **base,
-            "classified_type": "display_block",
-            "width": width,
-            "body_width": None,
-            "width_ratio": None,
-            "left_inset": None,
-            "right_inset": None,
-            "signals": [f"{short_line_group}_aligned_short_line_group"],
-            "layout_form": "short_line_group",
-            "alignment": short_line_group,
-            "decision": "display_block",
-        }
     profile = page_profiles.get(int(unit["page"]))
     if not profile:
         width = _width(bbox)
@@ -301,6 +283,27 @@ def _unit_record(
             "decision": "skipped_no_profile",
         }
     metrics = _unit_metrics(bbox, profile)
+    if profile.get("profile_source") == "nearest_page":
+        return {
+            **base,
+            "classified_type": "paragraph",
+            **metrics,
+            "profile_source": "nearest_page",
+            "profile_source_page": profile["profile_source_page"],
+            "signals": [],
+            "decision": "paragraph",
+        }
+    short_line_group = _short_line_group(unit, page_sizes)
+    if short_line_group:
+        return {
+            **base,
+            "classified_type": "display_block",
+            **metrics,
+            "signals": [f"{short_line_group}_aligned_short_line_group"],
+            "layout_form": "short_line_group",
+            "alignment": short_line_group,
+            "decision": "display_block",
+        }
     signals = _display_signals(bbox, profile)
     decision = "display_block" if _is_display_candidate(signals) else "paragraph"
     return {

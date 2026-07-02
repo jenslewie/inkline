@@ -566,6 +566,49 @@ def test_layout_profile_ignores_short_line_outliers_when_estimating_body_lane() 
     assert audit["page_profiles"][0]["body_width"] == 800.0
 
 
+def test_layout_profile_uses_widest_stable_lane_when_page_has_many_short_lines() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Mixed body and short lines",
+                page=1,
+                bbox=[100, 100, 900, 440],
+                spans=[
+                    {"page": 1, "bbox": [100, 100, 185, 120]},
+                    {"page": 1, "bbox": [100, 135, 205, 155]},
+                    {"page": 1, "bbox": [100, 170, 900, 200]},
+                    {"page": 1, "bbox": [100, 215, 900, 245]},
+                    {"page": 1, "bbox": [100, 260, 900, 290]},
+                    {"page": 1, "bbox": [220, 305, 380, 325]},
+                    {"page": 1, "bbox": [220, 340, 470, 360]},
+                    {"page": 1, "bbox": [100, 385, 365, 405]},
+                    {"page": 1, "bbox": [100, 420, 235, 440]},
+                    {"page": 1, "bbox": [100, 455, 235, 475]},
+                    {"page": 1, "bbox": [100, 490, 235, 510]},
+                    {"page": 1, "bbox": [100, 525, 190, 545]},
+                    {"page": 1, "bbox": [100, 560, 235, 580]},
+                    {"page": 1, "bbox": [100, 595, 190, 615]},
+                ],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            )
+        ]
+    )
+    units, _ = build_text_units(document)
+
+    audit = audit_text_unit_layout(units, document["pages"])
+
+    assert audit["summary"]["skipped_no_profile"] == 0
+    assert audit["profile_quality"]["accepted"] == 1
+    assert audit["profile_quality"]["rejected_unstable_widths"] == 0
+    assert audit["page_profiles"][0]["body_left"] == 100.0
+    assert audit["page_profiles"][0]["body_right"] == 900.0
+    assert audit["page_profiles"][0]["body_width"] == 800.0
+    assert audit["page_profiles"][0]["reference_unit_count"] == 3
+
+
 def test_layout_profile_uses_nearest_stable_profile_for_sparse_page() -> None:
     document = _document_with_pages(
         [
@@ -603,7 +646,7 @@ def test_layout_profile_uses_nearest_stable_profile_for_sparse_page() -> None:
     classified = classify_text_units_by_layout(units, document["pages"])
     audit = audit_text_unit_layout(units, document["pages"])
 
-    assert [unit["unit_type"] for unit in classified] == ["paragraph", "display_block"]
+    assert [unit["unit_type"] for unit in classified] == ["paragraph", "paragraph"]
     assert audit["summary"]["skipped_no_profile"] == 0
     assert audit["profile_quality"]["accepted"] == 1
     assert audit["profile_quality"]["filled_from_nearest_profile"] == 1
@@ -618,9 +661,60 @@ def test_layout_profile_uses_nearest_stable_profile_for_sparse_page() -> None:
         "profile_source": "nearest_page",
         "profile_source_page": 1,
     }
+    assert audit["unit_records"][1]["profile_source"] == "nearest_page"
+    assert audit["unit_records"][1]["signals"] == []
 
 
-def test_layout_profile_quality_rejects_unstable_reference_widths() -> None:
+def test_layout_profile_uses_nearest_stable_profile_for_narrow_local_references() -> None:
+    document = _document_with_pages(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body before",
+                page=1,
+                bbox=[100, 100, 900, 250],
+                spans=[
+                    {"page": 1, "bbox": [100, 100, 900, 130]},
+                    {"page": 1, "bbox": [100, 160, 900, 190]},
+                    {"page": 1, "bbox": [100, 220, 900, 250]},
+                ],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Narrow local structure",
+                page=2,
+                bbox=[420, 100, 610, 220],
+                spans=[
+                    {"page": 2, "bbox": [420, 100, 610, 130]},
+                    {"page": 2, "bbox": [422, 160, 608, 190]},
+                    {"page": 2, "bbox": [421, 220, 609, 250]},
+                ],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+        ],
+        [
+            make_observed_page(1, width=1000, height=1000),
+            make_observed_page(2, width=1000, height=1000),
+        ],
+    )
+    units, _ = build_text_units(document)
+
+    audit = audit_text_unit_layout(units, document["pages"])
+
+    assert audit["summary"]["skipped_no_profile"] == 0
+    assert audit["profile_quality"]["filled_from_nearest_profile"] == 1
+    assert audit["profile_quality"]["rejected_extreme_body_width"] == 0
+    assert audit["page_profiles"][1]["profile_source"] == "nearest_page"
+    assert audit["page_profiles"][1]["profile_source_page"] == 1
+    assert audit["unit_records"][1]["body_width"] == 800.0
+
+
+def test_layout_profile_quality_rejects_page_without_dominant_body_lane() -> None:
     document = _document(
         [
             make_observation(
@@ -631,7 +725,7 @@ def test_layout_profile_quality_rejects_unstable_reference_widths() -> None:
                 bbox=[100, 100, 900, 220],
                 spans=[
                     {"page": 1, "bbox": [100, 100, 900, 130]},
-                    {"page": 1, "bbox": [100, 130, 750, 160]},
+                    {"page": 1, "bbox": [100, 130, 590, 160]},
                     {"page": 1, "bbox": [100, 160, 600, 190]},
                     {"page": 1, "bbox": [100, 190, 400, 220]},
                 ],
@@ -656,7 +750,7 @@ def test_layout_profile_quality_rejects_unstable_reference_widths() -> None:
 
     assert [unit["unit_type"] for unit in classified] == ["paragraph", "paragraph"]
     assert audit["page_profiles"] == []
-    assert audit["profile_quality"]["rejected_unstable_widths"] == 1
+    assert audit["profile_quality"]["rejected_no_stable_profile"] == 1
 
 
 def test_layout_profile_quality_rejects_extremely_narrow_body_width() -> None:
