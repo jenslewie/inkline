@@ -133,7 +133,7 @@ def _layout_records_by_unit_id(observed_path: Path) -> dict[str, dict[str, Any]]
     observed = _read_json(observed_path)
     validate_observed_document(observed)
     units, _ignored_counts = build_text_units(observed)
-    audit = audit_text_unit_layout(units, observed["pages"])
+    audit = audit_text_unit_layout(units, observed["pages"], observed["observations"])
     return {
         str(record["unit_id"]): record
         for record in audit.get("unit_records", [])

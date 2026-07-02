@@ -13,13 +13,21 @@ MAX_DOMINANT_WIDTH_SPREAD_RATIO = 1.5
 
 
 def audit_text_unit_layout(
-    units: list[dict[str, Any]], pages: list[dict[str, Any]]
+    units: list[dict[str, Any]],
+    pages: list[dict[str, Any]],
+    observations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     page_profiles, profile_quality = _page_profiles(units, pages)
     page_sizes = _page_sizes(pages)
+    page_coverage = _page_coverage(pages, units, page_profiles, observations or [])
     unit_records: list[dict[str, Any]] = []
     summary = {
+        "total_pages": page_coverage["total_pages"],
         "pages_with_profiles": len(page_profiles),
+        "pages_without_profiles": len(page_coverage["pages_without_profiles"]),
+        "pages_without_profiles_by_reason": page_coverage[
+            "pages_without_profiles_by_reason"
+        ],
         "paragraph_units": 0,
         "classified_display_blocks": 0,
         "skipped_no_bbox": 0,
@@ -39,6 +47,7 @@ def audit_text_unit_layout(
             summary["skipped_no_profile"] += 1
     return {
         "summary": summary,
+        "page_coverage": page_coverage,
         "profile_quality": profile_quality,
         "page_profiles": _page_profile_records(page_profiles),
         "unit_records": unit_records,
@@ -223,6 +232,95 @@ def _nearest_profile_page(page: int, page_profiles: dict[int, dict[str, Any]]) -
     if not page_profiles:
         return None
     return min(page_profiles, key=lambda candidate: (abs(candidate - page), candidate))
+
+
+def _page_coverage(
+    pages: list[dict[str, Any]],
+    units: list[dict[str, Any]],
+    page_profiles: dict[int, dict[str, Any]],
+    observations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    page_numbers = sorted(int(page["page"]) for page in pages)
+    units_by_page: dict[int, Counter[str]] = {page: Counter() for page in page_numbers}
+    observation_kinds_by_page: dict[int, Counter[str]] = {
+        page: Counter() for page in page_numbers
+    }
+    for unit in units:
+        page = int(unit["page"])
+        if page in units_by_page:
+            units_by_page[page][str(unit.get("unit_type") or "")] += 1
+    for observation in observations:
+        page = int(observation["page"])
+        if page in observation_kinds_by_page:
+            observation_kinds_by_page[page][str(observation.get("kind") or "")] += 1
+
+    profile_pages = set(page_profiles)
+    pages_without_profiles = [
+        {
+            "page": page,
+            "reason": _page_without_profile_reason(
+                units_by_page[page], observation_kinds_by_page[page]
+            ),
+        }
+        for page in page_numbers
+        if page not in profile_pages
+    ]
+    return {
+        "total_pages": len(page_numbers),
+        "pages_with_profiles": len(profile_pages),
+        "pages_without_profiles": pages_without_profiles,
+        "pages_without_profiles_by_reason": dict(
+            Counter(record["reason"] for record in pages_without_profiles)
+        ),
+        "mixed_pages": {
+            "heading_with_paragraph_units": [
+                page
+                for page in page_numbers
+                if units_by_page[page].get("heading")
+                and units_by_page[page].get("paragraph")
+            ],
+            "image_with_text_units": [
+                page
+                for page in page_numbers
+                if observation_kinds_by_page[page].get("image_region")
+                and sum(units_by_page[page].values()) > 0
+            ],
+            "table_with_text_units": [
+                page
+                for page in page_numbers
+                if observation_kinds_by_page[page].get("table_region")
+                and sum(units_by_page[page].values()) > 0
+            ],
+        },
+    }
+
+
+def _page_without_profile_reason(
+    unit_types: Counter[str], observation_kinds: Counter[str]
+) -> str:
+    if unit_types.get("paragraph"):
+        return "paragraph_without_profile"
+    if unit_types and set(unit_types) == {"heading"}:
+        return "heading_only"
+    if unit_types:
+        return "non_paragraph_text_units"
+
+    content_kinds = Counter(
+        {kind: count for kind, count in observation_kinds.items() if kind != "page_marker"}
+    )
+    if not content_kinds:
+        return "empty"
+    if set(content_kinds) == {"image_region"}:
+        return "image_only"
+    if set(content_kinds) == {"table_region"}:
+        return "table_only"
+    if set(content_kinds) == {"text_region"}:
+        return "text_without_text_units"
+    if content_kinds.get("image_region") and content_kinds.get("text_region"):
+        return "image_with_text_without_units"
+    if content_kinds.get("table_region") and content_kinds.get("text_region"):
+        return "table_with_text_without_units"
+    return "non_text_observations"
 
 
 def _reference_bboxes(unit: dict[str, Any], page: int) -> list[list[float]]:

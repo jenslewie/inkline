@@ -25,7 +25,7 @@ def audit_observed_text_unit_layout(observed_path: Path) -> dict[str, Any]:
     observed = _read_json(observed_path)
     validate_observed_document(observed)
     units, ignored_counts = build_text_units(observed)
-    report = audit_text_unit_layout(units, observed["pages"])
+    report = audit_text_unit_layout(units, observed["pages"], observed["observations"])
     report["ignored_observation_counts"] = ignored_counts
     return report
 

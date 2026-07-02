@@ -28,7 +28,9 @@ def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
     reading_order: list[str] = []
     parser = str(metadata.get("parser_name") or "")
     text_units, ignored_counts = build_text_units(document)
-    layout_audit = audit_text_unit_layout(text_units, document["pages"])
+    layout_audit = audit_text_unit_layout(
+        text_units, document["pages"], document["observations"]
+    )
     text_units = classify_text_units_by_layout(text_units, document["pages"])
 
     for unit in text_units:
@@ -50,6 +52,7 @@ def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
 
     metadata["shadow_ignored_observation_counts"] = ignored_counts
     metadata["shadow_text_unit_layout_audit_summary"] = layout_audit["summary"]
+    metadata["shadow_text_unit_layout_page_coverage"] = layout_audit["page_coverage"]
     metadata["shadow_text_unit_layout_profile_quality"] = layout_audit["profile_quality"]
     projections = {
         "reading_order": reading_order,

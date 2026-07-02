@@ -243,7 +243,10 @@ def test_build_bookgraph_from_observed_records_layout_audit_summary() -> None:
     graph = build_bookgraph_from_observed(_inset_body_document())
 
     assert graph["metadata"]["shadow_text_unit_layout_audit_summary"] == {
+        "total_pages": 1,
         "pages_with_profiles": 1,
+        "pages_without_profiles": 0,
+        "pages_without_profiles_by_reason": {},
         "paragraph_units": 3,
         "classified_display_blocks": 1,
         "skipped_no_bbox": 0,
@@ -256,6 +259,17 @@ def test_build_bookgraph_from_observed_records_layout_audit_summary() -> None:
         "rejected_invalid_width": 0,
         "rejected_unstable_widths": 0,
         "rejected_extreme_body_width": 0,
+    }
+    assert graph["metadata"]["shadow_text_unit_layout_page_coverage"] == {
+        "total_pages": 1,
+        "pages_with_profiles": 1,
+        "pages_without_profiles": [],
+        "pages_without_profiles_by_reason": {},
+        "mixed_pages": {
+            "heading_with_paragraph_units": [],
+            "image_with_text_units": [],
+            "table_with_text_units": [],
+        },
     }
     assert "shadow_text_unit_layout_audit" not in graph["metadata"]
 

@@ -502,13 +502,125 @@ def test_layout_classifier_builds_body_lane_from_text_unit_spans() -> None:
 
     assert [unit["unit_type"] for unit in classified] == ["paragraph", "display_block"]
     assert audit["summary"] == {
+        "total_pages": 1,
         "pages_with_profiles": 1,
+        "pages_without_profiles": 0,
+        "pages_without_profiles_by_reason": {},
         "paragraph_units": 2,
         "classified_display_blocks": 1,
         "skipped_no_bbox": 0,
         "skipped_no_profile": 0,
     }
     assert audit["page_profiles"][0]["reference_unit_count"] == 3
+
+
+def test_layout_audit_reports_page_coverage_reasons() -> None:
+    document = _document_with_pages(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Title",
+                page=1,
+                bbox=[400, 100, 600, 140],
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000002",
+                "image_region",
+                page=2,
+                bbox=[100, 100, 900, 900],
+            ),
+            make_observation(
+                "obs000003",
+                "table_region",
+                page=3,
+                bbox=[100, 100, 900, 900],
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="Chapter",
+                page=5,
+                bbox=[400, 100, 600, 140],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000005",
+                "text_region",
+                text="Chapter number",
+                page=5,
+                bbox=[450, 180, 550, 210],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000006",
+                "image_region",
+                page=6,
+                bbox=[100, 100, 900, 700],
+            ),
+            make_observation(
+                "obs000007",
+                "text_region",
+                text="Map label",
+                page=6,
+                bbox=[300, 750, 500, 780],
+                role_hint="body_text",
+            ),
+            make_observation(
+                "obs000008",
+                "text_region",
+                text="Body",
+                page=7,
+                bbox=[100, 100, 900, 220],
+                spans=[
+                    {"page": 7, "bbox": [100, 100, 900, 130]},
+                    {"page": 7, "bbox": [100, 150, 900, 180]},
+                    {"page": 7, "bbox": [100, 190, 900, 220]},
+                ],
+                role_hint="body_text",
+            ),
+            make_observation(
+                "obs000009",
+                "text_region",
+                text="No stable lane",
+                page=8,
+                bbox=[100, 100, 600, 220],
+                spans=[
+                    {"page": 8, "bbox": [100, 100, 600, 130]},
+                    {"page": 8, "bbox": [100, 150, 390, 180]},
+                    {"page": 8, "bbox": [100, 190, 300, 220]},
+                ],
+                role_hint="body_text",
+            ),
+        ],
+        [make_observed_page(page, width=1000, height=1000) for page in range(1, 9)],
+    )
+    units, _ = build_text_units(document)
+
+    audit = audit_text_unit_layout(units, document["pages"], document["observations"])
+
+    assert audit["summary"]["total_pages"] == 8
+    assert audit["summary"]["pages_without_profiles"] == 4
+    assert audit["summary"]["pages_without_profiles_by_reason"] == {
+        "empty": 1,
+        "heading_only": 1,
+        "image_only": 1,
+        "table_only": 1,
+    }
+    assert audit["page_coverage"]["pages_without_profiles"] == [
+        {"page": 1, "reason": "heading_only"},
+        {"page": 2, "reason": "image_only"},
+        {"page": 3, "reason": "table_only"},
+        {"page": 4, "reason": "empty"},
+    ]
+    assert audit["page_coverage"]["mixed_pages"] == {
+        "heading_with_paragraph_units": [5],
+        "image_with_text_units": [6],
+        "table_with_text_units": [],
+    }
 
 
 def test_layout_profile_ignores_short_line_outliers_when_estimating_body_lane() -> None:
@@ -828,7 +940,10 @@ def test_layout_audit_reports_page_profiles_and_candidate_signals_without_text()
     audit = audit_text_unit_layout(units, document["pages"])
 
     assert audit["summary"] == {
+        "total_pages": 1,
         "pages_with_profiles": 1,
+        "pages_without_profiles": 0,
+        "pages_without_profiles_by_reason": {},
         "paragraph_units": 3,
         "classified_display_blocks": 1,
         "skipped_no_bbox": 0,
