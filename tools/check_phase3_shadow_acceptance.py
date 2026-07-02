@@ -57,6 +57,8 @@ def _book_report(path: Path) -> dict[str, Any]:
         else []
     )
     node_counts = dict(sorted(Counter(_node_types(nodes)).items()))
+    node_counts_by_flow_scope = _node_counts_by_flow_scope(nodes)
+    node_counts_by_rag_inclusion = _node_counts_by_rag_inclusion(nodes)
 
     errors.extend(_structural_errors(nodes, evidence, reading_order))
     return {
@@ -64,6 +66,9 @@ def _book_report(path: Path) -> dict[str, Any]:
         "doc_id": metadata.get("doc_id") or "",
         "title": metadata.get("title") or "",
         "node_counts": node_counts,
+        "node_counts_by_flow_scope": node_counts_by_flow_scope,
+        "node_counts_by_rag_inclusion": node_counts_by_rag_inclusion,
+        "page_role_counts": _page_role_counts(metadata),
         "node_count": len(nodes),
         "evidence_count": len(evidence),
         "reading_order_count": len(reading_order),
@@ -123,6 +128,46 @@ def _node_types(nodes: list[Any]) -> list[str]:
     return values
 
 
+def _node_counts_by_flow_scope(nodes: list[Any]) -> dict[str, dict[str, int]]:
+    counts: dict[str, Counter[str]] = {}
+    for node in nodes:
+        if not isinstance(node, dict) or not isinstance(node.get("node_type"), str):
+            continue
+        attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+        flow_scope = str(attrs.get("flow_scope") or "unknown")
+        counts.setdefault(flow_scope, Counter())[node["node_type"]] += 1
+    return _nested_counts(counts)
+
+
+def _node_counts_by_rag_inclusion(nodes: list[Any]) -> dict[str, dict[str, int]]:
+    counts: dict[str, Counter[str]] = {}
+    for node in nodes:
+        if not isinstance(node, dict) or not isinstance(node.get("node_type"), str):
+            continue
+        attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+        key = "excluded" if attrs.get("include_in_rag") is False else "included"
+        counts.setdefault(key, Counter())[node["node_type"]] += 1
+    return _nested_counts(counts)
+
+
+def _page_role_counts(metadata: dict[str, Any]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    page_roles = metadata.get("shadow_page_roles")
+    if not isinstance(page_roles, list):
+        return {}
+    for record in page_roles:
+        if not isinstance(record, dict):
+            continue
+        counts[str(record.get("page_role") or "unknown")] += 1
+    return dict(sorted(counts.items()))
+
+
+def _nested_counts(counts: dict[str, Counter[str]]) -> dict[str, dict[str, int]]:
+    return {
+        group: dict(sorted(group_counts.items())) for group, group_counts in sorted(counts.items())
+    }
+
+
 def _ignored_counts(metadata: dict[str, Any]) -> dict[str, int]:
     counts = (
         metadata.get("shadow_ignored_observation_counts")
@@ -159,15 +204,24 @@ def _multi_page_evidence_count(evidence: list[Any]) -> int:
 
 def _totals(books: list[dict[str, Any]]) -> dict[str, Any]:
     node_counts: Counter[str] = Counter()
+    node_counts_by_flow_scope: dict[str, Counter[str]] = {}
+    node_counts_by_rag_inclusion: dict[str, Counter[str]] = {}
+    page_role_counts: Counter[str] = Counter()
     ignored_counts: Counter[str] = Counter()
     merge_counts: Counter[str] = Counter()
     for book in books:
         node_counts.update(book["node_counts"])
+        _update_nested_counts(node_counts_by_flow_scope, book["node_counts_by_flow_scope"])
+        _update_nested_counts(node_counts_by_rag_inclusion, book["node_counts_by_rag_inclusion"])
+        page_role_counts.update(book["page_role_counts"])
         ignored_counts.update(book["ignored_counts"])
         merge_counts.update(book["merge_counts"])
     return {
         "book_count": len(books),
         "node_counts": dict(sorted(node_counts.items())),
+        "node_counts_by_flow_scope": _nested_counts(node_counts_by_flow_scope),
+        "node_counts_by_rag_inclusion": _nested_counts(node_counts_by_rag_inclusion),
+        "page_role_counts": dict(sorted(page_role_counts.items())),
         "node_count": sum(book["node_count"] for book in books),
         "evidence_count": sum(book["evidence_count"] for book in books),
         "reading_order_count": sum(book["reading_order_count"] for book in books),
@@ -176,6 +230,13 @@ def _totals(books: list[dict[str, Any]]) -> dict[str, Any]:
         "merge_counts": dict(sorted(merge_counts.items())),
         "multi_page_evidence_count": sum(book["multi_page_evidence_count"] for book in books),
     }
+
+
+def _update_nested_counts(
+    target: dict[str, Counter[str]], source: dict[str, dict[str, int]]
+) -> None:
+    for group, counts in source.items():
+        target.setdefault(group, Counter()).update(counts)
 
 
 if __name__ == "__main__":

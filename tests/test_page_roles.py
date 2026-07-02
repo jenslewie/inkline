@@ -78,7 +78,7 @@ def test_classify_observed_page_roles_uses_visual_density_for_cover_material() -
 
     roles = classify_observed_page_roles(document)
 
-    assert [record["page_role"] for record in roles] == ["cover_page", "cover_spread"]
+    assert [record["page_role"] for record in roles] == ["cover_page", "front_visual_page"]
     assert [record["flow_scope"] for record in roles] == ["front_matter", "front_matter"]
     assert [record["include_in_rag"] for record in roles] == [False, False]
     assert "visual_dominant" in roles[0]["signals"]

@@ -42,37 +42,83 @@ def _metadata(doc_id: str = "sample") -> dict[str, Any]:
             "rejected_unstable_widths": 0,
             "rejected_extreme_body_width": 0,
         },
+        "shadow_page_roles": [
+            {
+                "page": 1,
+                "page_role": "title_like_page",
+                "flow_scope": "front_matter",
+                "include_in_epub": True,
+                "include_in_rag": False,
+                "signals": ["early_page", "sparse_centered_text", "no_body_profile"],
+            },
+            {
+                "page": 2,
+                "page_role": "body",
+                "flow_scope": "body",
+                "include_in_epub": True,
+                "include_in_rag": True,
+                "signals": ["body_profile"],
+            },
+        ],
     }
 
 
 def _graph(doc_id: str = "sample") -> dict[str, Any]:
-    node = make_node(
+    front_heading = make_node(
         "n000001",
-        "paragraph",
-        "Body",
+        "heading",
+        "Title",
         attrs={
             "source_text_unit_id": "tu000001",
-            "layout_role": "normal_flow",
-            "merge_reasons": ["cross_page_boundary_continuation"],
+            "flow_scope": "front_matter",
+            "page_role": "title_like_page",
+            "include_in_rag": False,
         },
         evidence_ids=["ev000001"],
     )
-    evidence = make_evidence(
+    body_node = make_node(
+        "n000002",
+        "paragraph",
+        "Body",
+        attrs={
+            "source_text_unit_id": "tu000002",
+            "layout_role": "normal_flow",
+            "flow_scope": "body",
+            "page_role": "body",
+            "include_in_rag": True,
+            "merge_reasons": ["cross_page_boundary_continuation"],
+        },
+        evidence_ids=["ev000002"],
+    )
+    front_evidence = make_evidence(
         "ev000001",
         "parser-neutral",
         "tu000001",
         source_kind="text_unit",
         page=1,
-        pages=[1, 2],
+        pages=[1],
+        bbox=[10, 20, 300, 80],
+    )
+    body_evidence = make_evidence(
+        "ev000002",
+        "parser-neutral",
+        "tu000002",
+        source_kind="text_unit",
+        page=2,
+        pages=[2, 3],
         bbox=[10, 20, 300, 400],
-        spans=[{"page": 1, "bbox": [10, 20, 300, 400]}],
+        spans=[{"page": 2, "bbox": [10, 20, 300, 400]}],
     )
     return make_bookgraph(
         _metadata(doc_id),
-        [node],
+        [front_heading, body_node],
         [],
-        [evidence],
-        projections={"reading_order": ["n000001"], "epub_flow": ["n000001"], "rag_units": []},
+        [front_evidence, body_evidence],
+        projections={
+            "reading_order": ["n000001", "n000002"],
+            "epub_flow": ["n000001", "n000002"],
+            "rag_units": [{"unit_id": "ru000001", "node_id": "n000002"}],
+        },
     )
 
 
@@ -85,7 +131,19 @@ def test_phase3_shadow_acceptance_summarizes_structural_signals(tmp_path) -> Non
 
     assert report["status"] == "pass"
     assert report["totals"]["book_count"] == 1
-    assert report["totals"]["node_counts"] == {"paragraph": 1}
+    assert report["totals"]["node_counts"] == {"heading": 1, "paragraph": 1}
+    assert report["totals"]["node_counts_by_flow_scope"] == {
+        "body": {"paragraph": 1},
+        "front_matter": {"heading": 1},
+    }
+    assert report["totals"]["node_counts_by_rag_inclusion"] == {
+        "excluded": {"heading": 1},
+        "included": {"paragraph": 1},
+    }
+    assert report["books"][0]["page_role_counts"] == {
+        "body": 1,
+        "title_like_page": 1,
+    }
     assert report["totals"]["merge_counts"] == {"cross_page_boundary_continuation": 1}
     assert report["books"][0]["multi_page_evidence_count"] == 1
     assert report["books"][0]["ignored_counts"] == {"image_region": 1}

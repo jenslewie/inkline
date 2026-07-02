@@ -397,7 +397,7 @@ Observed shadow BookGraph 在 TextUnit 进入 node 之后记录 page-level scope
 
 它不读取页面文字含义，也不根据 `目录`、`ISBN`、`版权`、`前言`、`附录` 等关键词分类。因此当前角色名应理解为结构候选，而不是最终语义标签：
 
-- `cover_page` / `cover_spread`: 早期或 unnumbered prelude 中带视觉内容的页面。
+- `cover_page` / `front_visual_page`: 早期或 unnumbered prelude 中带视觉内容的页面；`front_visual_page` 只表示前置视觉页，不承诺它一定是装帧意义上的护封或封底。
 - `front_matter_page`: 首个印刷页码之前的文本页，即使存在稳定 body profile，也默认不进入 RAG。
 - `title_like_page`: 早期稀疏居中文本页，无 body profile。
 - `bibliographic_like_page`: 边缘页的文本页候选，无 body profile；名称表示迁移期候选，不表示已抽取出版语义。
@@ -407,6 +407,8 @@ Observed shadow BookGraph 在 TextUnit 进入 node 之后记录 page-level scope
 - `body` / `body_candidate`: 可进入正文 RAG flow 的页面。
 
 这一层不会从 `reading_order` 或 `epub_flow` 删除节点；它只影响 shadow `rag_units`。这让 EPUB 仍可保留封面、扉页、版权页、护封展开页、图版页等视觉或前后置材料，同时避免这些材料在 release canonical 切换前污染正文 RAG chunk。
+
+Phase 3 acceptance report 同时保留全量 `node_counts`，并增加 `node_counts_by_flow_scope`、`node_counts_by_rag_inclusion` 和 `page_role_counts`。这样 audit 可以明确区分 BookGraph 全量结构、正文流结构和实际进入 RAG 的文本单元，避免把 front matter heading 与 body heading 混在同一个判断口径里。
 
 ## display_block 定义
 

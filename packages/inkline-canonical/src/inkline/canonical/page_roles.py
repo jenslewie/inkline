@@ -193,7 +193,7 @@ def _unnumbered_prelude_record(
     if metrics["visual_count"]:
         return _record(
             page,
-            "cover_page" if is_first_page else "cover_spread",
+            "cover_page" if is_first_page else "front_visual_page",
             "front_matter",
             True,
             False,
@@ -234,7 +234,7 @@ def _visual_role_record(
     if is_first_page:
         return _record(page, "cover_page", "front_matter", True, False, signals)
     if is_early_page:
-        return _record(page, "cover_spread", "front_matter", True, False, signals)
+        return _record(page, "front_visual_page", "front_matter", True, False, signals)
     if is_last_page or is_late_page:
         return _record(page, "back_cover_candidate", "back_matter", True, False, signals)
     return _record(page, "visual_page", "visual_insert", True, False, signals)
