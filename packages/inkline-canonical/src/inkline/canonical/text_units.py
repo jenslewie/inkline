@@ -34,6 +34,8 @@ def build_text_units(document: dict[str, Any]) -> tuple[list[dict[str, Any]], di
             continue
         units.append(_unit_from_observation(observation, len(units) + 1, unit_type, layout_role))
 
+    _merge_heading_cluster_fragments(units, page_sizes, visual_bboxes)
+    _renumber_units(units)
     return units, dict(sorted(ignored_counts.items()))
 
 
@@ -94,6 +96,112 @@ def _unit_type(
     if observation["kind"] == "footnote_region" or role_hint == "footnote_text":
         return "footnote"
     return None
+
+
+def _merge_heading_cluster_fragments(
+    units: list[dict[str, Any]],
+    page_sizes: dict[int, dict[str, float]],
+    visual_bboxes: dict[int, list[list[float]]],
+) -> None:
+    units_by_page: dict[int, list[dict[str, Any]]] = {}
+    for unit in units:
+        units_by_page.setdefault(int(unit["page"]), []).append(unit)
+
+    for page, page_units in units_by_page.items():
+        if visual_bboxes.get(page) or not _text_only_heading_cluster_page(page_units):
+            continue
+        page_size = page_sizes.get(page, {})
+        page_width = float(page_size.get("width") or 0.0)
+        page_height = float(page_size.get("height") or 0.0)
+        heading_bboxes = [
+            unit["bbox"]
+            for unit in page_units
+            if unit.get("unit_type") == "heading" and _valid_bbox(unit.get("bbox"))
+        ]
+        cluster_units = [
+            unit
+            for unit in page_units
+            if unit.get("unit_type") == "heading"
+            or (
+                unit.get("unit_type") == "paragraph"
+                and _heading_cluster_candidate(unit, heading_bboxes, page_width, page_height)
+            )
+        ]
+        if len(cluster_units) < 2:
+            continue
+        keeper = cluster_units[0]
+        keeper["unit_type"] = "heading"
+        keeper["attrs"]["structure_promotion"] = "heading_cluster"
+        for fragment in cluster_units[1:]:
+            _merge_unit_fragment(keeper, fragment, "heading_cluster")
+            units.remove(fragment)
+
+
+def _text_only_heading_cluster_page(page_units: list[dict[str, Any]]) -> bool:
+    unit_types = {str(unit.get("unit_type")) for unit in page_units}
+    return (
+        2 <= len(page_units) <= 4
+        and "heading" in unit_types
+        and "paragraph" in unit_types
+        and unit_types <= {"heading", "paragraph"}
+    )
+
+
+def _heading_cluster_candidate(
+    unit: dict[str, Any],
+    heading_bboxes: list[list[float]],
+    page_width: float,
+    page_height: float,
+) -> bool:
+    bbox = unit.get("bbox")
+    if not _valid_bbox(bbox) or not heading_bboxes or page_width <= 0 or page_height <= 0:
+        return False
+    page_center = page_width / 2.0
+    unit_center = (float(bbox[0]) + float(bbox[2])) / 2.0
+    width = _width(bbox)
+    min_heading_top = min(float(heading[1]) for heading in heading_bboxes)
+    max_heading_bottom = max(float(heading[3]) for heading in heading_bboxes)
+    vertical_margin = page_height * 0.12
+    return (
+        width <= page_width * 0.55
+        and abs(unit_center - page_center) <= page_width * 0.12
+        and float(bbox[1]) >= min_heading_top - vertical_margin
+        and float(bbox[3]) <= max_heading_bottom + vertical_margin
+    )
+
+
+def _merge_unit_fragment(unit: dict[str, Any], fragment: dict[str, Any], merge_reason: str) -> None:
+    text = str(fragment.get("text") or "")
+    if text:
+        unit["text"] = f"{unit['text']}\n{text}" if unit["text"] else text
+    bbox = fragment.get("bbox")
+    if _valid_bbox(unit.get("bbox")) and _valid_bbox(bbox):
+        unit["bbox"] = _union_bbox(unit["bbox"], bbox)
+    for page in fragment.get("pages") or []:
+        if page not in unit["pages"]:
+            unit["pages"].append(page)
+    unit["spans"].extend(deepcopy(fragment.get("spans") or []))
+    unit["observation_ids"].extend(fragment.get("observation_ids") or [])
+    for role_hint in fragment.get("role_hints") or []:
+        if role_hint not in unit["role_hints"]:
+            unit["role_hints"].append(role_hint)
+    unit["parser_payloads"].extend(deepcopy(fragment.get("parser_payloads") or []))
+    unit["attrs"].setdefault("merge_reasons", []).append(merge_reason)
+    _merge_unit_attrs(unit["attrs"], fragment.get("attrs") or {})
+
+
+def _merge_unit_attrs(attrs: dict[str, Any], fragment_attrs: dict[str, Any]) -> None:
+    inline_runs = fragment_attrs.get("inline_runs")
+    if isinstance(inline_runs, list):
+        attrs.setdefault("inline_runs", []).extend(deepcopy(inline_runs))
+    note_refs = fragment_attrs.get("note_refs")
+    if isinstance(note_refs, list):
+        attrs.setdefault("note_refs", []).extend(deepcopy(note_refs))
+
+
+def _renumber_units(units: list[dict[str, Any]]) -> None:
+    for index, unit in enumerate(units, start=1):
+        unit["unit_id"] = f"tu{index:06d}"
 
 
 def _unit_from_observation(

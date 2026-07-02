@@ -147,6 +147,115 @@ def test_incompatible_role_hints_do_not_merge() -> None:
     assert [unit["text"] for unit in units] == ["Chapter", "Body"]
 
 
+def test_centered_fragments_on_text_only_heading_page_merge_into_one_heading() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Chapter number",
+                page=1,
+                bbox=[455, 300, 545, 322],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Main title",
+                page=1,
+                bbox=[360, 365, 640, 405],
+                role_hint="title_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Subtitle",
+                page=1,
+                bbox=[260, 430, 740, 462],
+                role_hint="body_text",
+                attrs={"reading_order": 3},
+            ),
+        ]
+    )
+
+    units, ignored = build_text_units(document)
+
+    assert ignored == {}
+    assert [unit["unit_type"] for unit in units] == ["heading"]
+    assert units[0]["text"] == "Chapter number\nMain title\nSubtitle"
+    assert units[0]["bbox"] == [260, 300, 740, 462]
+    assert units[0]["observation_ids"] == ["obs000001", "obs000002", "obs000003"]
+    assert units[0]["role_hints"] == ["body_text", "title_text"]
+    assert units[0]["attrs"]["structure_promotion"] == "heading_cluster"
+    assert units[0]["attrs"]["merge_reasons"] == ["heading_cluster", "heading_cluster"]
+
+
+def test_wide_body_paragraph_after_heading_does_not_promote_to_heading() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Section heading",
+                page=1,
+                bbox=[410, 180, 590, 210],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Body paragraph",
+                page=1,
+                bbox=[110, 280, 890, 920],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+        ]
+    )
+
+    units, _ = build_text_units(document)
+
+    assert [unit["unit_type"] for unit in units] == ["heading", "paragraph"]
+
+
+def test_image_text_heading_page_does_not_promote_map_labels_to_heading() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "image_region",
+                page=1,
+                bbox=[100, 100, 900, 700],
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Map title",
+                page=1,
+                bbox=[410, 720, 590, 745],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Map label",
+                page=1,
+                bbox=[430, 760, 570, 780],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+        ]
+    )
+
+    units, _ = build_text_units(document)
+
+    assert [unit["unit_type"] for unit in units] == ["paragraph"]
+
+
 def test_non_text_observations_are_ignored_with_counts() -> None:
     document = _document(
         [
@@ -549,9 +658,9 @@ def test_layout_audit_reports_page_coverage_reasons() -> None:
             make_observation(
                 "obs000005",
                 "text_region",
-                text="Chapter number",
+                text="Body paragraph",
                 page=5,
-                bbox=[450, 180, 550, 210],
+                bbox=[100, 180, 900, 240],
                 role_hint="body_text",
                 attrs={"reading_order": 2},
             ),
