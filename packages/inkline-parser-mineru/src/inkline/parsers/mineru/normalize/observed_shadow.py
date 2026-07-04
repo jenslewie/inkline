@@ -70,7 +70,7 @@ def _kind(raw_type: str) -> str:
         return "table_region"
     if raw_type in {"page_number", "page_header", "page_footer"}:
         return "page_marker"
-    if raw_type in {"page_footnote", "ref_text"}:
+    if raw_type == "page_footnote":
         return "footnote_region"
     return "text_region"
 
@@ -83,7 +83,7 @@ def _role_hint(raw_type: str, *, page: int, total_pages: int) -> str:
         "title": "title_text",
         "list": "list_text",
         "page_footnote": "footnote_text",
-        "ref_text": "footnote_text",
+        "ref_text": "reference_text",
         "caption": "caption_text",
         "toc": "toc_text",
         "page_number": "page_number",

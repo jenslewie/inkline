@@ -680,6 +680,7 @@ def _has_text_flow_hint(metrics: dict[str, Any]) -> bool:
     return bool(
         role_hint_counts.get("body_text")
         or role_hint_counts.get("list_text")
+        or role_hint_counts.get("reference_text")
         or role_hint_counts.get("footnote_text")
     )
 

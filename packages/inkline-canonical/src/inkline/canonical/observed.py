@@ -20,6 +20,7 @@ OBSERVATION_ROLE_HINTS = {
     "body_text",
     "title_text",
     "list_text",
+    "reference_text",
     "footnote_text",
     "caption_text",
     "toc_text",

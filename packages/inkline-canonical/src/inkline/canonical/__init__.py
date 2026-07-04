@@ -10,7 +10,9 @@ from inkline.canonical.bookgraph import (
 from inkline.canonical.bookgraph_audit import audit_bookgraph
 from inkline.canonical.bookgraph_notes import (
     audit_bookgraph_notes,
+    normalize_bookgraph_note_sections,
     normalize_bookgraph_notes,
+    resolve_bookgraph_note_refs,
     resolve_page_footnote_refs,
 )
 from inkline.canonical.footnote_text import strip_footnote_marker
@@ -74,7 +76,9 @@ __all__ = [
     "make_observed_page",
     "make_toc_entry",
     "migrate_document",
+    "normalize_bookgraph_note_sections",
     "normalize_bookgraph_notes",
+    "resolve_bookgraph_note_refs",
     "resolve_page_footnote_refs",
     "sample_document",
     "strip_footnote_marker",

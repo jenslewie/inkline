@@ -11,7 +11,7 @@ from inkline.canonical.bookgraph import (
     make_evidence,
     make_node,
 )
-from inkline.canonical.bookgraph_notes import resolve_page_footnote_refs
+from inkline.canonical.bookgraph_notes import resolve_bookgraph_note_refs
 from inkline.canonical.observed import validate_observed_document
 from inkline.canonical.page_roles import classify_observed_page_roles, page_roles_by_page
 from inkline.canonical.text_unit_layout import (
@@ -55,6 +55,7 @@ def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
     metadata["shadow_text_unit_layout_page_coverage"] = layout_audit["page_coverage"]
     metadata["shadow_text_unit_layout_profile_quality"] = layout_audit["profile_quality"]
     metadata["shadow_page_roles"] = _canonical_page_role_records(page_role_records)
+    metadata["shadow_page_sizes"] = _canonical_page_sizes(document["pages"])
     projections = {"reading_order": reading_order}
     graph = make_bookgraph(
         metadata,
@@ -64,7 +65,7 @@ def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
         assets=deepcopy(document.get("assets") or {}),
         projections=projections,
     )
-    return resolve_page_footnote_refs(graph)
+    return resolve_bookgraph_note_refs(graph)
 
 
 def _bookgraph_metadata(document: dict[str, Any]) -> dict[str, Any]:
@@ -139,4 +140,15 @@ def _canonical_page_role_records(records: list[dict[str, Any]]) -> list[dict[str
             "signals": list(record.get("signals") or []),
         }
         for record in records
+    ]
+
+
+def _canonical_page_sizes(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "page": int(page["page"]),
+            "width": float(page["width"]),
+            "height": float(page["height"]),
+        }
+        for page in pages
     ]

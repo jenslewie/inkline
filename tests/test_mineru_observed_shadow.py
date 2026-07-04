@@ -37,6 +37,7 @@ def test_build_observed_document_shadow_maps_mineru_blocks_to_generic_observatio
                 _raw("table", "", [10, 340, 300, 520], index=4),
                 _raw("page_number", "1", [490, 960, 510, 980], index=5),
                 _raw("page_footnote", "1 Note", [10, 850, 300, 900], index=6),
+                _raw("ref_text", "1 Reference-like note.", [10, 910, 300, 950], index=7),
             ]
         },
         page_sizes={1: (1000, 1000)},
@@ -52,6 +53,7 @@ def test_build_observed_document_shadow_maps_mineru_blocks_to_generic_observatio
         "table_region",
         "page_marker",
         "footnote_region",
+        "text_region",
     ]
     assert [observation["role_hint"] for observation in document["observations"]] == [
         "title_text",
@@ -60,6 +62,7 @@ def test_build_observed_document_shadow_maps_mineru_blocks_to_generic_observatio
         "unknown",
         "page_number",
         "footnote_text",
+        "reference_text",
     ]
     assert [page["page"] for page in document["pages"]] == [1]
 

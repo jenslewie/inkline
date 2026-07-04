@@ -267,6 +267,69 @@ def _page_footnote_ref_document() -> dict:
     )
 
 
+def _explicit_note_section_document() -> dict:
+    return make_observed_document(
+        _metadata(),
+        [
+            make_observed_page(10, width=1000, height=1000),
+            make_observed_page(90, width=1000, height=1000),
+        ],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="正文第一章",
+                page=10,
+                bbox=[100, 100, 500, 140],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Body text 1.",
+                page=10,
+                bbox=[100, 180, 900, 220],
+                role_hint="body_text",
+                attrs={
+                    "reading_order": 2,
+                    "inline_runs": [
+                        {"type": "text", "text": "Body text "},
+                        {"type": "note_ref", "text": "1", "marker": "1"},
+                    ],
+                },
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="注释",
+                page=90,
+                bbox=[420, 100, 580, 140],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="正文第一章",
+                page=90,
+                bbox=[100, 180, 500, 220],
+                role_hint="title_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000005",
+                "text_region",
+                text="1. A chapter note.",
+                page=90,
+                bbox=[100, 250, 900, 300],
+                role_hint="reference_text",
+                attrs={"reading_order": 3},
+            ),
+        ],
+    )
+
+
 def test_build_bookgraph_from_observed_uses_text_unit_aggregation() -> None:
     graph = build_bookgraph_from_observed(_adjacent_body_document())
 
@@ -384,6 +447,65 @@ def test_build_bookgraph_from_observed_resolves_page_footnote_refs() -> None:
         "page_footnote_ambiguous": 0,
         "page_footnote_unresolved": 0,
     }
+
+
+def test_build_bookgraph_from_observed_resolves_explicit_note_section_refs() -> None:
+    graph = build_bookgraph_from_observed(_explicit_note_section_document())
+
+    validate_bookgraph(graph)
+    assert [node["node_type"] for node in graph["nodes"]] == [
+        "heading",
+        "paragraph",
+        "heading",
+        "heading",
+        "note",
+    ]
+    note = graph["nodes"][4]
+    assert note["attrs"]["source_placement"] == "book_end"
+    assert note["attrs"]["scope"] == "chapter"
+    assert graph["nodes"][1]["inline_runs"][1]["attrs"]["target_note_id"] == "n000005"
+    assert graph["metadata"]["shadow_scoped_note_ref_resolution"] == {
+        "scoped_note_resolved": 1,
+        "scoped_note_ambiguous": 0,
+        "scoped_note_unresolved": 0,
+    }
+
+
+def test_build_bookgraph_from_observed_promotes_bottom_reference_text_to_page_foot_note() -> None:
+    document = make_observed_document(
+        _metadata(),
+        [make_observed_page(12, width=1000, height=1000)],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body text 1.",
+                page=12,
+                bbox=[100, 100, 900, 140],
+                role_hint="body_text",
+                attrs={
+                    "reading_order": 1,
+                    "inline_runs": [{"type": "note_ref", "text": "1", "marker": "1"}],
+                },
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="1. Bottom reference note.",
+                page=12,
+                bbox=[100, 720, 900, 760],
+                role_hint="reference_text",
+                attrs={"reading_order": 2},
+            ),
+        ],
+    )
+
+    graph = build_bookgraph_from_observed(document)
+
+    validate_bookgraph(graph)
+    assert [node["node_type"] for node in graph["nodes"]] == ["paragraph", "note"]
+    assert graph["nodes"][1]["attrs"]["source_placement"] == "page_foot"
+    assert graph["nodes"][0]["inline_runs"][0]["attrs"]["target_note_id"] == "n000002"
 
 
 def test_build_bookgraph_from_observed_does_not_promote_image_title_to_heading() -> None:

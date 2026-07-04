@@ -179,6 +179,8 @@ def _unit_type(observation: dict[str, Any], caption_title_ids: set[str]) -> str 
         return "paragraph"
     if role_hint == "list_text":
         return "list_item"
+    if role_hint == "reference_text":
+        return "list_item"
     if observation["kind"] == "footnote_region" or role_hint == "footnote_text":
         return "footnote"
     return None
