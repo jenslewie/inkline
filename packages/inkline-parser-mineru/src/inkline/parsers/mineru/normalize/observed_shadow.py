@@ -24,9 +24,12 @@ def build_observed_document_shadow(
         for page, size in sorted(page_sizes.items())
     ]
     observations: list[dict[str, Any]] = []
+    total_pages = len(page_sizes)
     for page in sorted(pages):
         for block in pages[page]:
-            observations.append(_observation_from_raw_block(block, len(observations) + 1))
+            observations.append(
+                _observation_from_raw_block(block, len(observations) + 1, total_pages)
+            )
     return make_observed_document(
         _observed_metadata(metadata),
         observed_pages,
@@ -46,7 +49,7 @@ def _observed_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _observation_from_raw_block(block: RawBlock, index: int) -> dict[str, Any]:
+def _observation_from_raw_block(block: RawBlock, index: int, total_pages: int) -> dict[str, Any]:
     return make_observation(
         f"obs{index:06d}",
         _kind(block.raw_type),
@@ -54,7 +57,7 @@ def _observation_from_raw_block(block: RawBlock, index: int) -> dict[str, Any]:
         page=block.page,
         bbox=deepcopy(block.bbox),
         spans=_spans(block),
-        role_hint=_role_hint(block.raw_type),
+        role_hint=_role_hint(block.raw_type, page=block.page, total_pages=total_pages),
         attrs=_attrs(block),
         parser_payload={"raw_type": block.raw_type, "raw": deepcopy(block.raw)},
     )
@@ -72,7 +75,9 @@ def _kind(raw_type: str) -> str:
     return "text_region"
 
 
-def _role_hint(raw_type: str) -> str:
+def _role_hint(raw_type: str, *, page: int, total_pages: int) -> str:
+    if raw_type == "index" and _is_front_edge_page(page, total_pages):
+        return "toc_text"
     return {
         "paragraph": "body_text",
         "title": "title_text",
@@ -85,6 +90,10 @@ def _role_hint(raw_type: str) -> str:
         "page_header": "header",
         "page_footer": "footer",
     }.get(raw_type, "unknown")
+
+
+def _is_front_edge_page(page: int, total_pages: int) -> bool:
+    return page <= max(20, round(total_pages * 0.05))
 
 
 def _attrs(block: RawBlock) -> dict[str, Any]:

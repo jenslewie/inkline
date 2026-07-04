@@ -46,17 +46,11 @@ def _metadata(doc_id: str = "sample") -> dict[str, Any]:
             {
                 "page": 1,
                 "page_role": "title_like_page",
-                "flow_scope": "front_matter",
-                "include_in_epub": True,
-                "include_in_rag": False,
                 "signals": ["early_page", "sparse_centered_text", "no_body_profile"],
             },
             {
                 "page": 2,
-                "page_role": "body",
-                "flow_scope": "body",
-                "include_in_epub": True,
-                "include_in_rag": True,
+                "page_role": "text_flow_page",
                 "signals": ["body_profile"],
             },
         ],
@@ -70,9 +64,7 @@ def _graph(doc_id: str = "sample") -> dict[str, Any]:
         "Title",
         attrs={
             "source_text_unit_id": "tu000001",
-            "flow_scope": "front_matter",
             "page_role": "title_like_page",
-            "include_in_rag": False,
         },
         evidence_ids=["ev000001"],
     )
@@ -83,9 +75,7 @@ def _graph(doc_id: str = "sample") -> dict[str, Any]:
         attrs={
             "source_text_unit_id": "tu000002",
             "layout_role": "normal_flow",
-            "flow_scope": "body",
-            "page_role": "body",
-            "include_in_rag": True,
+            "page_role": "text_flow_page",
             "merge_reasons": ["cross_page_boundary_continuation"],
         },
         evidence_ids=["ev000002"],
@@ -116,8 +106,6 @@ def _graph(doc_id: str = "sample") -> dict[str, Any]:
         [front_evidence, body_evidence],
         projections={
             "reading_order": ["n000001", "n000002"],
-            "epub_flow": ["n000001", "n000002"],
-            "rag_units": [{"unit_id": "ru000001", "node_id": "n000002"}],
         },
     )
 
@@ -132,16 +120,8 @@ def test_phase3_shadow_acceptance_summarizes_structural_signals(tmp_path) -> Non
     assert report["status"] == "pass"
     assert report["totals"]["book_count"] == 1
     assert report["totals"]["node_counts"] == {"heading": 1, "paragraph": 1}
-    assert report["totals"]["node_counts_by_flow_scope"] == {
-        "body": {"paragraph": 1},
-        "front_matter": {"heading": 1},
-    }
-    assert report["totals"]["node_counts_by_rag_inclusion"] == {
-        "excluded": {"heading": 1},
-        "included": {"paragraph": 1},
-    }
     assert report["books"][0]["page_role_counts"] == {
-        "body": 1,
+        "text_flow_page": 1,
         "title_like_page": 1,
     }
     assert report["totals"]["merge_counts"] == {"cross_page_boundary_continuation": 1}
@@ -174,3 +154,83 @@ def test_phase3_shadow_acceptance_fails_on_empty_reading_order(tmp_path) -> None
 
     assert report["status"] == "fail"
     assert "reading_order_node_count_mismatch" in report["books"][0]["errors"]
+
+
+def test_phase3_shadow_acceptance_fails_on_flow_scope_leakage(tmp_path) -> None:
+    tool = _load_tool()
+    graph = _graph()
+    graph["nodes"][0]["attrs"]["flow_scope"] = "front_matter"
+    graph["metadata"]["shadow_page_roles"] = [
+        {
+            "page": 1,
+            "page_role": "blank_page",
+            "flow_scope": "front_matter",
+            "signals": ["no_content_observations"],
+        },
+        {
+            "page": 2,
+            "page_role": "visual_page",
+            "signals": ["visual_dominant"],
+        },
+    ]
+    graph_path = tmp_path / "bookgraph.json"
+    graph_path.write_text(json.dumps(graph), encoding="utf-8")
+
+    report = tool.check_phase3_shadow_acceptance([graph_path])
+
+    assert report["status"] == "fail"
+    assert "phase3_flow_scope_leakage:metadata.shadow_page_roles" in report["books"][0]["errors"]
+    assert "phase3_flow_scope_leakage:nodes.attrs" in report["books"][0]["errors"]
+
+
+def test_phase3_shadow_acceptance_fails_on_removed_plate_section_page_role(
+    tmp_path,
+) -> None:
+    tool = _load_tool()
+    graph = _graph()
+    graph["metadata"]["shadow_page_roles"] = [
+        {
+            "page": 1,
+            "page_role": "plate_section_candidate",
+            "signals": ["plate_section_candidate_run"],
+        },
+    ]
+    graph_path = tmp_path / "bookgraph.json"
+    graph_path.write_text(json.dumps(graph), encoding="utf-8")
+
+    report = tool.check_phase3_shadow_acceptance([graph_path])
+
+    assert report["status"] == "fail"
+    assert "phase3_removed_page_role:plate_section_candidate" in report["books"][0]["errors"]
+
+
+def test_phase3_shadow_acceptance_fails_on_downstream_projection_leakage(tmp_path) -> None:
+    tool = _load_tool()
+    graph = _graph()
+    graph["projections"]["epub_flow"] = ["n000001", "n000002"]
+    graph["projections"]["rag_units"] = [{"unit_id": "ru000001", "node_id": "n000002"}]
+    graph_path = tmp_path / "bookgraph.json"
+    graph_path.write_text(json.dumps(graph), encoding="utf-8")
+
+    report = tool.check_phase3_shadow_acceptance([graph_path])
+
+    assert report["status"] == "fail"
+    assert "phase3_projection_leakage:epub_flow" in report["books"][0]["errors"]
+    assert "phase3_projection_leakage:rag_units" in report["books"][0]["errors"]
+
+
+def test_phase3_shadow_acceptance_fails_on_downstream_inclusion_attr_leakage(
+    tmp_path,
+) -> None:
+    tool = _load_tool()
+    graph = _graph()
+    graph["nodes"][0]["attrs"]["include_in_epub"] = True
+    graph["nodes"][1]["attrs"]["include_in_rag"] = True
+    graph_path = tmp_path / "bookgraph.json"
+    graph_path.write_text(json.dumps(graph), encoding="utf-8")
+
+    report = tool.check_phase3_shadow_acceptance([graph_path])
+
+    assert report["status"] == "fail"
+    assert "phase3_downstream_attr_leakage:include_in_epub" in report["books"][0]["errors"]
+    assert "phase3_downstream_attr_leakage:include_in_rag" in report["books"][0]["errors"]

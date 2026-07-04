@@ -360,34 +360,15 @@ def test_build_bookgraph_from_observed_preserves_observation_provenance() -> Non
     assert "legacy_block_id" not in graph["nodes"][1]["attrs"]
 
 
-def test_build_bookgraph_from_observed_creates_reading_order_and_rag_units() -> None:
+def test_build_bookgraph_from_observed_creates_reading_order_without_downstream_projections() -> None:
     graph = build_bookgraph_from_observed(_observed_document())
 
     assert graph["projections"]["reading_order"] == ["n000001", "n000002", "n000003"]
-    assert graph["projections"]["epub_flow"] == ["n000001", "n000002", "n000003"]
-    assert graph["projections"]["rag_units"] == [
-        {
-            "unit_id": "ru000001",
-            "node_id": "n000002",
-            "text": "Body",
-            "heading_path": ["Chapter"],
-            "parent_node_ids": ["n000001"],
-            "source_pages": [1],
-            "evidence_ids": ["ev000002"],
-        },
-        {
-            "unit_id": "ru000002",
-            "node_id": "n000003",
-            "text": "1 Note",
-            "heading_path": ["Chapter"],
-            "parent_node_ids": ["n000001"],
-            "source_pages": [1],
-            "evidence_ids": ["ev000003"],
-        },
-    ]
+    assert "epub_flow" not in graph["projections"]
+    assert "rag_units" not in graph["projections"]
 
 
-def test_build_bookgraph_from_observed_records_page_roles_and_excludes_paratext_from_rag() -> None:
+def test_build_bookgraph_from_observed_records_page_roles_without_projection_policy() -> None:
     graph = build_bookgraph_from_observed(_front_matter_then_body_document())
 
     validate_bookgraph(graph)
@@ -395,35 +376,22 @@ def test_build_bookgraph_from_observed_records_page_roles_and_excludes_paratext_
         {
             "page": 1,
             "page_role": "title_like_page",
-            "flow_scope": "front_matter",
-            "include_in_epub": True,
-            "include_in_rag": False,
             "signals": ["early_page", "sparse_centered_text", "no_body_profile"],
         },
         {
             "page": 2,
-            "page_role": "body",
-            "flow_scope": "body",
-            "include_in_epub": True,
-            "include_in_rag": True,
+            "page_role": "text_flow_page",
             "signals": ["body_profile"],
         },
     ]
     assert graph["nodes"][0]["attrs"]["page_role"] == "title_like_page"
-    assert graph["nodes"][0]["attrs"]["flow_scope"] == "front_matter"
-    assert graph["nodes"][0]["attrs"]["include_in_rag"] is False
-    assert graph["nodes"][1]["attrs"]["page_role"] == "body"
-    assert graph["nodes"][1]["attrs"]["include_in_rag"] is True
+    assert "flow_scope" not in graph["nodes"][0]["attrs"]
+    assert "include_in_epub" not in graph["nodes"][0]["attrs"]
+    assert "include_in_rag" not in graph["nodes"][0]["attrs"]
+    assert graph["nodes"][1]["attrs"]["page_role"] == "text_flow_page"
+    assert "flow_scope" not in graph["nodes"][1]["attrs"]
+    assert "include_in_epub" not in graph["nodes"][1]["attrs"]
+    assert "include_in_rag" not in graph["nodes"][1]["attrs"]
     assert graph["projections"]["reading_order"] == ["n000001", "n000002"]
-    assert graph["projections"]["epub_flow"] == ["n000001", "n000002"]
-    assert graph["projections"]["rag_units"] == [
-        {
-            "unit_id": "ru000001",
-            "node_id": "n000002",
-            "text": "Body line one\nBody line two",
-            "heading_path": [],
-            "parent_node_ids": [],
-            "source_pages": [2],
-            "evidence_ids": ["ev000002"],
-        }
-    ]
+    assert "epub_flow" not in graph["projections"]
+    assert "rag_units" not in graph["projections"]

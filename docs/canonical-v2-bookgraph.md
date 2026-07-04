@@ -280,7 +280,7 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/check_phase3_shadow_accep
 
 acceptance report 只统计 BookGraph 的结构信号：
 
-- 每本书的 `node_counts`、`evidence_count`、`reading_order_count`、`rag_unit_count`。
+- 每本书的 `node_counts`、`evidence_count`、`reading_order_count` 和 `projection_keys`。
 - ignored observation counts，例如 `image_region`、`table_region`、`page_marker`。
 - `merge_counts`，例如跨页聚合产生的 `cross_page_boundary_continuation`。
 - `multi_page_evidence_count`，用于确认跨页 evidence 是否被保留。
@@ -378,14 +378,17 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_golden_al
 
 这些发现只能指导下一轮结构规则设计；最终修复仍必须回到版面和 provenance 信号，不能把正文含义或特定文本写入分类逻辑。
 
-### Page scope and RAG gating
+### Page role candidates
 
-Observed shadow BookGraph 在 TextUnit 进入 node 之后记录 page-level scope：
+Observed shadow BookGraph 在 TextUnit 进入 node 之后只记录 page-level role candidates：
 
-- `metadata.shadow_page_roles`: 每个物理页的结构候选角色、flow scope、EPUB/RAG inclusion 和 signals。
-- node `attrs.page_role` / `attrs.flow_scope`: 该 node 所在物理页的页面作用域。
-- node `attrs.include_in_epub`: 当前 shadow projection 是否应保留给 EPUB flow。
-- node `attrs.include_in_rag`: 当前 shadow RAG units 是否应包含该 node。
+- `metadata.shadow_page_roles`: 每个物理页的结构候选角色和 signals。
+- node `attrs.page_role`: 该 node 所在物理页的候选页面角色。
+- node `attrs.page_role_signals`: page role classifier 使用的结构信号，便于 audit 追溯。
+
+Phase 3 不写入 `flow_scope`。`front_matter`、`body`、`back_matter` 是书籍出版结构位置，必须在 Phase 5 结合 LLM/视觉/目录/上下文 verifier 后再确定。Phase 3 单靠几何、页码、body profile 和显式结构提示，不足以可靠判断真实书籍结构边界，尤其无法可靠处理封底提前出现在 PDF 前部、章末注、书末注、版权页和图版页等情况。
+
+`blank_page`、`visual_page` 等都是 `page_role`。它们只说明页面自身的候选形态，不说明页面属于 front matter、body 或 back matter，也不表达跨页出版结构。
 
 这一层只使用 parser-neutral 的结构信号：
 
@@ -395,20 +398,31 @@ Observed shadow BookGraph 在 TextUnit 进入 node 之后记录 page-level scope
 - `layout_audit.page_profiles`: 是否存在稳定 body lane。
 - 物理页序，以及首个 `page_number` marker 之前的 unnumbered prelude。
 
-它不读取页面文字含义，也不根据 `目录`、`ISBN`、`版权`、`前言`、`附录` 等关键词分类。因此当前角色名应理解为结构候选，而不是最终语义标签：
+它不读取页面文字含义，也不根据 `目录`、`ISBN`、`版权`、`前言`、`附录` 等关键词分类。因此当前角色名应理解为结构候选，而不是最终语义标签。
 
-- `cover_page` / `front_visual_page`: 早期或 unnumbered prelude 中带视觉内容的页面；`front_visual_page` 只表示前置视觉页，不承诺它一定是装帧意义上的护封或封底。
-- `front_matter_page`: 首个印刷页码之前的文本页，即使存在稳定 body profile，也默认不进入 RAG。
-- `title_like_page`: 早期稀疏居中文本页，无 body profile。
-- `bibliographic_like_page`: 边缘页的文本页候选，无 body profile；名称表示迁移期候选，不表示已抽取出版语义。
-- `visual_page`: 正文中的视觉占优插页。
-- `blank_page`: 无有效 content observation 的空白页。
-- `unknown`: 缺少 body profile 且无法用结构信号归类的页，保守地 `include_in_rag = false`。
-- `body` / `body_candidate`: 可进入正文 RAG flow 的页面。
+Phase 3 当前允许的 `page_role` 值如下：
 
-这一层不会从 `reading_order` 或 `epub_flow` 删除节点；它只影响 shadow `rag_units`。这让 EPUB 仍可保留封面、扉页、版权页、护封展开页、图版页等视觉或前后置材料，同时避免这些材料在 release canonical 切换前污染正文 RAG chunk。
+| page_role | 含义 | Phase 3 判断依据 |
+| --- | --- | --- |
+| `blank_page` | 无有效内容 observation 的空白页或近似空白页。 | 页面没有 text/image/table/footnote content observation，只可能有页码等 marker。 |
+| `cover_page` | PDF/observed 序列首部的视觉占优页候选。 | 第一页或 unnumbered prelude 中存在显著视觉区域。它不承诺一定是实体书封面。 |
+| `front_visual_page` | PDF/observed 序列前部的视觉页候选。 | 前部或 unnumbered prelude 中存在视觉内容，但不是第一页。它可能是护封展开、内封、装饰页、封底提前页等，需要 Phase 5 确认。 |
+| `front_matter_page` | PDF/observed 序列前部的文本页候选。 | 首个印刷页码前的文本内容页，即使有 body-like profile，也只表示前部文本页候选。 |
+| `title_like_page` | 稀疏、居中、标题式页面候选。 | 早期页面，文本区域少、面积小、居中比例高，缺少稳定 body profile。 |
+| `toc_page` | 目录式页面候选。 | 上游显式 `role_hint` 或 parser-neutral 结构提示表明它是 toc-like observation；Phase 3 不读“目录”等文字语义。 |
+| `text_flow_page` | 具有稳定文本流版心的普通文本页候选。 | 当前页存在 layout audit 认可的 body lane/profile；它只表示页面形态是普通文本流，不表示该页一定属于正文 body。 |
+| `text_flow_candidate` | 缺少稳定文本流 profile，但有文本流结构信号的页面候选。 | 有 body/list/footnote 等 text flow hint，但 profile 证据不足。 |
+| `visual_page` | 视觉占优页候选。 | 页面 image/table 区域面积占比高，或视觉区域较大且文字很少，但不处于前部首要视觉页规则中。 |
+| `note_section_candidate` | 注释式页面候选。 | 页面中 note-like observations 占主导，且不是普通正文/文本流形态。它不区分页脚脚注、章末注或书末注，也不表示所有 back matter，Phase 5 note model 再确认。 |
+| `bibliographic_like_page` | 边缘文本页候选。 | PDF/observed 序列前部或后部有文本内容，但缺少 body profile 和更明确结构信号。名称只表示候选，不表示已抽取出版语义。 |
+| `back_cover_candidate` | PDF/observed 序列后部视觉页候选。 | 最后一页或后部视觉占优页。它不承诺一定是实体书封底。 |
+| `unknown` | 证据不足，无法归入以上候选。 | 缺少 body profile，也没有足够视觉、文本流、toc-like 或 note-like 结构信号。 |
 
-Phase 3 acceptance report 同时保留全量 `node_counts`，并增加 `node_counts_by_flow_scope`、`node_counts_by_rag_inclusion` 和 `page_role_counts`。这样 audit 可以明确区分 BookGraph 全量结构、正文流结构和实际进入 RAG 的文本单元，避免把 front matter heading 与 body heading 混在同一个判断口径里。
+Phase 3 的 `signals` 可以包含 `visual_verifier_candidate`。这不是新的 page role，也不表示当前页已经被判定为 `visual_page`；它只表示页面同时包含较大的 image/table 区域和少量文本，几何上无法可靠区分“正文配图页”和“图版/图注页”。Phase 5 的 LLM/视觉 verifier 应优先抽查这类候选页，而不是逐页调用 LLM。
+
+Phase 3 不写入 `flow_scope`、`include_in_epub`、`include_in_rag`、`epub_flow` 或 `rag_units`。这些都是后续结构确认或下游 projection policy，必须等 Phase 5/EPUB/RAG projection phase 基于 BookGraph 结构统一决定。连续 `visual_page` 是否构成出版意义上的图版区、插图区、护封展开或其他跨页结构，也留给 Phase 5 结合视觉、目录、上下文和 verifier 确认；Phase 3 不写入 `plate_section_candidate` 或 page group。Phase 3 的 canonical 只表达它当前真正完成的事：稳定 TextUnit、layout classification、page role candidates 和 evidence/provenance。
+
+Phase 3 acceptance report 同时保留全量 `node_counts` 和 `page_role_counts`。若 Phase 3 artifact 出现 `flow_scope` 或 EPUB/RAG projection 字段，acceptance 应失败，因为那表示阶段边界已经泄漏。
 
 ## display_block 定义
 

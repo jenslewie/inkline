@@ -53,12 +53,8 @@ def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
     metadata["shadow_text_unit_layout_audit_summary"] = layout_audit["summary"]
     metadata["shadow_text_unit_layout_page_coverage"] = layout_audit["page_coverage"]
     metadata["shadow_text_unit_layout_profile_quality"] = layout_audit["profile_quality"]
-    metadata["shadow_page_roles"] = page_role_records
-    projections = {
-        "reading_order": reading_order,
-        "epub_flow": list(reading_order),
-        "rag_units": _rag_units(nodes, evidence_records),
-    }
+    metadata["shadow_page_roles"] = _canonical_page_role_records(page_role_records)
+    projections = {"reading_order": reading_order}
     return make_bookgraph(
         metadata,
         nodes,
@@ -103,9 +99,6 @@ def _node_from_unit(
     page_role = roles_by_page.get(int(unit["page"]))
     if page_role:
         attrs["page_role"] = page_role["page_role"]
-        attrs["flow_scope"] = page_role["flow_scope"]
-        attrs["include_in_epub"] = page_role["include_in_epub"]
-        attrs["include_in_rag"] = page_role["include_in_rag"]
         attrs["page_role_signals"] = list(page_role["signals"])
     inline_runs = unit_attrs.get("inline_runs")
     return make_node(
@@ -136,41 +129,12 @@ def _evidence_from_unit(unit: dict[str, Any], evidence_id: str, parser: str) -> 
     )
 
 
-def _rag_units(
-    nodes: list[dict[str, Any]], evidence_records: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    evidence_by_id = {record["evidence_id"]: record for record in evidence_records}
-    heading_path: list[str] = []
-    current_heading_node_id: str | None = None
-    units: list[dict[str, Any]] = []
-    for node in nodes:
-        if node.get("attrs", {}).get("include_in_rag") is False:
-            continue
-        if node["node_type"] == "heading":
-            heading_path = [node["text"]] if node["text"] else []
-            current_heading_node_id = node["node_id"]
-            continue
-        units.append(
-            {
-                "unit_id": f"ru{len(units) + 1:06d}",
-                "node_id": node["node_id"],
-                "text": node["text"],
-                "heading_path": list(heading_path),
-                "parent_node_ids": [current_heading_node_id] if current_heading_node_id else [],
-                "source_pages": _source_pages(node, evidence_by_id),
-                "evidence_ids": list(node["evidence_ids"]),
-            }
-        )
-    return units
-
-
-def _source_pages(node: dict[str, Any], evidence_by_id: dict[str, dict[str, Any]]) -> list[int]:
-    pages: list[int] = []
-    for evidence_id in node.get("evidence_ids", []):
-        evidence = evidence_by_id.get(evidence_id)
-        if not evidence:
-            continue
-        for page in evidence.get("pages") or []:
-            if isinstance(page, int) and page not in pages:
-                pages.append(page)
-    return pages
+def _canonical_page_role_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "page": int(record["page"]),
+            "page_role": str(record["page_role"]),
+            "signals": list(record.get("signals") or []),
+        }
+        for record in records
+    ]

@@ -57,22 +57,19 @@ def _book_report(path: Path) -> dict[str, Any]:
         else []
     )
     node_counts = dict(sorted(Counter(_node_types(nodes)).items()))
-    node_counts_by_flow_scope = _node_counts_by_flow_scope(nodes)
-    node_counts_by_rag_inclusion = _node_counts_by_rag_inclusion(nodes)
 
     errors.extend(_structural_errors(nodes, evidence, reading_order))
+    errors.extend(_phase3_scope_errors(metadata, nodes, projections))
     return {
         "path": str(path),
         "doc_id": metadata.get("doc_id") or "",
         "title": metadata.get("title") or "",
         "node_counts": node_counts,
-        "node_counts_by_flow_scope": node_counts_by_flow_scope,
-        "node_counts_by_rag_inclusion": node_counts_by_rag_inclusion,
         "page_role_counts": _page_role_counts(metadata),
         "node_count": len(nodes),
         "evidence_count": len(evidence),
         "reading_order_count": len(reading_order),
-        "rag_unit_count": len(projections.get("rag_units") or []),
+        "projection_keys": sorted(str(key) for key in projections),
         "ignored_counts": _ignored_counts(metadata),
         "merge_counts": _merge_counts(nodes),
         "multi_page_evidence_count": _multi_page_evidence_count(evidence),
@@ -120,34 +117,65 @@ def _structural_errors(
     return errors
 
 
+def _phase3_scope_errors(
+    metadata: dict[str, Any], nodes: list[Any], projections: dict[str, Any]
+) -> list[str]:
+    errors: list[str] = []
+    for field in ("epub_flow", "rag_units"):
+        if field in projections:
+            errors.append(f"phase3_projection_leakage:{field}")
+
+    leaked_attrs: set[str] = set()
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+        for field in ("include_in_epub", "include_in_rag"):
+            if field in attrs:
+                leaked_attrs.add(field)
+    for field in sorted(leaked_attrs):
+        errors.append(f"phase3_downstream_attr_leakage:{field}")
+    errors.extend(_flow_scope_leakage_errors(metadata, nodes))
+    errors.extend(_removed_page_role_errors(metadata))
+    return errors
+
+
+def _flow_scope_leakage_errors(metadata: dict[str, Any], nodes: list[Any]) -> list[str]:
+    errors: list[str] = []
+    page_roles = metadata.get("shadow_page_roles")
+    if isinstance(page_roles, list) and any(
+        isinstance(record, dict) and "flow_scope" in record for record in page_roles
+    ):
+        errors.append("phase3_flow_scope_leakage:metadata.shadow_page_roles")
+    leaked_in_nodes = any(
+        isinstance(node, dict)
+        and isinstance(node.get("attrs"), dict)
+        and "flow_scope" in node["attrs"]
+        for node in nodes
+    )
+    if leaked_in_nodes:
+        errors.append("phase3_flow_scope_leakage:nodes.attrs")
+    return errors
+
+
+def _removed_page_role_errors(metadata: dict[str, Any]) -> list[str]:
+    page_roles = metadata.get("shadow_page_roles")
+    if not isinstance(page_roles, list):
+        return []
+    removed_roles = {
+        str(record.get("page_role"))
+        for record in page_roles
+        if isinstance(record, dict) and record.get("page_role") == "plate_section_candidate"
+    }
+    return [f"phase3_removed_page_role:{role}" for role in sorted(removed_roles)]
+
+
 def _node_types(nodes: list[Any]) -> list[str]:
     values: list[str] = []
     for node in nodes:
         if isinstance(node, dict) and isinstance(node.get("node_type"), str):
             values.append(node["node_type"])
     return values
-
-
-def _node_counts_by_flow_scope(nodes: list[Any]) -> dict[str, dict[str, int]]:
-    counts: dict[str, Counter[str]] = {}
-    for node in nodes:
-        if not isinstance(node, dict) or not isinstance(node.get("node_type"), str):
-            continue
-        attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
-        flow_scope = str(attrs.get("flow_scope") or "unknown")
-        counts.setdefault(flow_scope, Counter())[node["node_type"]] += 1
-    return _nested_counts(counts)
-
-
-def _node_counts_by_rag_inclusion(nodes: list[Any]) -> dict[str, dict[str, int]]:
-    counts: dict[str, Counter[str]] = {}
-    for node in nodes:
-        if not isinstance(node, dict) or not isinstance(node.get("node_type"), str):
-            continue
-        attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
-        key = "excluded" if attrs.get("include_in_rag") is False else "included"
-        counts.setdefault(key, Counter())[node["node_type"]] += 1
-    return _nested_counts(counts)
 
 
 def _page_role_counts(metadata: dict[str, Any]) -> dict[str, int]:
@@ -204,28 +232,21 @@ def _multi_page_evidence_count(evidence: list[Any]) -> int:
 
 def _totals(books: list[dict[str, Any]]) -> dict[str, Any]:
     node_counts: Counter[str] = Counter()
-    node_counts_by_flow_scope: dict[str, Counter[str]] = {}
-    node_counts_by_rag_inclusion: dict[str, Counter[str]] = {}
     page_role_counts: Counter[str] = Counter()
     ignored_counts: Counter[str] = Counter()
     merge_counts: Counter[str] = Counter()
     for book in books:
         node_counts.update(book["node_counts"])
-        _update_nested_counts(node_counts_by_flow_scope, book["node_counts_by_flow_scope"])
-        _update_nested_counts(node_counts_by_rag_inclusion, book["node_counts_by_rag_inclusion"])
         page_role_counts.update(book["page_role_counts"])
         ignored_counts.update(book["ignored_counts"])
         merge_counts.update(book["merge_counts"])
     return {
         "book_count": len(books),
         "node_counts": dict(sorted(node_counts.items())),
-        "node_counts_by_flow_scope": _nested_counts(node_counts_by_flow_scope),
-        "node_counts_by_rag_inclusion": _nested_counts(node_counts_by_rag_inclusion),
         "page_role_counts": dict(sorted(page_role_counts.items())),
         "node_count": sum(book["node_count"] for book in books),
         "evidence_count": sum(book["evidence_count"] for book in books),
         "reading_order_count": sum(book["reading_order_count"] for book in books),
-        "rag_unit_count": sum(book["rag_unit_count"] for book in books),
         "ignored_counts": dict(sorted(ignored_counts.items())),
         "merge_counts": dict(sorted(merge_counts.items())),
         "multi_page_evidence_count": sum(book["multi_page_evidence_count"] for book in books),

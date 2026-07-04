@@ -89,3 +89,30 @@ def test_build_observed_document_shadow_preserves_parser_payload_without_raw_top
         "raw": {"type": "paragraph", "confidence": 0.93},
     }
     assert "raw_type" not in observation
+
+
+def test_build_observed_document_shadow_maps_mineru_index_to_toc_hint() -> None:
+    document = build_observed_document_shadow(
+        pages={1: [_raw("index", "Chapter 1  1", [10, 70, 900, 500], index=1)]},
+        page_sizes=dict.fromkeys(range(1, 101), (1000, 1000)),
+        metadata=_metadata(),
+    )
+
+    observation = document["observations"][0]
+    assert observation["kind"] == "text_region"
+    assert observation["role_hint"] == "toc_text"
+    assert observation["parser_payload"]["raw_type"] == "index"
+    assert "raw_type" not in observation
+
+
+def test_build_observed_document_shadow_does_not_map_late_mineru_index_to_toc_hint() -> None:
+    document = build_observed_document_shadow(
+        pages={60: [_raw("index", "Late index-like region", [10, 70, 900, 500], page=60)]},
+        page_sizes=dict.fromkeys(range(1, 101), (1000, 1000)),
+        metadata=_metadata(),
+    )
+
+    observation = document["observations"][0]
+    assert observation["role_hint"] == "unknown"
+    assert observation["parser_payload"]["raw_type"] == "index"
+    assert "raw_type" not in observation

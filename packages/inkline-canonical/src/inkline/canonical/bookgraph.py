@@ -81,8 +81,6 @@ def make_bookgraph(
     graph["metadata"].setdefault("schema_name", BOOKGRAPH_SCHEMA_NAME)
     graph["metadata"].setdefault("schema_version", BOOKGRAPH_SCHEMA_VERSION)
     graph["projections"].setdefault("reading_order", [])
-    graph["projections"].setdefault("epub_flow", [])
-    graph["projections"].setdefault("rag_units", [])
     validate_bookgraph(graph)
     return graph
 
