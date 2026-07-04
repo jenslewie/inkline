@@ -226,8 +226,9 @@ def _normalize_node_notes(node: dict[str, Any]) -> dict[str, Any]:
         {"note_marker": marker} if marker else None,
     )
     attrs["marker"] = marker
-    attrs["source_placement"] = "page_foot"
-    attrs["scope"] = "page"
+    source_placement, scope = _note_source_scope(attrs)
+    attrs["source_placement"] = source_placement
+    attrs["scope"] = scope
     attrs["source_text_unit_ids"] = _source_text_unit_ids(normalized)
     return normalized
 
@@ -246,6 +247,12 @@ def _source_text_unit_ids(node: dict[str, Any]) -> list[str]:
     if isinstance(source_text_unit_id, str) and source_text_unit_id:
         return [source_text_unit_id]
     return [str(node["node_id"])]
+
+
+def _note_source_scope(attrs: dict[str, Any]) -> tuple[str, str]:
+    if attrs.get("page_role") == "note_section_candidate":
+        return "note_section_candidate", "unknown"
+    return "page_foot", "page"
 
 
 def _note_ref_counts(nodes: list[dict[str, Any]]) -> Counter[str]:

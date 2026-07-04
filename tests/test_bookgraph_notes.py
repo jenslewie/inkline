@@ -92,6 +92,35 @@ def test_normalize_bookgraph_notes_keeps_existing_note_nodes() -> None:
     assert normalized["nodes"] == [note]
 
 
+def test_normalize_bookgraph_notes_marks_note_section_candidate_without_page_foot_claim() -> None:
+    graph = make_bookgraph(
+        _metadata(),
+        [
+            make_node(
+                "n000001",
+                "footnote",
+                "1. Section note candidate.",
+                attrs={
+                    "source_text_unit_id": "tu000001",
+                    "page_role": "note_section_candidate",
+                },
+                evidence_ids=["ev000001"],
+            ),
+        ],
+        [],
+        [make_evidence("ev000001", "mineru", "tu000001", source_kind="text_unit", page=500)],
+        projections={"reading_order": ["n000001"]},
+    )
+
+    normalized = normalize_bookgraph_notes(graph)
+
+    note = normalized["nodes"][0]
+    assert note["node_type"] == "note"
+    assert note["attrs"]["marker"] == "1"
+    assert note["attrs"]["source_placement"] == "note_section_candidate"
+    assert note["attrs"]["scope"] == "unknown"
+
+
 def test_audit_bookgraph_notes_reports_resolved_and_orphan_notes() -> None:
     body = make_node(
         "n000001",
