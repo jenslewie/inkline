@@ -127,9 +127,57 @@ def test_audit_bookgraph_reports_counts_and_health_signals() -> None:
     assert audit["ignored_block_counts"] == {"figure": 1}
     assert audit["footnotes"]["note_ref_runs"] == 1
     assert audit["footnotes"]["references_note_edges"] == 1
+    assert audit["footnotes"]["references_to_note_nodes"] == 1
     assert audit["footnotes"]["resolved_note_ref_ratio"] == 1.0
     assert audit["display_blocks"]["pages"] == {"2": 1}
     assert audit["display_blocks"]["legacy_block_ids"] == ["b000003"]
+
+
+def test_audit_bookgraph_counts_phase4_note_refs() -> None:
+    graph = make_bookgraph(
+        _metadata(),
+        [
+            make_node(
+                "n000001",
+                "paragraph",
+                "Body 1.",
+                inline_runs=[
+                    {
+                        "type": "note_ref",
+                        "text": "1",
+                        "attrs": {"marker": "1", "target_note_id": "n000002"},
+                    }
+                ],
+                attrs={},
+                evidence_ids=["ev000001"],
+            ),
+            make_node(
+                "n000002",
+                "note",
+                "Note.",
+                attrs={
+                    "marker": "1",
+                    "source_placement": "page_foot",
+                    "scope": "page",
+                    "source_text_unit_ids": ["tu000002"],
+                },
+                evidence_ids=["ev000002"],
+            ),
+        ],
+        [make_edge("references_note", "n000001", "n000002", evidence_ids=["ev000001"])],
+        [
+            make_evidence("ev000001", "mineru", "tu000001", source_kind="text_unit", page=1),
+            make_evidence("ev000002", "mineru", "tu000002", source_kind="text_unit", page=1),
+        ],
+        projections={"reading_order": ["n000001", "n000002"]},
+    )
+
+    audit = audit_bookgraph(graph)
+
+    assert audit["footnotes"]["footnote_nodes"] == 0
+    assert audit["footnotes"]["note_nodes"] == 1
+    assert audit["footnotes"]["note_ref_runs"] == 1
+    assert audit["footnotes"]["references_to_note_nodes"] == 1
 
 
 def test_audit_bookgraph_reports_heading_like_display_candidates() -> None:

@@ -9,6 +9,7 @@ from inkline.canonical import (
     make_evidence,
     make_node,
     normalize_bookgraph_notes,
+    resolve_page_footnote_refs,
     validate_bookgraph,
 )
 
@@ -198,3 +199,114 @@ def test_audit_bookgraph_notes_counts_legacy_top_level_note_ref_target() -> None
     )
 
     assert audit_bookgraph_notes(graph)["resolved_note_ref_count"] == 1
+
+
+def test_resolve_page_footnote_refs_links_same_page_unique_marker() -> None:
+    graph = make_bookgraph(
+        _metadata(),
+        [
+            make_node(
+                "n000001",
+                "paragraph",
+                "Body text 1.",
+                inline_runs=[
+                    {"type": "text", "text": "Body text "},
+                    {"type": "note_ref", "text": "1", "marker": "1"},
+                ],
+                attrs={"source_text_unit_id": "tu000001"},
+                evidence_ids=["ev000001"],
+            ),
+            make_node(
+                "n000002",
+                "footnote",
+                "1. Page footnote.",
+                attrs={"source_text_unit_id": "tu000002"},
+                evidence_ids=["ev000002"],
+            ),
+        ],
+        [],
+        [
+            make_evidence("ev000001", "mineru", "tu000001", source_kind="text_unit", page=12),
+            make_evidence("ev000002", "mineru", "tu000002", source_kind="text_unit", page=12),
+        ],
+        projections={"reading_order": ["n000001", "n000002"]},
+    )
+
+    resolved = resolve_page_footnote_refs(graph)
+
+    validate_bookgraph(resolved)
+    assert [node["node_type"] for node in resolved["nodes"]] == ["paragraph", "note"]
+    assert resolved["nodes"][0]["inline_runs"][1]["attrs"] == {
+        "marker": "1",
+        "target_note_id": "n000002",
+        "source_placement": "page_foot",
+        "scope": "page",
+        "match_confidence": "exact",
+    }
+    assert resolved["edges"] == [
+        {
+            "edge_type": "references_note",
+            "source": "n000001",
+            "target": "n000002",
+            "evidence_ids": ["ev000001", "ev000002"],
+            "attrs": {
+                "marker": "1",
+                "source_placement": "page_foot",
+                "scope": "page",
+                "match_confidence": "exact",
+            },
+        }
+    ]
+    assert resolved["metadata"]["shadow_note_ref_resolution"] == {
+        "page_footnote_resolved": 1,
+        "page_footnote_ambiguous": 0,
+        "page_footnote_unresolved": 0,
+    }
+
+
+def test_resolve_page_footnote_refs_does_not_guess_ambiguous_marker() -> None:
+    graph = make_bookgraph(
+        _metadata(),
+        [
+            make_node(
+                "n000001",
+                "paragraph",
+                "Body text 1.",
+                inline_runs=[{"type": "note_ref", "text": "1", "marker": "1"}],
+                attrs={"source_text_unit_id": "tu000001"},
+                evidence_ids=["ev000001"],
+            ),
+            make_node(
+                "n000002",
+                "footnote",
+                "1. First note.",
+                attrs={"source_text_unit_id": "tu000002"},
+                evidence_ids=["ev000002"],
+            ),
+            make_node(
+                "n000003",
+                "footnote",
+                "1. Duplicate note.",
+                attrs={"source_text_unit_id": "tu000003"},
+                evidence_ids=["ev000003"],
+            ),
+        ],
+        [],
+        [
+            make_evidence("ev000001", "mineru", "tu000001", source_kind="text_unit", page=12),
+            make_evidence("ev000002", "mineru", "tu000002", source_kind="text_unit", page=12),
+            make_evidence("ev000003", "mineru", "tu000003", source_kind="text_unit", page=12),
+        ],
+        projections={"reading_order": ["n000001", "n000002", "n000003"]},
+    )
+
+    resolved = resolve_page_footnote_refs(graph)
+
+    validate_bookgraph(resolved)
+    assert "attrs" not in resolved["nodes"][0]["inline_runs"][0]
+    assert resolved["edges"] == []
+    assert resolved["metadata"]["shadow_note_ref_resolution"] == {
+        "page_footnote_resolved": 0,
+        "page_footnote_ambiguous": 1,
+        "page_footnote_unresolved": 0,
+    }

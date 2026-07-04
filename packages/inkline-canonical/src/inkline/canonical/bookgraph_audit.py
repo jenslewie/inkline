@@ -72,14 +72,21 @@ def _footnote_summary(graph: dict[str, Any]) -> dict[str, Any]:
         edge for edge in graph["edges"] if edge.get("edge_type") == "references_note"
     ]
     edge_targets = {edge.get("target") for edge in reference_edges}
-    footnote_node_ids = {
+    legacy_footnote_node_ids = {
         node["node_id"] for node in graph["nodes"] if node["node_type"] == "footnote"
     }
+    note_node_ids = {
+        node["node_id"] for node in graph["nodes"] if node["node_type"] in {"note", "footnote"}
+    }
     return {
-        "footnote_nodes": len(footnote_node_ids),
+        "footnote_nodes": len(legacy_footnote_node_ids),
+        "note_nodes": len(note_node_ids),
         "note_ref_runs": note_ref_runs,
         "references_note_edges": len(reference_edges),
-        "references_to_footnote_nodes": sum(1 for target in edge_targets if target in footnote_node_ids),
+        "references_to_footnote_nodes": sum(
+            1 for target in edge_targets if target in legacy_footnote_node_ids
+        ),
+        "references_to_note_nodes": sum(1 for target in edge_targets if target in note_node_ids),
         "resolved_note_ref_ratio": _ratio(len(reference_edges), note_ref_runs),
     }
 
@@ -87,10 +94,13 @@ def _footnote_summary(graph: dict[str, Any]) -> dict[str, Any]:
 def _note_ref_runs(nodes: list[dict[str, Any]]) -> int:
     count = 0
     for node in nodes:
-        if node["node_type"] == "footnote":
+        if node["node_type"] in {"note", "footnote"}:
             continue
         for run in node.get("inline_runs", []):
-            if isinstance(run, dict) and run.get("target_note_id"):
+            if not isinstance(run, dict):
+                continue
+            attrs = run.get("attrs") if isinstance(run.get("attrs"), dict) else {}
+            if run.get("target_note_id") or attrs.get("target_note_id"):
                 count += 1
     return count
 

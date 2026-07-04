@@ -434,7 +434,9 @@ Phase 4 当前最小实现包括：
 - `references_note` edge 的目标必须是 note-compatible node。迁移期允许 legacy `footnote` node 作为兼容目标；release canonical 应收敛到 `note`。
 - resolved `note_ref.target_note_id` 如果指向 BookGraph node id，目标必须是 note-compatible node；legacy block id 或 note alias 暂时只作为迁移期引用值保留。
 - `normalize_bookgraph_notes(graph)` 可以把 legacy `footnote` node 规范化为 `note` node，并补齐 `marker`、`source_placement`、`scope`、`source_text_unit_ids`。
+- `resolve_page_footnote_refs(graph)` 只在同页、同 marker、唯一 page-foot note 的情况下写入 `note_ref.attrs.target_note_id` 并生成 `references_note` edge；重复 marker 或缺少候选时不猜测。
 - `audit_bookgraph_notes(graph)` 输出 note/ref 健康度摘要，包括 note 数、legacy footnote 数、resolved/unresolved note_ref 数、orphan note 数，以及按 `source_placement` / `scope` 的统计。
+- ObservedDocument -> BookGraph builder 在 Phase 4 会调用 page-foot resolver，因此新的 observed shadow BookGraph 输出应使用 `note`，而不是继续把脚注内容作为 release 方向的 `footnote` node。
 
 Phase 4 暂不做：
 

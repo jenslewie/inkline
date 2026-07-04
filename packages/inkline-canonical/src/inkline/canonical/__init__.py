@@ -8,7 +8,11 @@ from inkline.canonical.bookgraph import (
     validate_bookgraph,
 )
 from inkline.canonical.bookgraph_audit import audit_bookgraph
-from inkline.canonical.bookgraph_notes import audit_bookgraph_notes, normalize_bookgraph_notes
+from inkline.canonical.bookgraph_notes import (
+    audit_bookgraph_notes,
+    normalize_bookgraph_notes,
+    resolve_page_footnote_refs,
+)
 from inkline.canonical.footnote_text import strip_footnote_marker
 from inkline.canonical.observed import (
     OBSERVED_SCHEMA_NAME,
@@ -71,6 +75,7 @@ __all__ = [
     "make_toc_entry",
     "migrate_document",
     "normalize_bookgraph_notes",
+    "resolve_page_footnote_refs",
     "sample_document",
     "strip_footnote_marker",
     "validate_bookgraph",

@@ -11,6 +11,7 @@ from inkline.canonical.bookgraph import (
     make_evidence,
     make_node,
 )
+from inkline.canonical.bookgraph_notes import resolve_page_footnote_refs
 from inkline.canonical.observed import validate_observed_document
 from inkline.canonical.page_roles import classify_observed_page_roles, page_roles_by_page
 from inkline.canonical.text_unit_layout import (
@@ -55,7 +56,7 @@ def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
     metadata["shadow_text_unit_layout_profile_quality"] = layout_audit["profile_quality"]
     metadata["shadow_page_roles"] = _canonical_page_role_records(page_role_records)
     projections = {"reading_order": reading_order}
-    return make_bookgraph(
+    graph = make_bookgraph(
         metadata,
         nodes,
         edges,
@@ -63,6 +64,7 @@ def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
         assets=deepcopy(document.get("assets") or {}),
         projections=projections,
     )
+    return resolve_page_footnote_refs(graph)
 
 
 def _bookgraph_metadata(document: dict[str, Any]) -> dict[str, Any]:

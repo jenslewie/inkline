@@ -234,6 +234,39 @@ def _front_matter_then_body_document() -> dict:
     )
 
 
+def _page_footnote_ref_document() -> dict:
+    return make_observed_document(
+        _metadata(),
+        [make_observed_page(12, width=1000, height=1000)],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body text 1.",
+                page=12,
+                bbox=[100, 100, 900, 140],
+                role_hint="body_text",
+                attrs={
+                    "reading_order": 1,
+                    "inline_runs": [
+                        {"type": "text", "text": "Body text "},
+                        {"type": "note_ref", "text": "1", "marker": "1"},
+                    ],
+                },
+            ),
+            make_observation(
+                "obs000002",
+                "footnote_region",
+                text="1. Page footnote.",
+                page=12,
+                bbox=[100, 860, 900, 910],
+                role_hint="footnote_text",
+                attrs={"reading_order": 2},
+            ),
+        ],
+    )
+
+
 def test_build_bookgraph_from_observed_uses_text_unit_aggregation() -> None:
     graph = build_bookgraph_from_observed(_adjacent_body_document())
 
@@ -328,11 +361,29 @@ def test_build_bookgraph_from_observed_maps_explicit_structure_hints() -> None:
     assert [node["node_type"] for node in graph["nodes"]] == [
         "heading",
         "paragraph",
-        "footnote",
+        "note",
     ]
     assert graph["nodes"][0]["level"] == 1
     assert graph["nodes"][1]["inline_runs"] == [{"type": "text", "text": "Body"}]
     assert graph["metadata"]["shadow_ignored_observation_counts"] == {"image_region": 1}
+
+
+def test_build_bookgraph_from_observed_resolves_page_footnote_refs() -> None:
+    graph = build_bookgraph_from_observed(_page_footnote_ref_document())
+
+    validate_bookgraph(graph)
+    assert [node["node_type"] for node in graph["nodes"]] == ["paragraph", "note"]
+    assert graph["nodes"][0]["inline_runs"][1]["attrs"]["target_note_id"] == "n000002"
+    assert graph["nodes"][1]["attrs"]["source_placement"] == "page_foot"
+    assert graph["nodes"][1]["attrs"]["scope"] == "page"
+    assert graph["edges"][-1]["edge_type"] == "references_note"
+    assert graph["edges"][-1]["source"] == "n000001"
+    assert graph["edges"][-1]["target"] == "n000002"
+    assert graph["metadata"]["shadow_note_ref_resolution"] == {
+        "page_footnote_resolved": 1,
+        "page_footnote_ambiguous": 0,
+        "page_footnote_unresolved": 0,
+    }
 
 
 def test_build_bookgraph_from_observed_does_not_promote_image_title_to_heading() -> None:
