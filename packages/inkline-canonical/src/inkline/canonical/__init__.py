@@ -8,6 +8,7 @@ from inkline.canonical.bookgraph import (
     validate_bookgraph,
 )
 from inkline.canonical.bookgraph_audit import audit_bookgraph
+from inkline.canonical.bookgraph_notes import audit_bookgraph_notes, normalize_bookgraph_notes
 from inkline.canonical.footnote_text import strip_footnote_marker
 from inkline.canonical.observed import (
     OBSERVED_SCHEMA_NAME,
@@ -52,6 +53,7 @@ __all__ = [
     "NoteRef",
     "ValidationError",
     "audit_bookgraph",
+    "audit_bookgraph_notes",
     "audit_text_unit_layout",
     "build_bookgraph_from_observed",
     "build_text_units",
@@ -68,6 +70,7 @@ __all__ = [
     "make_observed_page",
     "make_toc_entry",
     "migrate_document",
+    "normalize_bookgraph_notes",
     "sample_document",
     "strip_footnote_marker",
     "validate_bookgraph",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from typing import Any
 
@@ -14,6 +15,7 @@ BOOKGRAPH_NODE_TYPES = {
     "display_block",
     "list_item",
     "footnote",
+    "note",
 }
 
 BOOKGRAPH_EDGE_TYPES = {
@@ -59,6 +61,13 @@ REQUIRED_EVIDENCE_FIELDS = {
     "parser": str,
     "source_id": str,
     "source_kind": str,
+}
+
+REQUIRED_NOTE_ATTR_FIELDS = {
+    "marker": str,
+    "source_placement": str,
+    "scope": str,
+    "source_text_unit_ids": list,
 }
 
 
@@ -159,9 +168,10 @@ def make_evidence(
 def validate_bookgraph(graph: dict[str, Any]) -> None:
     _validate_top_level(graph)
     _validate_metadata(graph["metadata"])
-    node_ids = _validate_nodes(graph["nodes"])
+    node_types = _validate_nodes(graph["nodes"])
+    node_ids = set(node_types)
     evidence_ids = _validate_evidence(graph["evidence"])
-    _validate_edges(graph["edges"], node_ids, evidence_ids)
+    _validate_edges(graph["edges"], node_types, evidence_ids)
     _validate_projections(graph["projections"], node_ids)
 
 
@@ -182,8 +192,8 @@ def _validate_metadata(metadata: dict[str, Any]) -> None:
         raise ValidationError(f"metadata.schema_version must be {BOOKGRAPH_SCHEMA_VERSION}")
 
 
-def _validate_nodes(nodes: list[dict[str, Any]]) -> set[str]:
-    node_ids: set[str] = set()
+def _validate_nodes(nodes: list[dict[str, Any]]) -> dict[str, str]:
+    node_types: dict[str, str] = {}
     for index, node in enumerate(nodes):
         if not isinstance(node, dict):
             raise ValidationError(f"nodes[{index}] must be object")
@@ -192,14 +202,48 @@ def _validate_nodes(nodes: list[dict[str, Any]]) -> set[str]:
             if not isinstance(value, expected_type):
                 raise ValidationError(f"nodes[{index}].{field} must be {expected_type.__name__}")
         node_id = node["node_id"]
-        if node_id in node_ids:
+        if node_id in node_types:
             raise ValidationError(f"duplicate node_id: {node_id}")
-        node_ids.add(node_id)
         if node["node_type"] not in BOOKGRAPH_NODE_TYPES:
             raise ValidationError(f"nodes[{index}].node_type is invalid: {node['node_type']}")
+        node_types[node_id] = node["node_type"]
+    for index, node in enumerate(nodes):
+        if node["node_type"] == "note":
+            _validate_note_attrs(node["attrs"], f"nodes[{index}].attrs")
         if "inline_runs" in node and not isinstance(node["inline_runs"], list):
             raise ValidationError(f"nodes[{index}].inline_runs must be list")
-    return node_ids
+        if "inline_runs" in node:
+            _validate_inline_runs(node["inline_runs"], node_types, f"nodes[{index}].inline_runs")
+    return node_types
+
+
+def _validate_note_attrs(attrs: dict[str, Any], path: str) -> None:
+    for field, expected_type in REQUIRED_NOTE_ATTR_FIELDS.items():
+        value = attrs.get(field)
+        if not isinstance(value, expected_type):
+            raise ValidationError(f"{path}.{field} must be {expected_type.__name__}")
+
+
+def _validate_inline_runs(
+    inline_runs: list[Any], node_types: dict[str, str], path: str
+) -> None:
+    for index, run in enumerate(inline_runs):
+        if not isinstance(run, dict):
+            raise ValidationError(f"{path}[{index}] must be object")
+        if run.get("type") != "note_ref":
+            continue
+        attrs = run.get("attrs") if isinstance(run.get("attrs"), dict) else {}
+        target_note_id = attrs.get("target_note_id") or run.get("target_note_id")
+        if target_note_id is None:
+            continue
+        if not isinstance(target_note_id, str):
+            raise ValidationError(f"{path}[{index}].target_note_id must be str")
+        if not _is_bookgraph_node_ref(target_note_id):
+            continue
+        if target_note_id not in node_types:
+            raise ValidationError(f"{path}[{index}].attrs.target_note_id missing node")
+        if not _is_note_node_type(node_types[target_note_id]):
+            raise ValidationError(f"{path}[{index}].attrs.target_note_id note_ref target must be note")
 
 
 def _validate_evidence(evidence: list[dict[str, Any]]) -> set[str]:
@@ -219,7 +263,7 @@ def _validate_evidence(evidence: list[dict[str, Any]]) -> set[str]:
 
 
 def _validate_edges(
-    edges: list[dict[str, Any]], node_ids: set[str], evidence_ids: set[str]
+    edges: list[dict[str, Any]], node_types: dict[str, str], evidence_ids: set[str]
 ) -> None:
     for index, edge in enumerate(edges):
         if not isinstance(edge, dict):
@@ -230,9 +274,21 @@ def _validate_edges(
             value = edge.get(endpoint)
             if not isinstance(value, str):
                 raise ValidationError(f"edges[{index}].{endpoint} must be str")
-            if value.startswith("n") and value not in node_ids:
+            if _is_bookgraph_node_ref(value) and value not in node_types:
                 raise ValidationError(f"edges[{index}].{endpoint} missing node: {value}")
+        if edge.get("edge_type") == "references_note":
+            target = edge.get("target")
+            if isinstance(target, str) and not _is_note_node_type(node_types.get(target)):
+                raise ValidationError(f"edges[{index}].references_note target must be note")
         _validate_evidence_ids(edge.get("evidence_ids", []), evidence_ids, f"edges[{index}]")
+
+
+def _is_note_node_type(node_type: str | None) -> bool:
+    return node_type in {"note", "footnote"}
+
+
+def _is_bookgraph_node_ref(value: str) -> bool:
+    return bool(re.fullmatch(r"n\d+", value))
 
 
 def _validate_projections(projections: dict[str, Any], node_ids: set[str]) -> None:

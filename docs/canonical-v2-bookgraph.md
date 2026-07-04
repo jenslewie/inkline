@@ -424,6 +424,27 @@ Phase 3 不写入 `flow_scope`、`include_in_epub`、`include_in_rag`、`epub_fl
 
 Phase 3 acceptance report 同时保留全量 `node_counts` 和 `page_role_counts`。若 Phase 3 artifact 出现 `flow_scope` 或 EPUB/RAG projection 字段，acceptance 应失败，因为那表示阶段边界已经泄漏。
 
+### Phase 4 note/ref model
+
+Phase 4 开始引入统一 note/ref 关系模型，但它不负责判断 `front_matter`、`body`、`back_matter`，也不负责判断 `preface`、`bibliography`、`copyright_page` 等出版语义角色。
+
+Phase 4 当前最小实现包括：
+
+- BookGraph schema 允许 `note` node。
+- `references_note` edge 的目标必须是 note-compatible node。迁移期允许 legacy `footnote` node 作为兼容目标；release canonical 应收敛到 `note`。
+- resolved `note_ref.target_note_id` 如果指向 BookGraph node id，目标必须是 note-compatible node；legacy block id 或 note alias 暂时只作为迁移期引用值保留。
+- `normalize_bookgraph_notes(graph)` 可以把 legacy `footnote` node 规范化为 `note` node，并补齐 `marker`、`source_placement`、`scope`、`source_text_unit_ids`。
+- `audit_bookgraph_notes(graph)` 输出 note/ref 健康度摘要，包括 note 数、legacy footnote 数、resolved/unresolved note_ref 数、orphan note 数，以及按 `source_placement` / `scope` 的统计。
+
+Phase 4 暂不做：
+
+- 不匹配正文 marker 到章末注或书末注。
+- 不调用 LLM 修复 note/ref。
+- 不把参考文献页、出版后记、版权页语义化。
+- 不决定 EPUB/RAG 如何消费 note。
+
+后续 Phase 4 工作应在这个基础上继续补齐 page footnote、section endnote、book endnote 的结构化 matcher，并把 unresolved/ambiguous 情况显式记录到 audit report 中。
+
 ## display_block 定义
 
 `display_block` 是逻辑文本结构，不是展示样式，也不是“bbox 看起来不像正文”的临时判断。它应该表达书中通过排版和结构证据独立出来的文本，例如引文、题记、书信摘录、碑文、诗文、档案摘录等。
