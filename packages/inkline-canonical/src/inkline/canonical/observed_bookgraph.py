@@ -35,6 +35,8 @@ INTERNAL_NODE_ATTRS = {
     "logical_split_reason",
 }
 INTERNAL_EVIDENCE_FIELDS = {"parser_payload"}
+NON_TEXT_BRIDGE_PAGE_ROLES = {"visual_page", "blank_page"}
+TEXT_FLOW_BRIDGE_PAGE_ROLES = {"text_flow_page"}
 
 
 def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
@@ -124,6 +126,9 @@ def _observed_pipeline(document: dict[str, Any]) -> dict[str, Any]:
     page_role_records = classify_observed_page_roles(document, layout_audit=layout_audit)
     classified_units = classify_text_units_by_layout(text_units, document["pages"])
     logical_units = _logical_units_from_text_units(classified_units, document["observations"])
+    logical_units = _merge_paragraphs_across_nontext_pages(
+        logical_units, page_role_records, document["pages"]
+    )
     return {
         "metadata": metadata,
         "text_units": classified_units,
@@ -203,7 +208,9 @@ def _logical_units_from_text_units(
     text_units: list[dict[str, Any]],
     observations: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    observations_by_id = {observation["observation_id"]: observation for observation in observations}
+    observations_by_id = {
+        observation["observation_id"]: observation for observation in observations
+    }
     logical_units: list[dict[str, Any]] = []
     for unit in text_units:
         logical_units.extend(_logical_units_from_text_unit(unit, observations_by_id))
@@ -286,7 +293,9 @@ def _logical_unit_from_observation_group(
         role_hint = str(observation.get("role_hint") or "")
         if role_hint and role_hint not in role_hints:
             role_hints.append(role_hint)
-        observation_attrs = observation.get("attrs") if isinstance(observation.get("attrs"), dict) else {}
+        observation_attrs = (
+            observation.get("attrs") if isinstance(observation.get("attrs"), dict) else {}
+        )
         inline_runs = observation_attrs.get("inline_runs")
         if isinstance(inline_runs, list):
             attrs.setdefault("inline_runs", []).extend(deepcopy(inline_runs))
@@ -295,7 +304,11 @@ def _logical_unit_from_observation_group(
             attrs.setdefault("note_refs", []).extend(deepcopy(note_refs))
         observation_bbox = observation.get("bbox")
         if _valid_bbox(observation_bbox):
-            bbox = _union_bbox(bbox, observation_bbox) if bbox is not None else deepcopy(observation_bbox)
+            bbox = (
+                _union_bbox(bbox, observation_bbox)
+                if bbox is not None
+                else deepcopy(observation_bbox)
+            )
     return {
         "unit_id": source_unit["unit_id"],
         "unit_type": source_unit["unit_type"],
@@ -309,6 +322,130 @@ def _logical_unit_from_observation_group(
         "attrs": attrs,
         "parser_payloads": parser_payloads,
     }
+
+
+def _merge_paragraphs_across_nontext_pages(
+    units: list[dict[str, Any]],
+    page_role_records: list[dict[str, Any]],
+    pages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    roles_by_page = page_roles_by_page(page_role_records)
+    page_sizes = {
+        int(page["page"]): {"width": float(page["width"]), "height": float(page["height"])}
+        for page in pages
+        if isinstance(page.get("page"), int)
+        and isinstance(page.get("width"), int | float)
+        and isinstance(page.get("height"), int | float)
+    }
+    merged: list[dict[str, Any]] = []
+    for unit in units:
+        if merged and _nontext_page_bridge_merge(merged[-1], unit, roles_by_page, page_sizes):
+            _merge_logical_unit(merged[-1], unit, "cross_nontext_page_boundary_continuation")
+            continue
+        merged.append(unit)
+    for index, unit in enumerate(merged, start=1):
+        unit["unit_id"] = f"lu{index:06d}"
+    return merged
+
+
+def _nontext_page_bridge_merge(
+    previous: dict[str, Any],
+    current: dict[str, Any],
+    roles_by_page: dict[int, dict[str, Any]],
+    page_sizes: dict[int, dict[str, float]],
+) -> bool:
+    if previous.get("unit_type") != "paragraph" or current.get("unit_type") != "paragraph":
+        return False
+    previous_page = int((previous.get("pages") or [previous["page"]])[-1])
+    current_page = int((current.get("pages") or [current["page"]])[0])
+    if current_page <= previous_page + 1:
+        return False
+    if not _text_flow_bridge_endpoint(previous_page, roles_by_page):
+        return False
+    if not _text_flow_bridge_endpoint(current_page, roles_by_page):
+        return False
+    if not _nontext_bridge_pages(previous_page, current_page, roles_by_page):
+        return False
+    previous_bbox = _last_span_bbox(previous)
+    current_bbox = _first_span_bbox(current)
+    if not _valid_bbox(previous_bbox) or not _valid_bbox(current_bbox):
+        return False
+    previous_height = page_sizes.get(previous_page, {}).get("height")
+    current_height = page_sizes.get(current_page, {}).get("height")
+    if previous_height is None or current_height is None:
+        return False
+    return (
+        float(previous_bbox[3]) >= previous_height * 0.86
+        and float(current_bbox[1]) <= current_height * 0.16
+        and _left_delta(previous_bbox, current_bbox) <= _max_left_delta(previous_bbox)
+        and _horizontal_overlap_ratio(previous_bbox, current_bbox) >= 0.6
+    )
+
+
+def _text_flow_bridge_endpoint(page: int, roles_by_page: dict[int, dict[str, Any]]) -> bool:
+    return str(roles_by_page.get(page, {}).get("page_role") or "") in TEXT_FLOW_BRIDGE_PAGE_ROLES
+
+
+def _nontext_bridge_pages(
+    previous_page: int,
+    current_page: int,
+    roles_by_page: dict[int, dict[str, Any]],
+) -> bool:
+    return all(
+        str(roles_by_page.get(page, {}).get("page_role") or "") in NON_TEXT_BRIDGE_PAGE_ROLES
+        for page in range(previous_page + 1, current_page)
+    )
+
+
+def _merge_logical_unit(target: dict[str, Any], source: dict[str, Any], merge_reason: str) -> None:
+    if source.get("text"):
+        target["text"] = (
+            f"{target['text']}\n{source['text']}" if target.get("text") else source["text"]
+        )
+    for page in source.get("pages") or []:
+        if page not in target["pages"]:
+            target["pages"].append(page)
+    target["spans"].extend(deepcopy(source.get("spans") or []))
+    target["observation_ids"].extend(source.get("observation_ids") or [])
+    for role_hint in source.get("role_hints") or []:
+        if role_hint not in target["role_hints"]:
+            target["role_hints"].append(role_hint)
+    target["parser_payloads"].extend(deepcopy(source.get("parser_payloads") or []))
+    target_attrs = target.setdefault("attrs", {})
+    source_attrs = source.get("attrs") or {}
+    _merge_source_text_unit_ids(target_attrs, source_attrs)
+    target_attrs.setdefault("merge_reasons", []).append(merge_reason)
+
+
+def _merge_source_text_unit_ids(target_attrs: dict[str, Any], source_attrs: dict[str, Any]) -> None:
+    ids = []
+    for attrs in (target_attrs, source_attrs):
+        source_text_unit_ids = attrs.get("source_text_unit_ids")
+        if isinstance(source_text_unit_ids, list):
+            ids.extend(str(value) for value in source_text_unit_ids)
+        source_text_unit_id = attrs.get("source_text_unit_id")
+        if isinstance(source_text_unit_id, str):
+            ids.append(source_text_unit_id)
+    if ids:
+        deduped = list(dict.fromkeys(ids))
+        target_attrs["source_text_unit_ids"] = deduped
+        target_attrs["source_text_unit_id"] = deduped[0]
+
+
+def _first_span_bbox(unit: dict[str, Any]) -> Any:
+    for span in unit.get("spans") or []:
+        bbox = span.get("bbox") if isinstance(span, dict) else None
+        if _valid_bbox(bbox):
+            return bbox
+    return unit.get("bbox")
+
+
+def _last_span_bbox(unit: dict[str, Any]) -> Any:
+    for span in reversed(unit.get("spans") or []):
+        bbox = span.get("bbox") if isinstance(span, dict) else None
+        if _valid_bbox(bbox):
+            return bbox
+    return unit.get("bbox")
 
 
 def _observation_spans(observation: dict[str, Any]) -> list[dict[str, Any]]:
@@ -340,6 +477,22 @@ def _union_bbox(left: list[float] | None, right: list[float]) -> list[float]:
     ]
 
 
+def _left_delta(left: list[float], right: list[float]) -> float:
+    return abs(float(left[0]) - float(right[0]))
+
+
+def _max_left_delta(bbox: list[float]) -> float:
+    return max(24.0, (float(bbox[2]) - float(bbox[0])) * 0.08)
+
+
+def _horizontal_overlap_ratio(left: list[float], right: list[float]) -> float:
+    overlap = max(0.0, min(float(left[2]), float(right[2])) - max(float(left[0]), float(right[0])))
+    width = min(float(left[2]) - float(left[0]), float(right[2]) - float(right[0]))
+    if width <= 0:
+        return 0.0
+    return overlap / width
+
+
 def _public_bookgraph(debug_graph: dict[str, Any]) -> dict[str, Any]:
     public = deepcopy(debug_graph)
     public["metadata"] = {
@@ -366,26 +519,20 @@ def _public_bookgraph(debug_graph: dict[str, Any]) -> dict[str, Any]:
 def _public_node(node: dict[str, Any]) -> dict[str, Any]:
     public = deepcopy(node)
     attrs = public.get("attrs") if isinstance(public.get("attrs"), dict) else {}
-    public["attrs"] = {
-        key: value for key, value in attrs.items() if key not in INTERNAL_NODE_ATTRS
-    }
+    public["attrs"] = {key: value for key, value in attrs.items() if key not in INTERNAL_NODE_ATTRS}
     return public
 
 
 def _public_edge(edge: dict[str, Any]) -> dict[str, Any]:
     public = deepcopy(edge)
     attrs = public.get("attrs") if isinstance(public.get("attrs"), dict) else {}
-    public["attrs"] = {
-        key: value for key, value in attrs.items() if key not in INTERNAL_NODE_ATTRS
-    }
+    public["attrs"] = {key: value for key, value in attrs.items() if key not in INTERNAL_NODE_ATTRS}
     return public
 
 
 def _public_evidence(record: dict[str, Any]) -> dict[str, Any]:
     public = {
-        key: deepcopy(value)
-        for key, value in record.items()
-        if key not in INTERNAL_EVIDENCE_FIELDS
+        key: deepcopy(value) for key, value in record.items() if key not in INTERNAL_EVIDENCE_FIELDS
     }
     if public.get("source_kind") == "text_unit":
         public["source_kind"] = "source_span_set"
@@ -397,9 +544,7 @@ def _internal_pages(
     public_graph: dict[str, Any],
     page_role_records: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    page_roles_by_page_number = {
-        int(record["page"]): record for record in page_role_records
-    }
+    page_roles_by_page_number = {int(record["page"]): record for record in page_role_records}
     pages = []
     for page in public_graph.get("metadata", {}).get("pages", []):
         page_number = int(page["page"])

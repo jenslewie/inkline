@@ -129,6 +129,64 @@ def _cross_page_body_document() -> dict:
     )
 
 
+def _cross_visual_insert_body_document() -> dict:
+    return make_observed_document(
+        _metadata(),
+        [
+            make_observed_page(1, width=1000, height=1000),
+            make_observed_page(2, width=1000, height=1000),
+            make_observed_page(3, width=1000, height=1000),
+        ],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body before",
+                page=1,
+                bbox=[100, 100, 700, 130],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Paragraph tail",
+                page=1,
+                bbox=[100, 900, 700, 980],
+                spans=[{"page": 1, "bbox": [100, 900, 700, 980]}],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000003",
+                "image_region",
+                page=2,
+                bbox=[100, 100, 900, 900],
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="Paragraph head",
+                page=3,
+                bbox=[102, 30, 690, 90],
+                spans=[{"page": 3, "bbox": [102, 30, 690, 90]}],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000005",
+                "text_region",
+                text="Body after",
+                page=3,
+                bbox=[102, 180, 690, 220],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+        ],
+    )
+
+
 def _inset_body_document() -> dict:
     return make_observed_document(
         _metadata(),
@@ -370,6 +428,31 @@ def test_build_bookgraph_from_observed_preserves_cross_page_text_unit_evidence()
     ]
 
 
+def test_build_bookgraph_from_observed_bridges_paragraph_over_visual_insert() -> None:
+    document = _cross_visual_insert_body_document()
+    graph = build_bookgraph_from_observed(document)
+
+    validate_bookgraph(graph)
+    assert [node["text"] for node in graph["nodes"]] == [
+        "Body before",
+        "Paragraph tail\nParagraph head",
+        "Body after",
+    ]
+    assert graph["evidence"][1]["pages"] == [1, 3]
+    assert graph["evidence"][1]["spans"] == [
+        {"page": 1, "bbox": [100, 900, 700, 980]},
+        {"page": 3, "bbox": [102, 30, 690, 90]},
+    ]
+
+    internal = build_internal_canonical_from_observed(document)
+
+    assert internal["nodes"][1]["debug"]["attrs"]["merge_reasons"] == [
+        "cross_nontext_page_boundary_continuation"
+    ]
+    assert internal["pipeline"]["page_roles"][1]["page_role"] == "visual_page"
+    assert "merge_reasons" not in graph["nodes"][1]["attrs"]
+
+
 def test_build_bookgraph_from_observed_uses_layout_classification() -> None:
     graph = build_bookgraph_from_observed(_inset_body_document())
 
@@ -546,7 +629,9 @@ def test_build_bookgraph_from_observed_preserves_observation_provenance() -> Non
     assert "legacy_block_id" not in graph["nodes"][1]["attrs"]
 
 
-def test_build_bookgraph_from_observed_creates_reading_order_without_downstream_projections() -> None:
+def test_build_bookgraph_from_observed_creates_reading_order_without_downstream_projections() -> (
+    None
+):
     graph = build_bookgraph_from_observed(_observed_document())
 
     assert graph["projections"]["reading_order"] == ["n000001", "n000002", "n000003"]
