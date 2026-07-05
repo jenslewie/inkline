@@ -356,6 +356,8 @@ def _nontext_page_bridge_merge(
 ) -> bool:
     if previous.get("unit_type") != "paragraph" or current.get("unit_type") != "paragraph":
         return False
+    if "\n" in str(previous.get("text") or "") or "\n" in str(current.get("text") or ""):
+        return False
     previous_page = int((previous.get("pages") or [previous["page"]])[-1])
     current_page = int((current.get("pages") or [current["page"]])[0])
     if current_page <= previous_page + 1:
@@ -398,10 +400,10 @@ def _nontext_bridge_pages(
 
 
 def _merge_logical_unit(target: dict[str, Any], source: dict[str, Any], merge_reason: str) -> None:
+    target_text = str(target.get("text") or "")
+    source_text = str(source.get("text") or "")
     if source.get("text"):
-        target["text"] = (
-            f"{target['text']}\n{source['text']}" if target.get("text") else source["text"]
-        )
+        target["text"] = f"{target_text}{source_text}" if target_text else source_text
     for page in source.get("pages") or []:
         if page not in target["pages"]:
             target["pages"].append(page)
@@ -413,8 +415,28 @@ def _merge_logical_unit(target: dict[str, Any], source: dict[str, Any], merge_re
     target["parser_payloads"].extend(deepcopy(source.get("parser_payloads") or []))
     target_attrs = target.setdefault("attrs", {})
     source_attrs = source.get("attrs") or {}
+    _merge_inline_attrs(target_attrs, source_attrs, target_text, source_text)
     _merge_source_text_unit_ids(target_attrs, source_attrs)
     target_attrs.setdefault("merge_reasons", []).append(merge_reason)
+
+
+def _merge_inline_attrs(
+    target_attrs: dict[str, Any],
+    source_attrs: dict[str, Any],
+    target_text: str,
+    source_text: str,
+) -> None:
+    source_inline_runs = source_attrs.get("inline_runs")
+    if isinstance(source_inline_runs, list):
+        if "inline_runs" not in target_attrs and target_text:
+            target_attrs["inline_runs"] = [{"type": "text", "text": target_text}]
+        target_attrs.setdefault("inline_runs", []).extend(deepcopy(source_inline_runs))
+    elif "inline_runs" in target_attrs and source_text:
+        target_attrs["inline_runs"].append({"type": "text", "text": source_text})
+
+    source_note_refs = source_attrs.get("note_refs")
+    if isinstance(source_note_refs, list):
+        target_attrs.setdefault("note_refs", []).extend(deepcopy(source_note_refs))
 
 
 def _merge_source_text_unit_ids(target_attrs: dict[str, Any], source_attrs: dict[str, Any]) -> None:

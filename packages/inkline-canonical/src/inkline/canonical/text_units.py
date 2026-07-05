@@ -18,9 +18,7 @@ def build_text_units(document: dict[str, Any]) -> tuple[list[dict[str, Any]], di
     image_bboxes = _region_bboxes(document["observations"], {"image_region"})
     table_bboxes = _region_bboxes(document["observations"], {"table_region"})
     ordered_observations = _ordered_observations(document["observations"])
-    caption_title_ids = _visual_caption_title_ids(
-        ordered_observations, image_bboxes, page_sizes
-    )
+    caption_title_ids = _visual_caption_title_ids(ordered_observations, image_bboxes, page_sizes)
 
     for observation in ordered_observations:
         layout_role = None
@@ -95,9 +93,7 @@ def _visual_caption_title_ids(
     text_observations_by_page: dict[int, list[dict[str, Any]]] = {}
     for observation in observations:
         if observation.get("kind") in {"text_region", "footnote_region"}:
-            text_observations_by_page.setdefault(int(observation["page"]), []).append(
-                observation
-            )
+            text_observations_by_page.setdefault(int(observation["page"]), []).append(observation)
 
     for page, text_observations in text_observations_by_page.items():
         visuals = visual_bboxes.get(page) or []
@@ -127,12 +123,11 @@ def _caption_text_group(title: dict[str, Any], following: dict[str, Any]) -> boo
     following_bbox = following.get("bbox")
     if not _valid_bbox(title_bbox) or not _valid_bbox(following_bbox):
         return False
-    return (
-        0 <= _vertical_gap(title_bbox, following_bbox) <= max(40.0, _height(title_bbox) * 2.0)
-        and (
-            _horizontal_overlap_ratio(title_bbox, following_bbox) >= 0.5
-            or _left_delta(title_bbox, following_bbox) <= 32.0
-        )
+    return 0 <= _vertical_gap(title_bbox, following_bbox) <= max(
+        40.0, _height(title_bbox) * 2.0
+    ) and (
+        _horizontal_overlap_ratio(title_bbox, following_bbox) >= 0.5
+        or _left_delta(title_bbox, following_bbox) <= 32.0
     )
 
 
@@ -480,9 +475,10 @@ def _cross_page_merge(
 def _merge_observation(
     unit: dict[str, Any], observation: dict[str, Any], merge_reason: str
 ) -> None:
+    target_text = str(unit.get("text") or "")
     text = str(observation.get("text") or "")
     if text:
-        unit["text"] = f"{unit['text']}\n{text}" if unit["text"] else text
+        unit["text"] = _join_merged_text(target_text, text, merge_reason)
     bbox = observation.get("bbox")
     if unit["page"] == observation["page"] and _valid_bbox(unit.get("bbox")) and _valid_bbox(bbox):
         unit["bbox"] = _union_bbox(unit["bbox"], bbox)
@@ -495,16 +491,36 @@ def _merge_observation(
         unit["role_hints"].append(observation["role_hint"])
     unit["parser_payloads"].append(deepcopy(observation.get("parser_payload") or {}))
     unit["attrs"].setdefault("merge_reasons", []).append(merge_reason)
-    _merge_attrs(unit["attrs"], observation)
+    _merge_attrs(unit["attrs"], observation, target_text=target_text, source_text=text)
 
 
-def _merge_attrs(attrs: dict[str, Any], observation: dict[str, Any]) -> None:
+def _join_merged_text(target_text: str, source_text: str, merge_reason: str) -> str:
+    if not target_text:
+        return source_text
+    if merge_reason == "cross_page_boundary_continuation":
+        return f"{target_text}{source_text}"
+    return f"{target_text}\n{source_text}"
+
+
+def _merge_attrs(
+    attrs: dict[str, Any],
+    observation: dict[str, Any],
+    *,
+    target_text: str,
+    source_text: str,
+) -> None:
     observation_attrs = observation.get("attrs")
     if not isinstance(observation_attrs, dict):
+        if "inline_runs" in attrs and source_text:
+            attrs["inline_runs"].append({"type": "text", "text": source_text})
         return
     inline_runs = observation_attrs.get("inline_runs")
     if isinstance(inline_runs, list):
+        if "inline_runs" not in attrs and target_text:
+            attrs["inline_runs"] = [{"type": "text", "text": target_text}]
         attrs.setdefault("inline_runs", []).extend(deepcopy(inline_runs))
+    elif "inline_runs" in attrs and source_text:
+        attrs["inline_runs"].append({"type": "text", "text": source_text})
     note_refs = observation_attrs.get("note_refs")
     if isinstance(note_refs, list):
         attrs.setdefault("note_refs", []).extend(deepcopy(note_refs))
@@ -616,12 +632,8 @@ def _near_visual_bbox(text_bbox: list[float], visual_bbox: list[float]) -> bool:
         float(text_bbox[0]) - float(visual_bbox[2]),
         0.0,
     )
-    return (
-        vertical_gap <= 64.0
-        and (
-            _horizontal_overlap_ratio(text_bbox, visual_bbox) >= 0.5
-            or horizontal_gap <= 96.0
-        )
+    return vertical_gap <= 64.0 and (
+        _horizontal_overlap_ratio(text_bbox, visual_bbox) >= 0.5 or horizontal_gap <= 96.0
     )
 
 

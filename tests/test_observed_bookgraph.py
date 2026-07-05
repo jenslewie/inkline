@@ -155,7 +155,14 @@ def _cross_visual_insert_body_document() -> dict:
                 bbox=[100, 900, 700, 980],
                 spans=[{"page": 1, "bbox": [100, 900, 700, 980]}],
                 role_hint="body_text",
-                attrs={"reading_order": 2},
+                attrs={
+                    "reading_order": 2,
+                    "inline_runs": [
+                        {"type": "text", "text": "Paragraph "},
+                        {"type": "note_ref", "text": "1", "marker": "1"},
+                        {"type": "text", "text": "tail"},
+                    ],
+                },
             ),
             make_observation(
                 "obs000003",
@@ -412,7 +419,7 @@ def test_build_bookgraph_from_observed_preserves_cross_page_text_unit_evidence()
 
     validate_bookgraph(graph)
     assert [node["node_type"] for node in graph["nodes"]] == ["paragraph"]
-    assert graph["nodes"][0]["text"] == "Page bottom\nPage top"
+    assert graph["nodes"][0]["text"] == "Page bottomPage top"
     internal = build_internal_canonical_from_observed(_cross_page_body_document())
     assert internal["nodes"][0]["debug"]["attrs"]["source_observation_ids"] == [
         "obs000001",
@@ -435,8 +442,14 @@ def test_build_bookgraph_from_observed_bridges_paragraph_over_visual_insert() ->
     validate_bookgraph(graph)
     assert [node["text"] for node in graph["nodes"]] == [
         "Body before",
-        "Paragraph tail\nParagraph head",
+        "Paragraph tailParagraph head",
         "Body after",
+    ]
+    assert graph["nodes"][1]["inline_runs"] == [
+        {"type": "text", "text": "Paragraph "},
+        {"type": "note_ref", "text": "1", "marker": "1"},
+        {"type": "text", "text": "tail"},
+        {"type": "text", "text": "Paragraph head"},
     ]
     assert graph["evidence"][1]["pages"] == [1, 3]
     assert graph["evidence"][1]["spans"] == [
@@ -451,6 +464,21 @@ def test_build_bookgraph_from_observed_bridges_paragraph_over_visual_insert() ->
     ]
     assert internal["pipeline"]["page_roles"][1]["page_role"] == "visual_page"
     assert "merge_reasons" not in graph["nodes"][1]["attrs"]
+
+
+def test_build_bookgraph_from_observed_does_not_bridge_multiline_visual_insert_endpoint() -> None:
+    document = _cross_visual_insert_body_document()
+    document["observations"][3]["text"] = "Paragraph\nhead"
+
+    graph = build_bookgraph_from_observed(document)
+
+    validate_bookgraph(graph)
+    assert [node["text"] for node in graph["nodes"]] == [
+        "Body before",
+        "Paragraph tail",
+        "Paragraph\nhead",
+        "Body after",
+    ]
 
 
 def test_build_bookgraph_from_observed_uses_layout_classification() -> None:

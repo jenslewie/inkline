@@ -498,7 +498,7 @@ def test_page_boundary_body_observations_merge_across_adjacent_pages() -> None:
     assert ignored == {}
     assert len(units) == 1
     unit = units[0]
-    assert unit["text"] == "Page bottom\nPage top"
+    assert unit["text"] == "Page bottomPage top"
     assert unit["page"] == 1
     assert unit["pages"] == [1, 2]
     assert unit["bbox"] == [100, 900, 700, 980]
@@ -794,9 +794,7 @@ def test_layout_classifier_marks_tall_slightly_inset_block_as_display_block() ->
         "display_block",
         "paragraph",
     ]
-    assert "slightly_inset_tall_block" in classified[1]["attrs"]["layout_classification"][
-        "signals"
-    ]
+    assert "slightly_inset_tall_block" in classified[1]["attrs"]["layout_classification"]["signals"]
 
 
 def test_layout_classifier_keeps_single_body_unit_as_paragraph() -> None:
