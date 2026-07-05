@@ -113,8 +113,31 @@ def make_node(
     if level is not None:
         node["level"] = level
     if inline_runs is not None:
-        node["inline_runs"] = deepcopy(inline_runs)
+        node["inline_runs"] = _normalize_inline_runs(inline_runs)
     return node
+
+
+def _normalize_inline_runs(inline_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for run in inline_runs:
+        current = deepcopy(run)
+        if normalized and _mergeable_text_runs(normalized[-1], current):
+            normalized[-1]["text"] = str(normalized[-1].get("text") or "") + str(
+                current.get("text") or ""
+            )
+            continue
+        normalized.append(current)
+    return normalized
+
+
+def _mergeable_text_runs(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    if left.get("type") != "text" or right.get("type") != "text":
+        return False
+    return _run_metadata(left) == _run_metadata(right)
+
+
+def _run_metadata(run: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in run.items() if key != "text"}
 
 
 def make_edge(
@@ -224,12 +247,16 @@ def _validate_note_attrs(attrs: dict[str, Any], path: str) -> None:
             raise ValidationError(f"{path}.{field} must be {expected_type.__name__}")
 
 
-def _validate_inline_runs(
-    inline_runs: list[Any], node_types: dict[str, str], path: str
-) -> None:
+def _validate_inline_runs(inline_runs: list[Any], node_types: dict[str, str], path: str) -> None:
     for index, run in enumerate(inline_runs):
         if not isinstance(run, dict):
             raise ValidationError(f"{path}[{index}] must be object")
+        if (
+            index > 0
+            and isinstance(inline_runs[index - 1], dict)
+            and _mergeable_text_runs(inline_runs[index - 1], run)
+        ):
+            raise ValidationError(f"{path}[{index}] adjacent text runs must be merged")
         if run.get("type") != "note_ref":
             continue
         attrs = run.get("attrs") if isinstance(run.get("attrs"), dict) else {}
@@ -243,7 +270,9 @@ def _validate_inline_runs(
         if target_note_id not in node_types:
             raise ValidationError(f"{path}[{index}].attrs.target_note_id missing node")
         if not _is_note_node_type(node_types[target_note_id]):
-            raise ValidationError(f"{path}[{index}].attrs.target_note_id note_ref target must be note")
+            raise ValidationError(
+                f"{path}[{index}].attrs.target_note_id note_ref target must be note"
+            )
 
 
 def _validate_evidence(evidence: list[dict[str, Any]]) -> set[str]:

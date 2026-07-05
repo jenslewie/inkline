@@ -448,8 +448,7 @@ def test_build_bookgraph_from_observed_bridges_paragraph_over_visual_insert() ->
     assert graph["nodes"][1]["inline_runs"] == [
         {"type": "text", "text": "Paragraph "},
         {"type": "note_ref", "text": "1", "marker": "1"},
-        {"type": "text", "text": "tail"},
-        {"type": "text", "text": "Paragraph head"},
+        {"type": "text", "text": "tailParagraph head"},
     ]
     assert graph["evidence"][1]["pages"] == [1, 3]
     assert graph["evidence"][1]["spans"] == [

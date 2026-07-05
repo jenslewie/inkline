@@ -152,6 +152,59 @@ def test_note_node_with_references_note_edge_passes() -> None:
     validate_bookgraph(graph)
 
 
+def test_make_node_merges_adjacent_plain_text_inline_runs() -> None:
+    node = make_node(
+        "n000001",
+        "paragraph",
+        "abcdef",
+        inline_runs=[
+            {"type": "text", "text": "ab"},
+            {"type": "text", "text": "cd"},
+            {"type": "note_ref", "text": "1", "marker": "1"},
+            {"type": "text", "text": "ef"},
+        ],
+        attrs={},
+        evidence_ids=["ev000001"],
+    )
+
+    assert node["inline_runs"] == [
+        {"type": "text", "text": "abcd"},
+        {"type": "note_ref", "text": "1", "marker": "1"},
+        {"type": "text", "text": "ef"},
+    ]
+
+
+def test_make_node_keeps_text_runs_with_different_metadata_separate() -> None:
+    node = make_node(
+        "n000001",
+        "paragraph",
+        "abcdef",
+        inline_runs=[
+            {"type": "text", "text": "ab", "attrs": {"style": "italic"}},
+            {"type": "text", "text": "cd"},
+            {"type": "text", "text": "ef"},
+        ],
+        attrs={},
+        evidence_ids=["ev000001"],
+    )
+
+    assert node["inline_runs"] == [
+        {"type": "text", "text": "ab", "attrs": {"style": "italic"}},
+        {"type": "text", "text": "cdef"},
+    ]
+
+
+def test_adjacent_plain_text_inline_runs_fail_validation() -> None:
+    graph = _minimal_graph()
+    graph["nodes"][0]["inline_runs"] = [
+        {"type": "text", "text": "ab"},
+        {"type": "text", "text": "cd"},
+    ]
+
+    with pytest.raises(ValidationError, match="adjacent text runs"):
+        validate_bookgraph(graph)
+
+
 def test_references_note_edge_target_must_be_note_node() -> None:
     graph = _minimal_graph()
     graph["nodes"].append(
