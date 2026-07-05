@@ -197,13 +197,19 @@ def main() -> None:
 
 
 def _write_observed_shadow_outputs(args, pages, page_sizes, canonical) -> None:
-    if not (args.observed_output or args.bookgraph_from_observed_output or args.internal_canonical_output):
+    if not (
+        args.observed_output
+        or args.bookgraph_from_observed_output
+        or args.internal_canonical_output
+    ):
         return
     observed = build_observed_document_shadow(
         pages=pages,
         page_sizes=page_sizes,
         metadata=canonical["metadata"],
         assets=canonical.get("assets") or {},
+        source_pdf=args.source_pdf,
+        allow_missing_pdf_text=args.allow_missing_pdf_text,
     )
     validate_observed_document(observed)
     if args.observed_output:

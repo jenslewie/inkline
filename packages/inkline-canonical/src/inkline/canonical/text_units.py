@@ -7,6 +7,7 @@ from typing import Any
 from inkline.canonical.observed import validate_observed_document
 
 TEXT_UNIT_TYPES = {"heading", "paragraph", "display_block", "list_item", "footnote"}
+_MIN_FIRST_LINE_INDENT = 8.0
 
 
 def build_text_units(document: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
@@ -376,6 +377,11 @@ def _unit_attrs(observation: dict[str, Any]) -> dict[str, Any]:
     observation_attrs = observation.get("attrs")
     if not isinstance(observation_attrs, dict):
         return attrs
+    text_line_metrics = observation_attrs.get("text_line_metrics")
+    if isinstance(text_line_metrics, dict):
+        attrs["text_line_metrics_by_observation"] = {
+            str(observation["observation_id"]): deepcopy(text_line_metrics)
+        }
     inline_runs = observation_attrs.get("inline_runs")
     if isinstance(inline_runs, list):
         attrs["inline_runs"] = deepcopy(inline_runs)
@@ -467,9 +473,69 @@ def _cross_page_merge(
     return (
         _near_page_bottom(previous_bbox, previous_height)
         and _near_page_top(bbox, current_height)
-        and _left_delta(previous_bbox, bbox) <= _max_left_delta(previous_bbox)
         and _horizontal_overlap_ratio(previous_bbox, bbox) >= 0.6
+        and _cross_page_text_flow_continues(previous_bbox, bbox, observation)
     )
+
+
+def _cross_page_text_flow_continues(
+    previous_bbox: list[float], bbox: list[float], observation: dict[str, Any]
+) -> bool:
+    if _next_observation_starts_new_paragraph(observation):
+        return False
+    if _next_observation_starts_continuation(observation):
+        return True
+    return _left_delta(previous_bbox, bbox) <= _max_left_delta(previous_bbox)
+
+
+def _next_observation_starts_new_paragraph(observation: dict[str, Any]) -> bool:
+    metrics = _observation_text_line_metrics(observation)
+    if not metrics:
+        return False
+    line_count = _metric_int(metrics, "line_count")
+    if line_count is not None and line_count < 2:
+        return False
+    indent = _metric_float(metrics, "first_line_indent")
+    char_width = _metric_float(metrics, "char_width")
+    if indent is None:
+        return False
+    threshold = max(_MIN_FIRST_LINE_INDENT, (char_width or 10.0) * 1.15)
+    return indent >= threshold
+
+
+def _next_observation_starts_continuation(observation: dict[str, Any]) -> bool:
+    metrics = _observation_text_line_metrics(observation)
+    if not metrics:
+        return False
+    line_count = _metric_int(metrics, "line_count")
+    if line_count is not None and line_count < 2:
+        return False
+    indent = _metric_float(metrics, "first_line_indent")
+    char_width = _metric_float(metrics, "char_width")
+    if indent is None:
+        return False
+    threshold = max(6.0, (char_width or 10.0) * 0.75)
+    return abs(indent) <= threshold
+
+
+def _observation_text_line_metrics(observation: dict[str, Any]) -> dict[str, Any] | None:
+    attrs = observation.get("attrs") if isinstance(observation.get("attrs"), dict) else {}
+    metrics = attrs.get("text_line_metrics")
+    return metrics if isinstance(metrics, dict) else None
+
+
+def _metric_float(metrics: dict[str, Any], key: str) -> float | None:
+    try:
+        return float(metrics[key])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _metric_int(metrics: dict[str, Any], key: str) -> int | None:
+    try:
+        return int(metrics[key])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _merge_observation(
@@ -514,6 +580,11 @@ def _merge_attrs(
         if "inline_runs" in attrs and source_text:
             attrs["inline_runs"].append({"type": "text", "text": source_text})
         return
+    text_line_metrics = observation_attrs.get("text_line_metrics")
+    if isinstance(text_line_metrics, dict):
+        attrs.setdefault("text_line_metrics_by_observation", {})[
+            str(observation["observation_id"])
+        ] = deepcopy(text_line_metrics)
     inline_runs = observation_attrs.get("inline_runs")
     if isinstance(inline_runs, list):
         if "inline_runs" not in attrs and target_text:

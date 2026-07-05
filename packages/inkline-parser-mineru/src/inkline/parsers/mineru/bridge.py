@@ -64,9 +64,7 @@ class MinerUParser:
             bookgraph_output=Path(bookgraph_output) if bookgraph_output else None,
             observed_output=Path(observed_output) if observed_output else None,
             bookgraph_from_observed_output=(
-                Path(bookgraph_from_observed_output)
-                if bookgraph_from_observed_output
-                else None
+                Path(bookgraph_from_observed_output) if bookgraph_from_observed_output else None
             ),
             internal_canonical_output=(
                 Path(internal_canonical_output) if internal_canonical_output else None
@@ -174,6 +172,8 @@ def normalize_mineru_outputs(
         pages,
         page_sizes,
         canonical,
+        args.source_pdf,
+        args.allow_missing_pdf_text,
         args.observed_output,
         args.bookgraph_from_observed_output,
         args.internal_canonical_output,
@@ -388,6 +388,8 @@ def _write_observed_shadow_if_requested(
     pages: dict[int, list[Any]],
     page_sizes: dict[int, tuple[float, float]],
     canonical: dict[str, Any],
+    source_pdf: str | Path | None,
+    allow_missing_pdf_text: bool,
     observed_output: str | Path | None,
     bookgraph_from_observed_output: str | Path | None,
     internal_canonical_output: str | Path | None,
@@ -403,6 +405,8 @@ def _write_observed_shadow_if_requested(
         page_sizes=page_sizes,
         metadata=canonical["metadata"],
         assets=canonical.get("assets") or {},
+        source_pdf=str(source_pdf) if source_pdf else None,
+        allow_missing_pdf_text=allow_missing_pdf_text,
     )
     validate_observed_document(observed)
     if observed_output:

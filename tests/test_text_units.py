@@ -509,6 +509,103 @@ def test_page_boundary_body_observations_merge_across_adjacent_pages() -> None:
     assert unit["attrs"]["merge_reasons"] == ["cross_page_boundary_continuation"]
 
 
+def test_cross_page_top_indented_first_line_starts_new_paragraph() -> None:
+    document = _document_with_pages(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Previous paragraph",
+                page=1,
+                bbox=[120, 700, 868, 905],
+                spans=[{"page": 1, "bbox": [120, 700, 868, 905]}],
+                role_hint="body_text",
+                attrs={
+                    "reading_order": 1,
+                    "text_line_metrics": {
+                        "line_count": 7,
+                        "first_line_indent": 0,
+                        "char_width": 10,
+                    },
+                },
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Next paragraph",
+                page=2,
+                bbox=[131, 111, 877, 298],
+                spans=[{"page": 2, "bbox": [131, 111, 877, 298]}],
+                role_hint="body_text",
+                attrs={
+                    "reading_order": 1,
+                    "text_line_metrics": {
+                        "line_count": 6,
+                        "first_line_indent": 18,
+                        "char_width": 10,
+                    },
+                },
+            ),
+        ],
+        [
+            make_observed_page(1, width=1000, height=1000),
+            make_observed_page(2, width=1000, height=1000),
+        ],
+    )
+
+    units, ignored = build_text_units(document)
+
+    assert ignored == {}
+    assert [unit["text"] for unit in units] == ["Previous paragraph", "Next paragraph"]
+
+
+def test_cross_page_unindented_first_line_continues_after_short_tail() -> None:
+    document = _document_with_pages(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="A paragraph splits in the middle of a word",
+                page=1,
+                bbox=[176, 882, 875, 900],
+                spans=[{"page": 1, "bbox": [176, 882, 875, 900]}],
+                role_hint="body_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="and resumes on the next page.",
+                page=2,
+                bbox=[115, 105, 863, 375],
+                spans=[{"page": 2, "bbox": [115, 105, 863, 375]}],
+                role_hint="body_text",
+                attrs={
+                    "reading_order": 1,
+                    "text_line_metrics": {
+                        "line_count": 8,
+                        "first_line_indent": 2,
+                        "char_width": 10,
+                    },
+                },
+            ),
+        ],
+        [
+            make_observed_page(1, width=1000, height=1000),
+            make_observed_page(2, width=1000, height=1000),
+        ],
+    )
+
+    units, ignored = build_text_units(document)
+
+    assert ignored == {}
+    assert len(units) == 1
+    assert units[0]["text"] == (
+        "A paragraph splits in the middle of a wordand resumes on the next page."
+    )
+    assert units[0]["attrs"]["merge_reasons"] == ["cross_page_boundary_continuation"]
+
+
 def test_non_boundary_body_observations_do_not_merge_across_pages() -> None:
     document = _document_with_pages(
         [

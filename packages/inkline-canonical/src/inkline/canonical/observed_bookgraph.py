@@ -37,6 +37,7 @@ INTERNAL_NODE_ATTRS = {
 INTERNAL_EVIDENCE_FIELDS = {"parser_payload"}
 NON_TEXT_BRIDGE_PAGE_ROLES = {"visual_page", "blank_page"}
 TEXT_FLOW_BRIDGE_PAGE_ROLES = {"text_flow_page"}
+_MIN_FIRST_LINE_INDENT = 8.0
 
 
 def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
@@ -293,15 +294,7 @@ def _logical_unit_from_observation_group(
         role_hint = str(observation.get("role_hint") or "")
         if role_hint and role_hint not in role_hints:
             role_hints.append(role_hint)
-        observation_attrs = (
-            observation.get("attrs") if isinstance(observation.get("attrs"), dict) else {}
-        )
-        inline_runs = observation_attrs.get("inline_runs")
-        if isinstance(inline_runs, list):
-            attrs.setdefault("inline_runs", []).extend(deepcopy(inline_runs))
-        note_refs = observation_attrs.get("note_refs")
-        if isinstance(note_refs, list):
-            attrs.setdefault("note_refs", []).extend(deepcopy(note_refs))
+        _merge_observation_attrs(attrs, observation)
         observation_bbox = observation.get("bbox")
         if _valid_bbox(observation_bbox):
             bbox = (
@@ -322,6 +315,23 @@ def _logical_unit_from_observation_group(
         "attrs": attrs,
         "parser_payloads": parser_payloads,
     }
+
+
+def _merge_observation_attrs(attrs: dict[str, Any], observation: dict[str, Any]) -> None:
+    observation_attrs = (
+        observation.get("attrs") if isinstance(observation.get("attrs"), dict) else {}
+    )
+    text_line_metrics = observation_attrs.get("text_line_metrics")
+    if isinstance(text_line_metrics, dict):
+        attrs.setdefault("text_line_metrics_by_observation", {})[
+            str(observation["observation_id"])
+        ] = deepcopy(text_line_metrics)
+    inline_runs = observation_attrs.get("inline_runs")
+    if isinstance(inline_runs, list):
+        attrs.setdefault("inline_runs", []).extend(deepcopy(inline_runs))
+    note_refs = observation_attrs.get("note_refs")
+    if isinstance(note_refs, list):
+        attrs.setdefault("note_refs", []).extend(deepcopy(note_refs))
 
 
 def _merge_paragraphs_across_nontext_pages(
@@ -379,6 +389,7 @@ def _nontext_page_bridge_merge(
     return (
         float(previous_bbox[3]) >= previous_height * 0.86
         and float(current_bbox[1]) <= current_height * 0.16
+        and not _unit_starts_new_paragraph(current)
         and _left_delta(previous_bbox, current_bbox) <= _max_left_delta(previous_bbox)
         and _horizontal_overlap_ratio(previous_bbox, current_bbox) >= 0.6
     )
@@ -426,6 +437,12 @@ def _merge_inline_attrs(
     target_text: str,
     source_text: str,
 ) -> None:
+    source_line_metrics = source_attrs.get("text_line_metrics_by_observation")
+    if isinstance(source_line_metrics, dict):
+        target_attrs.setdefault("text_line_metrics_by_observation", {}).update(
+            deepcopy(source_line_metrics)
+        )
+
     source_inline_runs = source_attrs.get("inline_runs")
     if isinstance(source_inline_runs, list):
         if "inline_runs" not in target_attrs and target_text:
@@ -468,6 +485,46 @@ def _last_span_bbox(unit: dict[str, Any]) -> Any:
         if _valid_bbox(bbox):
             return bbox
     return unit.get("bbox")
+
+
+def _unit_starts_new_paragraph(unit: dict[str, Any]) -> bool:
+    metrics = _first_unit_text_line_metrics(unit)
+    if not metrics:
+        return False
+    line_count = _metric_int(metrics, "line_count")
+    if line_count is not None and line_count < 2:
+        return False
+    indent = _metric_float(metrics, "first_line_indent")
+    char_width = _metric_float(metrics, "char_width")
+    if indent is None:
+        return False
+    return indent >= max(_MIN_FIRST_LINE_INDENT, (char_width or 10.0) * 1.15)
+
+
+def _first_unit_text_line_metrics(unit: dict[str, Any]) -> dict[str, Any] | None:
+    observation_ids = list(unit.get("observation_ids") or [])
+    if not observation_ids:
+        return None
+    attrs = unit.get("attrs") if isinstance(unit.get("attrs"), dict) else {}
+    metrics_by_observation = attrs.get("text_line_metrics_by_observation")
+    if not isinstance(metrics_by_observation, dict):
+        return None
+    metrics = metrics_by_observation.get(str(observation_ids[0]))
+    return metrics if isinstance(metrics, dict) else None
+
+
+def _metric_float(metrics: dict[str, Any], key: str) -> float | None:
+    try:
+        return float(metrics[key])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _metric_int(metrics: dict[str, Any], key: str) -> int | None:
+    try:
+        return int(metrics[key])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _observation_spans(observation: dict[str, Any]) -> list[dict[str, Any]]:

@@ -480,6 +480,25 @@ def test_build_bookgraph_from_observed_does_not_bridge_multiline_visual_insert_e
     ]
 
 
+def test_build_bookgraph_from_observed_does_not_bridge_indented_visual_insert_endpoint() -> None:
+    document = _cross_visual_insert_body_document()
+    document["observations"][3]["attrs"]["text_line_metrics"] = {
+        "line_count": 3,
+        "first_line_indent": 18,
+        "char_width": 10,
+    }
+
+    graph = build_bookgraph_from_observed(document)
+
+    validate_bookgraph(graph)
+    assert [node["text"] for node in graph["nodes"]] == [
+        "Body before",
+        "Paragraph tail",
+        "Paragraph head",
+        "Body after",
+    ]
+
+
 def test_build_bookgraph_from_observed_uses_layout_classification() -> None:
     graph = build_bookgraph_from_observed(_inset_body_document())
 
