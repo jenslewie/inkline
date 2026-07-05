@@ -67,7 +67,6 @@ REQUIRED_NOTE_ATTR_FIELDS = {
     "marker": str,
     "source_placement": str,
     "scope": str,
-    "source_text_unit_ids": list,
 }
 
 
@@ -159,9 +158,10 @@ def make_evidence(
         "pages": resolved_pages,
         "bbox": deepcopy(bbox),
         "spans": deepcopy(spans) if spans is not None else [],
-        "parser_payload": deepcopy(parser_payload) if parser_payload is not None else {},
         "confidence": confidence,
     }
+    if parser_payload is not None:
+        evidence["parser_payload"] = deepcopy(parser_payload)
     return evidence
 
 

@@ -494,8 +494,7 @@ def _merge_observation(
     if observation["role_hint"] not in unit["role_hints"]:
         unit["role_hints"].append(observation["role_hint"])
     unit["parser_payloads"].append(deepcopy(observation.get("parser_payload") or {}))
-    if merge_reason in {"cross_page_boundary_continuation", "same_page_short_line_group"}:
-        unit["attrs"].setdefault("merge_reasons", []).append(merge_reason)
+    unit["attrs"].setdefault("merge_reasons", []).append(merge_reason)
     _merge_attrs(unit["attrs"], observation)
 
 

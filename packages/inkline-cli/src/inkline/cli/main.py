@@ -64,6 +64,11 @@ def _add_ingest_commands(subparsers: argparse._SubParsersAction) -> None:
         type=Path,
         help="Optional BookGraph output built from observed_document shadow data.",
     )
+    ingest_pdf.add_argument(
+        "--internal-canonical-output",
+        type=Path,
+        help="Optional audit-first internal canonical output built from observed_document data.",
+    )
     ingest_pdf.add_argument("--output", required=True)
     ingest_pdf.set_defaults(handler=_ingest_pdf)
 
@@ -157,6 +162,7 @@ def _ingest_pdf(args: argparse.Namespace) -> int:
             "bookgraph_output": args.bookgraph_output,
             "observed_output": args.observed_output,
             "bookgraph_from_observed_output": args.bookgraph_from_observed_output,
+            "internal_canonical_output": args.internal_canonical_output,
         },
     )
     result = parse_document(request, args.parser_name)

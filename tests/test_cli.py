@@ -89,12 +89,15 @@ def test_cli_accepts_shadow_output_paths_for_pdf_ingest():
             "observed_document.json",
             "--bookgraph-from-observed-output",
             "canonical_v2_observed.json",
+            "--internal-canonical-output",
+            "internal_canonical.json",
         ]
     )
 
     assert args.bookgraph_output == Path("canonical_v2.json")
     assert args.observed_output == Path("observed_document.json")
     assert args.bookgraph_from_observed_output == Path("canonical_v2_observed.json")
+    assert args.internal_canonical_output == Path("internal_canonical.json")
 
 
 def test_cli_pdf_ingest_passes_shadow_output_paths_to_parser(monkeypatch, tmp_path):
@@ -129,6 +132,8 @@ def test_cli_pdf_ingest_passes_shadow_output_paths_to_parser(monkeypatch, tmp_pa
                 str(tmp_path / "observed_document.json"),
                 "--bookgraph-from-observed-output",
                 str(tmp_path / "canonical_v2_observed.json"),
+                "--internal-canonical-output",
+                str(tmp_path / "internal_canonical.json"),
             ]
         )
         == 0
@@ -141,6 +146,7 @@ def test_cli_pdf_ingest_passes_shadow_output_paths_to_parser(monkeypatch, tmp_pa
         captured["options"]["bookgraph_from_observed_output"]
         == tmp_path / "canonical_v2_observed.json"
     )
+    assert captured["options"]["internal_canonical_output"] == tmp_path / "internal_canonical.json"
 
 
 def test_cli_audits_bookgraph_shadow(tmp_path):

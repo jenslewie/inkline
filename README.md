@@ -49,7 +49,8 @@ uv run --extra mineru inkline ingest pdf data/samples/丝绸之路新史.pdf \
   --parser mineru \
   --output data/outputs/丝绸之路新史/canonical.json \
   --observed-output data/outputs/丝绸之路新史/observed_document.json \
-  --bookgraph-from-observed-output data/outputs/丝绸之路新史/canonical_v2_observed.json
+  --bookgraph-from-observed-output data/outputs/丝绸之路新史/canonical_v2_observed.json \
+  --internal-canonical-output data/outputs/丝绸之路新史/internal_canonical.json
 ```
 
 MinerU ingestion keeps Qwen visual marker repair disabled by default. Enable it
@@ -125,8 +126,15 @@ uv run --extra mineru mineru-to-canonical \
   ...existing args... \
   --output data/outputs/丝绸之路新史/canonical.json \
   --observed-output data/outputs/丝绸之路新史/observed_document.json \
-  --bookgraph-from-observed-output data/outputs/丝绸之路新史/canonical_v2_observed.json
+  --bookgraph-from-observed-output data/outputs/丝绸之路新史/canonical_v2_observed.json \
+  --internal-canonical-output data/outputs/丝绸之路新史/internal_canonical.json
 ```
+
+`canonical_v2_observed.json` is the public BookGraph projection for development.
+`internal_canonical.json` is the audit-first superset: it contains the same
+public projection plus per-page/node/edge/evidence debug provenance, TextUnits,
+layout audit, page-role candidates, and parser payload snapshots for internal
+troubleshooting.
 
 To compare the v1-shadow and ObservedDocument-shadow BookGraph paths:
 

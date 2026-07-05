@@ -13,8 +13,10 @@ from typing import Any, TypedDict
 
 from inkline.canonical import (
     build_bookgraph_from_observed,
+    build_internal_canonical_from_observed,
     validate_bookgraph,
     validate_document,
+    validate_internal_canonical,
     validate_observed_document,
 )
 from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_OLLAMA_KEEP_ALIVE, DEFAULT_QWEN_MODEL
@@ -50,6 +52,7 @@ class MinerUParser:
         bookgraph_output = request.options.get("bookgraph_output")
         observed_output = request.options.get("observed_output")
         bookgraph_from_observed_output = request.options.get("bookgraph_from_observed_output")
+        internal_canonical_output = request.options.get("internal_canonical_output")
         document = ingest_pdf_with_mineru(
             request.input_path,
             backend=backend,
@@ -64,6 +67,9 @@ class MinerUParser:
                 Path(bookgraph_from_observed_output)
                 if bookgraph_from_observed_output
                 else None
+            ),
+            internal_canonical_output=(
+                Path(internal_canonical_output) if internal_canonical_output else None
             ),
         )
         return ParseResult(
@@ -92,6 +98,7 @@ def normalize_mineru_outputs(
     bookgraph_output: str | Path | None = None,
     observed_output: str | Path | None = None,
     bookgraph_from_observed_output: str | Path | None = None,
+    internal_canonical_output: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run the MinerU normalization pipeline programmatically.
 
@@ -139,6 +146,9 @@ def normalize_mineru_outputs(
         bookgraph_from_observed_output=(
             str(bookgraph_from_observed_output) if bookgraph_from_observed_output else None
         ),
+        internal_canonical_output=(
+            str(internal_canonical_output) if internal_canonical_output else None
+        ),
         parser_mode="vlm",
         mineru_version=mineru_version,
         mineru_vl_utils_version=mineru_vl_utils_version,
@@ -166,6 +176,7 @@ def normalize_mineru_outputs(
         canonical,
         args.observed_output,
         args.bookgraph_from_observed_output,
+        args.internal_canonical_output,
     )
     write_note_ref_gap_report(canonical, out)
     return canonical
@@ -184,6 +195,7 @@ def ingest_pdf_with_mineru(
     bookgraph_output: str | Path | None = None,
     observed_output: str | Path | None = None,
     bookgraph_from_observed_output: str | Path | None = None,
+    internal_canonical_output: str | Path | None = None,
 ) -> dict[str, Any]:
     if engine != "mineru":
         raise ValueError(f"Unsupported PDF engine: {engine}")
@@ -212,6 +224,7 @@ def ingest_pdf_with_mineru(
         bookgraph_output=bookgraph_output,
         observed_output=observed_output,
         bookgraph_from_observed_output=bookgraph_from_observed_output,
+        internal_canonical_output=internal_canonical_output,
     )
 
 
@@ -377,8 +390,9 @@ def _write_observed_shadow_if_requested(
     canonical: dict[str, Any],
     observed_output: str | Path | None,
     bookgraph_from_observed_output: str | Path | None,
+    internal_canonical_output: str | Path | None,
 ) -> None:
-    if not observed_output and not bookgraph_from_observed_output:
+    if not observed_output and not bookgraph_from_observed_output and not internal_canonical_output:
         return
     from inkline.parsers.mineru.normalize.observed_shadow import (
         build_observed_document_shadow,
@@ -401,6 +415,12 @@ def _write_observed_shadow_if_requested(
         out = Path(bookgraph_from_observed_output)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(graph, ensure_ascii=False, indent=2), encoding="utf-8")
+    if internal_canonical_output:
+        internal = build_internal_canonical_from_observed(observed)
+        validate_internal_canonical(internal)
+        out = Path(internal_canonical_output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(internal, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _now_iso() -> str:

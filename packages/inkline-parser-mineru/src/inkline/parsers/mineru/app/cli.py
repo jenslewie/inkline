@@ -8,8 +8,10 @@ from pathlib import Path
 
 from inkline.canonical import (
     build_bookgraph_from_observed,
+    build_internal_canonical_from_observed,
     validate_bookgraph,
     validate_document,
+    validate_internal_canonical,
     validate_observed_document,
 )
 from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_OLLAMA_KEEP_ALIVE, DEFAULT_QWEN_MODEL
@@ -134,6 +136,10 @@ def parse_args() -> argparse.Namespace:
         "--bookgraph-from-observed-output",
         help="Optional BookGraph output built from observed_document shadow data",
     )
+    p.add_argument(
+        "--internal-canonical-output",
+        help="Optional audit-first internal canonical output built from observed_document data",
+    )
     p.add_argument("--doc-id", default=None)
     p.add_argument("--title", default=None)
     p.add_argument("--language", default="zh-CN")
@@ -179,26 +185,7 @@ def main() -> None:
         bookgraph_out.parent.mkdir(parents=True, exist_ok=True)
         with open(bookgraph_out, "w", encoding="utf-8") as f:
             json.dump(bookgraph, f, ensure_ascii=False, indent=2)
-    if args.observed_output or args.bookgraph_from_observed_output:
-        observed = build_observed_document_shadow(
-            pages=pages,
-            page_sizes=page_sizes,
-            metadata=canonical["metadata"],
-            assets=canonical.get("assets") or {},
-        )
-        validate_observed_document(observed)
-        if args.observed_output:
-            observed_out = Path(args.observed_output)
-            observed_out.parent.mkdir(parents=True, exist_ok=True)
-            with open(observed_out, "w", encoding="utf-8") as f:
-                json.dump(observed, f, ensure_ascii=False, indent=2)
-        if args.bookgraph_from_observed_output:
-            observed_bookgraph = build_bookgraph_from_observed(observed)
-            validate_bookgraph(observed_bookgraph)
-            observed_bookgraph_out = Path(args.bookgraph_from_observed_output)
-            observed_bookgraph_out.parent.mkdir(parents=True, exist_ok=True)
-            with open(observed_bookgraph_out, "w", encoding="utf-8") as f:
-                json.dump(observed_bookgraph, f, ensure_ascii=False, indent=2)
+    _write_observed_shadow_outputs(args, pages, page_sizes, canonical)
     report_path, report = write_note_ref_gap_report(canonical, out)
     print(
         f"Wrote {out} with {len(canonical['blocks'])} blocks and {len(canonical['toc'])} toc entries"
@@ -207,6 +194,34 @@ def main() -> None:
         f"Wrote {report_path} with "
         f"{report['summary']['missing_body_ref_notes']} missing body note ref(s)"
     )
+
+
+def _write_observed_shadow_outputs(args, pages, page_sizes, canonical) -> None:
+    if not (args.observed_output or args.bookgraph_from_observed_output or args.internal_canonical_output):
+        return
+    observed = build_observed_document_shadow(
+        pages=pages,
+        page_sizes=page_sizes,
+        metadata=canonical["metadata"],
+        assets=canonical.get("assets") or {},
+    )
+    validate_observed_document(observed)
+    if args.observed_output:
+        _write_json(Path(args.observed_output), observed)
+    if args.bookgraph_from_observed_output:
+        observed_bookgraph = build_bookgraph_from_observed(observed)
+        validate_bookgraph(observed_bookgraph)
+        _write_json(Path(args.bookgraph_from_observed_output), observed_bookgraph)
+    if args.internal_canonical_output:
+        internal_canonical = build_internal_canonical_from_observed(observed)
+        validate_internal_canonical(internal_canonical)
+        _write_json(Path(args.internal_canonical_output), internal_canonical)
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":

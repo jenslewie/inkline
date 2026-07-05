@@ -31,6 +31,47 @@ same in-memory canonical
 
 产品首个 release 之前，inkline 可以接受 `canonical_v2.json` 暂存；但 release 版本应只保留一个 canonical contract。既然产品尚未发布，就不需要长期兼容 v1 私有契约。迁移完成后，EPUB、RAG、CLI 和文档应统一消费新的 canonical，而不是要求用户在 v1/v2 之间选择。
 
+## Public Contract 与 Internal Canonical
+
+Canonical v2 必须区分 public contract 和 internal audit artifact。
+
+`canonical.json` / public BookGraph 只表达 release contract：下游 EPUB、RAG、UI 和外部工具可以依赖它。它不能包含中间层字段、调试信号、候选判断、parser 原始 payload 或 phase 尚未稳定的 projection。
+
+`internal_canonical.json` 是内部审计用的 public 超集。它的第一目标不是代码投影方便，而是排查问题方便。查看一个 page/node/edge/evidence 时，应该能在同一个局部看到 public 判断和 debug 来源，而不是在 `public` 与 `debug` 两个远离的树之间来回跳。
+
+Internal canonical 使用 audit-first 结构：
+
+```json
+{
+  "schema_name": "inkline_internal_canonical",
+  "schema_version": "0.1-dev",
+  "public_projection": {},
+  "pages": [
+    {"public": {}, "debug": {}}
+  ],
+  "nodes": [
+    {"public": {}, "debug": {}}
+  ],
+  "edges": [
+    {"public": {}, "debug": {}}
+  ],
+  "evidence": [
+    {"public": {}, "debug": {}}
+  ],
+  "pipeline": {}
+}
+```
+
+规则：
+
+- `public_projection` 必须与单独生成的 public BookGraph 完全一致。
+- `pages/nodes/edges/evidence` 必须按 entity 聚合 public 与 debug 信息，方便人工审计。
+- public BookGraph 不能依赖 internal canonical 才能被 EPUB/RAG 正常消费。
+- internal canonical 可以冗余 public 信息；冗余换来局部可读性，是有意设计。
+- `parser_payload`, `role_hint`, `merge_reasons`, `layout_classification`, `page_role_signals`, `shadow_*` metadata 等诊断字段只能进入 internal。
+
+这条规则来自一次 Phase 4 retro：`TextUnit` 曾被直接投射成 BookGraph node，导致 `paragraph` node 可能包含多个自然段，或把一个自然段切断。根因不是某个阈值，而是 public entity contract 没有先写清楚。之后所有 canonical entity 都必须先有 contract，再编码，再测试。
+
 ## ObservedDocument -> BookGraph -> Projections
 
 理想结构分三层：
@@ -58,6 +99,28 @@ Phase 2 在引入 ObservedDocument 前必须先完成两项前置清理：
 
 - neutralize BookGraph contract language: parser-specific raw labels 只能进入 `parser_payload`，迁移期 v1 block id 只能作为 `legacy_block_id`
 - add non-semantic guardrails: canonical builder 和 audit 不能依赖语义分类入口，也不能要求未来 parser 模仿 MinerU/v1 的内部词汇
+
+## BookGraph Entity Contracts
+
+任何进入 public canonical 的 entity，都必须满足 identity、boundary、evidence、phase ownership 和 tests 五个约束。中间层 entity 可以存在，但不能泄漏成 public contract。
+
+| Entity | Public/Internal | Identity | Boundary | Evidence / Debug | Test requirement |
+| --- | --- | --- | --- | --- | --- |
+| `metadata` | public | 文档级稳定元信息和 schema 标识 | 只包含下游可依赖字段 | `shadow_*`、audit summary、classifier counters 进入 internal `pipeline` | public metadata 不含 internal-only key |
+| `page` | public if stable; debug in internal | PDF 物理页的稳定事实，如 page number/size | 不表达未稳定的 flow scope 或 inclusion policy | page role candidates、signals、profile quality 进入 internal page debug | public page 不含 phase-later policy |
+| `observation` | internal | parser-neutral 的上游观察结果 | 由 parser adapter 输出的 region/page marker/image/table/text observation | parser 原始标签与 raw payload 只在 `parser_payload` | 不出现 MinerU-specific 顶层字段 |
+| `TextUnit` | internal | geometry/provenance 聚合候选 | 可以按 bbox/reading order 聚合 observation，但不是逻辑段落 | `source_observation_ids`, `role_hints`, `merge_reasons`, parser payloads | 不能直接等同 public node |
+| `node` | public | 书的逻辑内容节点 | `paragraph` 是完整自然段；`heading` 是一个逻辑标题；`display_block` 是完整展示性文本块；`note` 是一条完整注释；`list_item` 是一个完整列表项 | 来源、候选、merge/split reason 进入 internal node debug | paragraph 不吞多个自然段，不无理由切断自然段 |
+| `edge` | public | 两个 public entity 之间的稳定关系 | 只表达已确定关系，如 `appears_on_page`, `references_note` | 候选匹配、ambiguous/unresolved counters 进入 internal | references_note target 必须是 note |
+| `evidence` | public | public entity 的稳定溯源片段 | 记录 page/pages/bbox/spans/confidence/source span set | parser payload、TextUnit id、observation ids 进入 internal evidence debug | public evidence 不含 parser payload |
+| `asset` | public if consumed | 稳定可消费资源，如 image/table asset | 只包含下游可加载的资源引用和基本 metadata | crop/debug artifact、parser-specific resource payload 进入 internal | public asset path semantics 稳定 |
+| `reading_order` | public | public nodes 的阅读顺序 | 只引用 public node ids | ordering candidates 和 conflict diagnostics 进入 internal | 每个 id 必须存在 |
+| `projection` | phase-specific | 下游消费视图 | Phase 未完成前不能写入 public | EPUB/RAG candidate units 可在 internal pipeline 调试 | public 只保留当前 phase 已稳定 projection |
+| `note_ref` | public inline run | 正文中的注释引用点 | 只在可定位 marker 时表达；未解析 target 可保留 unresolved marker | 匹配 scope、candidate notes、ambiguous groups 进入 internal | target_note_id 若存在必须指向 note |
+| `page_role` | internal until stable | 页面角色候选或最终页级分类 | Phase 3 几何规则只能产生候选，不决定 EPUB/RAG inclusion | signals、flow scope candidates、LLM verifier input 进入 internal | 不污染 public node attrs |
+| `role_hint` | internal | parser-neutral 的观察层结构提示 | 只属于 observation/TextUnit 构建过程 | 可进入 internal node debug | 不进入 public node attrs |
+
+Usage-first rule: 设计 schema、接口或工具时，先确认主要使用者和使用场景，再反推结构。public canonical 为下游稳定消费优化；internal canonical 为内部审计和排查问题优化。代码实现简洁不能压过主要用途。
 
 ## Phase 1 支持范围
 
@@ -380,11 +443,13 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_golden_al
 
 ### Page role candidates
 
-Observed shadow BookGraph 在 TextUnit 进入 node 之后只记录 page-level role candidates：
+Internal canonical 在 TextUnit 进入 logical node 之后记录 page-level role candidates：
 
-- `metadata.shadow_page_roles`: 每个物理页的结构候选角色和 signals。
-- node `attrs.page_role`: 该 node 所在物理页的候选页面角色。
-- node `attrs.page_role_signals`: page role classifier 使用的结构信号，便于 audit 追溯。
+- `internal_canonical.pipeline.page_roles`: 每个物理页的结构候选角色和 signals。
+- `internal_canonical.nodes[*].debug.attrs.page_role`: 该 node 所在物理页的候选页面角色。
+- `internal_canonical.nodes[*].debug.attrs.page_role_signals`: page role classifier 使用的结构信号，便于 audit 追溯。
+
+Public BookGraph 不写入 `metadata.shadow_page_roles`、node `attrs.page_role` 或 node `attrs.page_role_signals`。这些都是 Phase 3/4 诊断信号，不是 release contract。
 
 Phase 3 不写入 `flow_scope`。`front_matter`、`body`、`back_matter` 是书籍出版结构位置，必须在 Phase 5 结合 LLM/视觉/目录/上下文 verifier 后再确定。Phase 3 单靠几何、页码、body profile 和显式结构提示，不足以可靠判断真实书籍结构边界，尤其无法可靠处理封底提前出现在 PDF 前部、章末注、书末注、版权页和图版页等情况。
 
@@ -420,7 +485,7 @@ Phase 3 当前允许的 `page_role` 值如下：
 
 Phase 3 的 `signals` 可以包含 `visual_verifier_candidate`。这不是新的 page role，也不表示当前页已经被判定为 `visual_page`；它只表示页面同时包含较大的 image/table 区域和少量文本，几何上无法可靠区分“正文配图页”和“图版/图注页”。Phase 5 的 LLM/视觉 verifier 应优先抽查这类候选页，而不是逐页调用 LLM。
 
-Phase 3 不写入 `flow_scope`、`include_in_epub`、`include_in_rag`、`epub_flow` 或 `rag_units`。这些都是后续结构确认或下游 projection policy，必须等 Phase 5/EPUB/RAG projection phase 基于 BookGraph 结构统一决定。连续 `visual_page` 是否构成出版意义上的图版区、插图区、护封展开或其他跨页结构，也留给 Phase 5 结合视觉、目录、上下文和 verifier 确认；Phase 3 不写入 `plate_section_candidate` 或 page group。Phase 3 的 canonical 只表达它当前真正完成的事：稳定 TextUnit、layout classification、page role candidates 和 evidence/provenance。
+Public BookGraph 不写入 `flow_scope`、`include_in_epub`、`include_in_rag`、`epub_flow` 或 `rag_units`。这些都是后续结构确认或下游 projection policy，必须等 Phase 5/EPUB/RAG projection phase 基于 BookGraph 结构统一决定。连续 `visual_page` 是否构成出版意义上的图版区、插图区、护封展开或其他跨页结构，也留给 Phase 5 结合视觉、目录、上下文和 verifier 确认；Phase 3 不写入 `plate_section_candidate` 或 page group。当前 public BookGraph 只表达它真正完成且可作为契约承诺的事；TextUnit、layout classification、page role candidates 和 merge/split provenance 进入 internal canonical。
 
 Phase 3 acceptance report 同时保留全量 `node_counts` 和 `page_role_counts`。若 Phase 3 artifact 出现 `flow_scope` 或 EPUB/RAG projection 字段，acceptance 应失败，因为那表示阶段边界已经泄漏。
 

@@ -8,7 +8,10 @@ from inkline.canonical import (
     make_observed_page,
     validate_bookgraph,
 )
-from inkline.canonical.observed_bookgraph import build_bookgraph_from_observed
+from inkline.canonical.observed_bookgraph import (
+    build_bookgraph_from_observed,
+    build_internal_canonical_from_observed,
+)
 
 
 def _metadata() -> dict:
@@ -332,20 +335,18 @@ def _explicit_note_section_document() -> dict:
 
 def test_build_bookgraph_from_observed_uses_text_unit_aggregation() -> None:
     graph = build_bookgraph_from_observed(_adjacent_body_document())
+    internal = build_internal_canonical_from_observed(_adjacent_body_document())
 
     validate_bookgraph(graph)
-    assert [node["node_type"] for node in graph["nodes"]] == ["paragraph"]
-    assert graph["nodes"][0]["text"] == "First line\nSecond line"
-    assert graph["nodes"][0]["attrs"]["source_observation_ids"] == [
+    assert [node["node_type"] for node in graph["nodes"]] == ["paragraph", "paragraph"]
+    assert [node["text"] for node in graph["nodes"]] == ["First line", "Second line"]
+    assert internal["pipeline"]["text_units"][0]["text"] == "First line\nSecond line"
+    assert internal["nodes"][0]["debug"]["attrs"]["source_observation_ids"] == ["obs000001"]
+    assert internal["pipeline"]["text_units"][0]["observation_ids"] == [
         "obs000001",
         "obs000002",
     ]
-    assert graph["evidence"][0]["source_id"] == "tu000001"
-    assert graph["evidence"][0]["source_kind"] == "text_unit"
-    assert graph["evidence"][0]["parser_payload"] == {
-        "observation_ids": ["obs000001", "obs000002"],
-        "parser_payloads": [{"raw_type": "paragraph"}, {"raw_type": "paragraph"}],
-    }
+    assert "parser_payload" not in graph["evidence"][0]
 
 
 def test_build_bookgraph_from_observed_preserves_cross_page_text_unit_evidence() -> None:
@@ -354,11 +355,14 @@ def test_build_bookgraph_from_observed_preserves_cross_page_text_unit_evidence()
     validate_bookgraph(graph)
     assert [node["node_type"] for node in graph["nodes"]] == ["paragraph"]
     assert graph["nodes"][0]["text"] == "Page bottom\nPage top"
-    assert graph["nodes"][0]["attrs"]["source_observation_ids"] == [
+    internal = build_internal_canonical_from_observed(_cross_page_body_document())
+    assert internal["nodes"][0]["debug"]["attrs"]["source_observation_ids"] == [
         "obs000001",
         "obs000002",
     ]
-    assert graph["nodes"][0]["attrs"]["merge_reasons"] == ["cross_page_boundary_continuation"]
+    assert internal["nodes"][0]["debug"]["attrs"]["merge_reasons"] == [
+        "cross_page_boundary_continuation"
+    ]
     assert graph["evidence"][0]["pages"] == [1, 2]
     assert graph["evidence"][0]["spans"] == [
         {"page": 1, "bbox": [100, 900, 700, 980]},
@@ -376,16 +380,17 @@ def test_build_bookgraph_from_observed_uses_layout_classification() -> None:
         "paragraph",
     ]
     assert graph["nodes"][1]["attrs"]["layout_role"] == "set_off"
-    assert graph["nodes"][1]["attrs"]["layout_classification"]["signals"] == [
+    internal = build_internal_canonical_from_observed(_inset_body_document())
+    assert internal["nodes"][1]["debug"]["attrs"]["layout_classification"]["signals"] == [
         "narrower_than_body_lane",
         "inset_from_body_lane",
     ]
 
 
 def test_build_bookgraph_from_observed_records_layout_audit_summary() -> None:
-    graph = build_bookgraph_from_observed(_inset_body_document())
+    internal = build_internal_canonical_from_observed(_inset_body_document())
 
-    assert graph["metadata"]["shadow_text_unit_layout_audit_summary"] == {
+    assert internal["pipeline"]["layout_audit"]["summary"] == {
         "total_pages": 1,
         "pages_with_profiles": 1,
         "pages_without_profiles": 0,
@@ -395,7 +400,7 @@ def test_build_bookgraph_from_observed_records_layout_audit_summary() -> None:
         "skipped_no_bbox": 0,
         "skipped_no_profile": 0,
     }
-    assert graph["metadata"]["shadow_text_unit_layout_profile_quality"] == {
+    assert internal["pipeline"]["layout_audit"]["profile_quality"] == {
         "accepted": 1,
         "filled_from_nearest_profile": 0,
         "rejected_no_stable_profile": 0,
@@ -403,7 +408,7 @@ def test_build_bookgraph_from_observed_records_layout_audit_summary() -> None:
         "rejected_unstable_widths": 0,
         "rejected_extreme_body_width": 0,
     }
-    assert graph["metadata"]["shadow_text_unit_layout_page_coverage"] == {
+    assert internal["pipeline"]["layout_audit"]["page_coverage"] == {
         "total_pages": 1,
         "pages_with_profiles": 1,
         "pages_without_profiles": [],
@@ -414,7 +419,7 @@ def test_build_bookgraph_from_observed_records_layout_audit_summary() -> None:
             "table_with_text_units": [],
         },
     }
-    assert "shadow_text_unit_layout_audit" not in graph["metadata"]
+    assert "shadow_text_unit_layout_audit" not in internal["public_projection"]["metadata"]
 
 
 def test_build_bookgraph_from_observed_maps_explicit_structure_hints() -> None:
@@ -428,7 +433,8 @@ def test_build_bookgraph_from_observed_maps_explicit_structure_hints() -> None:
     ]
     assert graph["nodes"][0]["level"] == 1
     assert graph["nodes"][1]["inline_runs"] == [{"type": "text", "text": "Body"}]
-    assert graph["metadata"]["shadow_ignored_observation_counts"] == {"image_region": 1}
+    internal = build_internal_canonical_from_observed(_observed_document())
+    assert internal["pipeline"]["ignored_observation_counts"] == {"image_region": 1}
 
 
 def test_build_bookgraph_from_observed_resolves_page_footnote_refs() -> None:
@@ -442,7 +448,8 @@ def test_build_bookgraph_from_observed_resolves_page_footnote_refs() -> None:
     assert graph["edges"][-1]["edge_type"] == "references_note"
     assert graph["edges"][-1]["source"] == "n000001"
     assert graph["edges"][-1]["target"] == "n000002"
-    assert graph["metadata"]["shadow_note_ref_resolution"] == {
+    internal = build_internal_canonical_from_observed(_page_footnote_ref_document())
+    assert internal["pipeline"]["bookgraph_debug_metadata"]["shadow_note_ref_resolution"] == {
         "page_footnote_resolved": 1,
         "page_footnote_ambiguous": 0,
         "page_footnote_unresolved": 0,
@@ -464,7 +471,10 @@ def test_build_bookgraph_from_observed_resolves_explicit_note_section_refs() -> 
     assert note["attrs"]["source_placement"] == "book_end"
     assert note["attrs"]["scope"] == "chapter"
     assert graph["nodes"][1]["inline_runs"][1]["attrs"]["target_note_id"] == "n000005"
-    assert graph["metadata"]["shadow_scoped_note_ref_resolution"] == {
+    internal = build_internal_canonical_from_observed(_explicit_note_section_document())
+    assert internal["pipeline"]["bookgraph_debug_metadata"][
+        "shadow_scoped_note_ref_resolution"
+    ] == {
         "scoped_note_resolved": 1,
         "scoped_note_ambiguous": 0,
         "scoped_note_unresolved": 0,
@@ -514,22 +524,25 @@ def test_build_bookgraph_from_observed_does_not_promote_image_title_to_heading()
     validate_bookgraph(graph)
     assert [node["node_type"] for node in graph["nodes"]] == ["paragraph"]
     assert graph["nodes"][0]["attrs"]["layout_role"] == "caption_candidate"
-    assert graph["metadata"]["shadow_ignored_observation_counts"] == {"image_region": 1}
+    internal = build_internal_canonical_from_observed(_image_title_document())
+    assert internal["pipeline"]["ignored_observation_counts"] == {"image_region": 1}
 
 
 def test_build_bookgraph_from_observed_preserves_observation_provenance() -> None:
     graph = build_bookgraph_from_observed(_observed_document())
+    internal = build_internal_canonical_from_observed(_observed_document())
 
     evidence = graph["evidence"][1]
-    assert evidence["source_id"] == "tu000002"
-    assert evidence["source_kind"] == "text_unit"
+    assert evidence["source_id"] == "ev000002"
+    assert evidence["source_kind"] == "source_span_set"
     assert evidence["parser"] == "sample_parser"
     assert evidence["bbox"] == [10, 70, 900, 120]
-    assert evidence["parser_payload"] == {
+    assert "parser_payload" not in evidence
+    assert internal["evidence"][1]["debug"]["parser_payload"] == {
         "observation_ids": ["obs000002"],
         "parser_payloads": [{"raw_type": "paragraph"}],
     }
-    assert graph["nodes"][1]["attrs"]["source_observation_ids"] == ["obs000002"]
+    assert internal["nodes"][1]["debug"]["attrs"]["source_observation_ids"] == ["obs000002"]
     assert "legacy_block_id" not in graph["nodes"][1]["attrs"]
 
 
@@ -543,28 +556,31 @@ def test_build_bookgraph_from_observed_creates_reading_order_without_downstream_
 
 def test_build_bookgraph_from_observed_records_page_roles_without_projection_policy() -> None:
     graph = build_bookgraph_from_observed(_front_matter_then_body_document())
+    internal = build_internal_canonical_from_observed(_front_matter_then_body_document())
 
     validate_bookgraph(graph)
-    assert graph["metadata"]["shadow_page_roles"] == [
+    assert internal["pipeline"]["page_roles"] == [
         {
             "page": 1,
             "page_role": "title_like_page",
+            "flow_scope": "front_matter",
             "signals": ["early_page", "sparse_centered_text", "no_body_profile"],
         },
         {
             "page": 2,
             "page_role": "text_flow_page",
+            "flow_scope": "body",
             "signals": ["body_profile"],
         },
     ]
-    assert graph["nodes"][0]["attrs"]["page_role"] == "title_like_page"
+    assert "page_role" not in graph["nodes"][0]["attrs"]
     assert "flow_scope" not in graph["nodes"][0]["attrs"]
     assert "include_in_epub" not in graph["nodes"][0]["attrs"]
     assert "include_in_rag" not in graph["nodes"][0]["attrs"]
-    assert graph["nodes"][1]["attrs"]["page_role"] == "text_flow_page"
+    assert "page_role" not in graph["nodes"][1]["attrs"]
     assert "flow_scope" not in graph["nodes"][1]["attrs"]
     assert "include_in_epub" not in graph["nodes"][1]["attrs"]
     assert "include_in_rag" not in graph["nodes"][1]["attrs"]
-    assert graph["projections"]["reading_order"] == ["n000001", "n000002"]
+    assert graph["projections"]["reading_order"] == ["n000001", "n000002", "n000003"]
     assert "epub_flow" not in graph["projections"]
     assert "rag_units" not in graph["projections"]

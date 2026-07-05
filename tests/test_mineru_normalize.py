@@ -9,6 +9,7 @@ from inkline.canonical import (
     BLOCK_TYPES,
     validate_bookgraph,
     validate_document,
+    validate_internal_canonical,
     validate_observed_document,
 )
 from inkline.llm import DEFAULT_QWEN_MODEL
@@ -194,6 +195,7 @@ def test_normalize_mineru_outputs_writes_optional_observed_shadow_outputs(tmp_pa
     output = tmp_path / "canonical.json"
     observed_output = tmp_path / "observed_document.json"
     observed_bookgraph_output = tmp_path / "canonical_v2_observed.json"
+    internal_canonical_output = tmp_path / "internal_canonical.json"
     content_list_v2.write_text(
         json.dumps(
             [[_text_item("paragraph", "A minimal MinerU paragraph.", [100, 100, 900, 180])]]
@@ -214,6 +216,7 @@ def test_normalize_mineru_outputs_writes_optional_observed_shadow_outputs(tmp_pa
         output=output,
         observed_output=observed_output,
         bookgraph_from_observed_output=observed_bookgraph_output,
+        internal_canonical_output=internal_canonical_output,
         doc_id="sample",
         title="Sample",
         language="en",
@@ -226,9 +229,14 @@ def test_normalize_mineru_outputs_writes_optional_observed_shadow_outputs(tmp_pa
 
     graph = json.loads(observed_bookgraph_output.read_text(encoding="utf-8"))
     validate_bookgraph(graph)
-    assert graph["evidence"][0]["source_kind"] == "text_unit"
-    assert graph["evidence"][0]["parser_payload"]["observation_ids"] == ["obs000001"]
+    assert graph["evidence"][0]["source_kind"] == "source_span_set"
+    assert "parser_payload" not in graph["evidence"][0]
     assert graph["nodes"]
+
+    internal = json.loads(internal_canonical_output.read_text(encoding="utf-8"))
+    validate_internal_canonical(internal)
+    assert internal["public_projection"] == graph
+    assert internal["evidence"][0]["debug"]["parser_payload"]["observation_ids"] == ["obs000001"]
 
 
 def test_normalize_mineru_outputs_does_not_write_bookgraph_shadow_by_default(tmp_path) -> None:
@@ -274,6 +282,7 @@ def test_mineru_cli_accepts_bookgraph_output_argument(monkeypatch, tmp_path) -> 
     bookgraph_output = tmp_path / "canonical_v2.json"
     observed_output = tmp_path / "observed_document.json"
     observed_bookgraph_output = tmp_path / "canonical_v2_observed.json"
+    internal_canonical_output = tmp_path / "internal_canonical.json"
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -290,6 +299,8 @@ def test_mineru_cli_accepts_bookgraph_output_argument(monkeypatch, tmp_path) -> 
             str(observed_output),
             "--bookgraph-from-observed-output",
             str(observed_bookgraph_output),
+            "--internal-canonical-output",
+            str(internal_canonical_output),
         ],
     )
 
@@ -298,6 +309,7 @@ def test_mineru_cli_accepts_bookgraph_output_argument(monkeypatch, tmp_path) -> 
     assert args.bookgraph_output == str(bookgraph_output)
     assert args.observed_output == str(observed_output)
     assert args.bookgraph_from_observed_output == str(observed_bookgraph_output)
+    assert args.internal_canonical_output == str(internal_canonical_output)
 
 
 def test_small_pdf_page_size_uses_content_coordinate_layout(tmp_path) -> None:
@@ -1284,6 +1296,7 @@ def test_mineru_parser_passes_optional_bookgraph_output(tmp_path, monkeypatch) -
     bookgraph_output = tmp_path / "canonical_v2.json"
     observed_output = tmp_path / "observed_document.json"
     observed_bookgraph_output = tmp_path / "canonical_v2_observed.json"
+    internal_canonical_output = tmp_path / "internal_canonical.json"
     request = ParseRequest(
         tmp_path / "sample.pdf",
         tmp_path / "canonical.json",
@@ -1292,6 +1305,7 @@ def test_mineru_parser_passes_optional_bookgraph_output(tmp_path, monkeypatch) -
             "bookgraph_output": bookgraph_output,
             "observed_output": observed_output,
             "bookgraph_from_observed_output": observed_bookgraph_output,
+            "internal_canonical_output": internal_canonical_output,
         },
     )
 
@@ -1300,3 +1314,4 @@ def test_mineru_parser_passes_optional_bookgraph_output(tmp_path, monkeypatch) -
     assert captured["bookgraph_output"] == bookgraph_output
     assert captured["observed_output"] == observed_output
     assert captured["bookgraph_from_observed_output"] == observed_bookgraph_output
+    assert captured["internal_canonical_output"] == internal_canonical_output

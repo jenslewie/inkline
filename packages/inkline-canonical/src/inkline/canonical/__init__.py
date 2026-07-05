@@ -16,6 +16,12 @@ from inkline.canonical.bookgraph_notes import (
     resolve_page_footnote_refs,
 )
 from inkline.canonical.footnote_text import strip_footnote_marker
+from inkline.canonical.internal_canonical import (
+    INTERNAL_CANONICAL_SCHEMA_NAME,
+    INTERNAL_CANONICAL_SCHEMA_VERSION,
+    make_internal_canonical,
+    validate_internal_canonical,
+)
 from inkline.canonical.observed import (
     OBSERVED_SCHEMA_NAME,
     OBSERVED_SCHEMA_VERSION,
@@ -24,7 +30,10 @@ from inkline.canonical.observed import (
     make_observed_page,
     validate_observed_document,
 )
-from inkline.canonical.observed_bookgraph import build_bookgraph_from_observed
+from inkline.canonical.observed_bookgraph import (
+    build_bookgraph_from_observed,
+    build_internal_canonical_from_observed,
+)
 from inkline.canonical.page_roles import classify_observed_page_roles
 from inkline.canonical.schema import (
     BLOCK_TYPES,
@@ -49,6 +58,8 @@ __all__ = [
     "BLOCK_TYPES",
     "BOOKGRAPH_SCHEMA_NAME",
     "BOOKGRAPH_SCHEMA_VERSION",
+    "INTERNAL_CANONICAL_SCHEMA_NAME",
+    "INTERNAL_CANONICAL_SCHEMA_VERSION",
     "OBSERVED_SCHEMA_NAME",
     "OBSERVED_SCHEMA_VERSION",
     "SCHEMA_VERSION",
@@ -62,6 +73,7 @@ __all__ = [
     "audit_bookgraph_notes",
     "audit_text_unit_layout",
     "build_bookgraph_from_observed",
+    "build_internal_canonical_from_observed",
     "build_text_units",
     "classify_observed_page_roles",
     "classify_text_units_by_layout",
@@ -70,6 +82,7 @@ __all__ = [
     "make_document",
     "make_edge",
     "make_evidence",
+    "make_internal_canonical",
     "make_node",
     "make_observation",
     "make_observed_document",
@@ -84,5 +97,6 @@ __all__ = [
     "strip_footnote_marker",
     "validate_bookgraph",
     "validate_document",
+    "validate_internal_canonical",
     "validate_observed_document",
 ]

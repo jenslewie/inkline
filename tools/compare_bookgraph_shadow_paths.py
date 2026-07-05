@@ -10,7 +10,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from inkline.canonical import build_bookgraph_from_observed, validate_bookgraph
+from inkline.canonical import validate_bookgraph
+from inkline.canonical.observed_bookgraph import build_observed_bookgraph_artifacts
 from inkline.parsers.mineru.normalize.bookgraph_shadow import build_bookgraph_shadow
 
 
@@ -27,12 +28,15 @@ def compare_shadow_paths(canonical_path: Path, observed_path: Path) -> dict[str,
     canonical = _read_json(canonical_path)
     observed = _read_json(observed_path)
     v1_graph = build_bookgraph_shadow(canonical)
-    observed_graph = build_bookgraph_from_observed(observed)
+    observed_artifacts = build_observed_bookgraph_artifacts(observed)
+    observed_graph = observed_artifacts["public_graph"]
     validate_bookgraph(v1_graph)
     validate_bookgraph(observed_graph)
 
     v1_summary = _graph_summary(v1_graph)
-    observed_summary = _graph_summary(observed_graph)
+    observed_summary = _graph_summary(
+        observed_graph, ignored_counts=observed_artifacts["ignored_counts"]
+    )
     return {
         "v1_shadow": v1_summary,
         "observed_shadow": observed_summary,
@@ -75,15 +79,19 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
         handle.write("\n")
 
 
-def _graph_summary(graph: dict[str, Any]) -> dict[str, Any]:
+def _graph_summary(
+    graph: dict[str, Any], *, ignored_counts: dict[str, int] | None = None
+) -> dict[str, Any]:
     node_counts = dict(sorted(Counter(node["node_type"] for node in graph["nodes"]).items()))
     metadata = graph.get("metadata") or {}
-    ignored_counts = metadata.get("shadow_ignored_observation_counts") or metadata.get(
-        "shadow_ignored_block_counts"
-    ) or {}
+    resolved_ignored_counts = ignored_counts
+    if resolved_ignored_counts is None:
+        resolved_ignored_counts = metadata.get("shadow_ignored_observation_counts") or metadata.get(
+            "shadow_ignored_block_counts"
+        ) or {}
     return {
         "node_counts": node_counts,
-        "ignored_counts": dict(sorted(ignored_counts.items())),
+        "ignored_counts": dict(sorted(resolved_ignored_counts.items())),
         "reading_order_count": len(graph.get("projections", {}).get("reading_order") or []),
         "display_paragraph_ratio": _display_paragraph_ratio(node_counts),
     }
