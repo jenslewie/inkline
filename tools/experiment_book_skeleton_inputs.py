@@ -93,7 +93,7 @@ def build_skeleton_evidence_package(document: dict[str, Any]) -> dict[str, Any]:
 def build_toc_driven_skeleton_plan(document: dict[str, Any]) -> dict[str, Any]:
     package = build_skeleton_evidence_package(document)
     toc_pages = detect_toc_pages(package)
-    toc_text = "\n".join(_page_text(package, page) for page in toc_pages)
+    toc_text = "\n".join(_observed_page_text(document, page) for page in toc_pages)
     entries = parse_toc_entries(toc_text)
     for entry in entries:
         entry["candidate_pages"] = locate_title_pages(package, entry["title"], exclude_pages=toc_pages)
@@ -133,6 +133,48 @@ def build_toc_driven_skeleton_plan(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_toc_llm_input(document: dict[str, Any]) -> dict[str, Any]:
+    package = build_skeleton_evidence_package(document)
+    toc_pages = detect_toc_pages(package)
+    toc_text_pages = [
+        {"page": page, "text": _observed_page_text(document, page)}
+        for page in toc_pages
+    ]
+    toc_text = "\n".join(item["text"] for item in toc_text_pages)
+    entries = parse_toc_entries(toc_text)
+    toc_entries = []
+    for index, entry in enumerate(entries):
+        toc_entries.append(
+            {
+                "entry_index": index,
+                "title": entry["title"],
+                "printed_page": entry.get("printed_page"),
+                "candidate_pages": locate_title_pages(
+                    package,
+                    entry["title"],
+                    exclude_pages=toc_pages,
+                )[:5],
+            }
+        )
+    return {
+        "mode": "toc_llm",
+        "metadata": package["metadata"],
+        "page_count": package["page_count"],
+        "toc_pages": toc_pages,
+        "toc_text_pages": toc_text_pages,
+        "toc_entries": toc_entries,
+        "expected_output": _expected_toc_llm_schema(),
+        "instructions": {
+            "purpose": "Ask an LLM to classify the book skeleton from TOC structure only.",
+            "rule_layer_responsibility": [
+                "Find TOC pages.",
+                "Extract TOC text and candidate title locations.",
+                "Do not decide front/body/back roles from title word lists.",
+            ],
+        },
+    }
+
+
 def detect_toc_pages(package: dict[str, Any]) -> list[int]:
     toc_pages: set[int] = set()
     page_count = int(package.get("page_count") or len(package.get("pages") or []))
@@ -156,12 +198,27 @@ def detect_toc_pages(package: dict[str, Any]) -> list[int]:
 
 def parse_toc_entries(text: str) -> list[dict[str, Any]]:
     entries = []
-    for raw_line in text.splitlines():
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    index = 0
+    while index < len(lines):
+        raw_line = lines[index]
         line = raw_line.strip()
         if not line or line == "目录":
+            index += 1
             continue
         normalized_line = _normalize_toc_line(line)
         match = TOC_ENTRY_RE.match(normalized_line)
+        if (
+            not match
+            and _unpaged_structural_toc_title(normalized_line) is None
+            and index + 1 < len(lines)
+            and not _is_standalone_page_label(lines[index + 1])
+        ):
+            combined_line = _normalize_toc_line(f"{line} {lines[index + 1].strip()}")
+            combined_match = TOC_ENTRY_RE.match(combined_line)
+            if combined_match is not None:
+                match = combined_match
+                index += 1
         if not match:
             structural_title = _unpaged_structural_toc_title(normalized_line)
             if structural_title is not None:
@@ -173,9 +230,11 @@ def parse_toc_entries(text: str) -> list[dict[str, Any]]:
                         "_role_source": _toc_entry_role_source(structural_title),
                     }
                 )
+            index += 1
             continue
         title = _clean_toc_title(match.group("title"))
         if not title or _is_noise_toc_title(title):
+            index += 1
             continue
         entries.append(
             {
@@ -185,6 +244,7 @@ def parse_toc_entries(text: str) -> list[dict[str, Any]]:
                 "_role_source": _toc_entry_role_source(title),
             }
         )
+        index += 1
     _apply_toc_sequence_roles(entries)
     for entry in entries:
         entry.pop("_role_source", None)
@@ -307,6 +367,7 @@ def write_experiment_inputs(
     hybrid_input = _hybrid_input(package, image_manifest)
     pdf_image_input = _pdf_image_only_input(package, image_manifest)
     toc_driven_input = build_toc_driven_skeleton_plan(document)
+    toc_llm_input = build_toc_llm_input(document)
     _write_mode(book_dir, "observed_only", observed_input, _observed_prompt(observed_input))
     _write_mode(book_dir, "hybrid", hybrid_input, _hybrid_prompt(hybrid_input))
     _write_mode(book_dir, "pdf_image_only", pdf_image_input, _pdf_image_prompt(pdf_image_input))
@@ -316,6 +377,7 @@ def write_experiment_inputs(
         toc_driven_input,
         _toc_driven_prompt(toc_driven_input),
     )
+    _write_mode(book_dir, "toc_llm", toc_llm_input, _toc_llm_prompt(toc_llm_input))
     summary = {
         "book": book,
         "observed_path": str(observed_path),
@@ -326,6 +388,7 @@ def write_experiment_inputs(
         "selected_image_pages": selected_pages,
         "rendered_image_count": len(image_manifest["rendered_images"]),
         "toc_driven_task_count": len(toc_driven_input["llm_page_tasks"]),
+        "toc_llm_entry_count": len(toc_llm_input["toc_entries"]),
     }
     _write_json(book_dir / "summary.json", summary)
     return summary
@@ -392,7 +455,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--modes",
         nargs="+",
-        choices=["observed_only", "hybrid", "pdf_image_only"],
+        choices=["observed_only", "hybrid", "pdf_image_only", "toc_driven", "toc_llm"],
         default=["observed_only", "hybrid", "pdf_image_only"],
     )
     parser.add_argument("--model", default=DEFAULT_QWEN_MODEL)
@@ -427,6 +490,24 @@ def _expected_skeleton_schema() -> dict[str, Any]:
     }
 
 
+def _expected_toc_llm_schema() -> dict[str, Any]:
+    return {
+        "entry_roles": [
+            {
+                "entry_index": 0,
+                "role": "front_matter|body|back_matter",
+            }
+        ],
+        "first_body_entry_index": 0,
+        "first_body_entry_title": "",
+        "last_body_entry_index": 0,
+        "last_body_entry_title": "",
+        "first_back_matter_entry_index": None,
+        "first_back_matter_entry_title": None,
+        "uncertain_entries": [{"entry_index": 0, "title": "", "reason": ""}],
+    }
+
+
 def _observations_by_page(observations: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
     grouped: dict[int, list[dict[str, Any]]] = {}
     for observation in observations:
@@ -434,11 +515,15 @@ def _observations_by_page(observations: list[dict[str, Any]]) -> dict[int, list[
     return grouped
 
 
-def _page_text(package: dict[str, Any], page_number: int) -> str:
-    for record in package["pages"]:
-        if int(record["page"]) == page_number:
-            return str(record.get("text_snippet") or "")
-    return ""
+def _observed_page_text(document: dict[str, Any], page_number: int) -> str:
+    parts = [
+        str(observation.get("text") or "").strip()
+        for observation in document.get("observations", [])
+        if int(observation.get("page") or 0) == page_number
+        and observation.get("kind") in TEXT_KINDS
+        and str(observation.get("text") or "").strip()
+    ]
+    return "\n".join(parts)
 
 
 def _toc_like_line_count(text: str) -> int:
@@ -513,10 +598,17 @@ def _is_noise_toc_title(title: str) -> bool:
     normalized = _normalize_title(title).lower()
     if not normalized:
         return True
+    if normalized == "目录":
+        return True
     if re.fullmatch(r"[ivxlcdm]+|\d+", normalized):
         return True
     publication_markers = {"copyright", "isbn", "postwave", "publishing", "consulting"}
     return any(marker in normalized for marker in publication_markers)
+
+
+def _is_standalone_page_label(line: str) -> bool:
+    normalized = _normalize_title(_normalize_toc_line(line)).lower()
+    return bool(re.fullmatch(r"[ivxlcdm]+|\d+", normalized))
 
 
 def _unpaged_structural_toc_title(line: str) -> str | None:
@@ -1034,6 +1126,22 @@ def _pdf_image_prompt(input_data: dict[str, Any]) -> str:
 def _toc_driven_prompt(input_data: dict[str, Any]) -> str:
     return _prompt(
         "Use the table-of-contents-derived tasks below. Verify only the listed pages; do not infer unrelated pages.",
+        input_data,
+    )
+
+
+def _toc_llm_prompt(input_data: dict[str, Any]) -> str:
+    return _prompt(
+        "Use only the table of contents to classify TOC entries into front_matter, "
+        "body, and back_matter. Do not classify TOC entries with hard-coded title "
+        "word lists. Identify first_body_entry_index, last_body_entry_index, and "
+        "first_back_matter_entry_index by reading TOC order and structure. Keep the "
+        "JSON compact: entry_roles must contain only entry_index and role; do not "
+        "include per-entry explanations unless an entry is uncertain. Treat conclusion "
+        "or epilogue-style argumentative closing entries as body when they precede "
+        "notes, bibliography, index, afterword, or other back matter. Never choose a "
+        "numbered chapter as first_back_matter_entry; numbered chapters remain body "
+        "even when they appear near the end of the TOC.",
         input_data,
     )
 

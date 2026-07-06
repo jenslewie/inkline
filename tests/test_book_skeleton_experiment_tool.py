@@ -227,6 +227,7 @@ def test_cli_writes_three_input_modes(tmp_path) -> None:
     assert (output_dir / "sample" / "hybrid" / "input.json").exists()
     assert (output_dir / "sample" / "pdf_image_only" / "input.json").exists()
     assert (output_dir / "sample" / "toc_driven" / "input.json").exists()
+    assert (output_dir / "sample" / "toc_llm" / "input.json").exists()
 
 
 def test_observed_only_input_is_compressed_for_llm() -> None:
@@ -421,13 +422,54 @@ def test_parse_toc_entries_extracts_titles_and_roles() -> None:
 
 def test_parse_toc_entries_ignores_standalone_page_labels_and_publication_noise() -> None:
     tool = _load_tool()
-    toc_text = "目录\n引言\nvii\nPOST WAVE PUBLISHING CONSULTING 2022\n第一章 正文 7"
+    toc_text = "目录\n目录 / 003\n引言\nvii\nPOST WAVE PUBLISHING CONSULTING 2022\n第一章 正文 7"
 
     entries = tool.parse_toc_entries(toc_text)
 
     assert entries == [
         {"title": "第一章 正文", "printed_page": "7", "role": "body"},
     ]
+
+
+def test_parse_toc_entries_joins_wrapped_title_lines() -> None:
+    tool = _load_tool()
+    toc_text = "结论 373\n附录 克伦威尔时期英格兰的自由灵：浮嚣派\n与他们的文献 …… 381\n注释 460"
+
+    entries = tool.parse_toc_entries(toc_text)
+
+    assert entries == [
+        {"title": "结论", "printed_page": "373", "role": "body"},
+        {
+            "title": "附录 克伦威尔时期英格兰的自由灵：浮嚣派 与他们的文献",
+            "printed_page": "381",
+            "role": "back_matter",
+        },
+        {"title": "注释", "printed_page": "460", "role": "back_matter"},
+    ]
+
+
+def test_toc_llm_input_uses_full_toc_page_text() -> None:
+    tool = _load_tool()
+    long_tail = "第二章 " + "很长的标题" * 80 + " 20"
+    document = _document_with_pages(
+        doc_id="full-toc-text",
+        page_count=3,
+        observations=[
+            make_observation(
+                "toc",
+                "text_region",
+                text=f"目录\n第一章 开始 1\n{long_tail}",
+                page=1,
+                bbox=[40, 80, 360, 500],
+                role_hint="toc_text",
+            ),
+            make_observation("body", "text_region", text="第一章 开始", page=2, bbox=[40, 80, 360, 500]),
+        ],
+    )
+
+    input_data = tool.build_toc_llm_input(document)
+
+    assert long_tail in input_data["toc_text_pages"][0]["text"]
 
 
 def test_build_toc_driven_skeleton_plan_locates_entry_pages_and_residuals() -> None:
@@ -464,6 +506,66 @@ def test_build_toc_driven_skeleton_plan_locates_entry_pages_and_residuals() -> N
         {"page": 11, "task": "classify_residual_back_page"},
         {"page": 12, "task": "classify_residual_back_page"},
     ]
+
+
+def test_toc_llm_input_uses_toc_text_without_rule_roles() -> None:
+    tool = _load_tool()
+
+    input_data = tool.build_toc_llm_input(_toc_document())
+
+    assert input_data["mode"] == "toc_llm"
+    assert input_data["toc_pages"] == [2]
+    assert input_data["toc_text_pages"] == [
+        {
+            "page": 2,
+            "text": "目录\n前言 1\n第一章 千年王国的期待 25\n附录 413\n注释和参考书目 491\n索引 568",
+        }
+    ]
+    assert input_data["toc_entries"] == [
+        {"entry_index": 0, "title": "前言", "printed_page": "1", "candidate_pages": [3]},
+        {
+            "entry_index": 1,
+            "title": "第一章 千年王国的期待",
+            "printed_page": "25",
+            "candidate_pages": [5],
+        },
+        {"entry_index": 2, "title": "附录", "printed_page": "413", "candidate_pages": [8]},
+        {
+            "entry_index": 3,
+            "title": "注释和参考书目",
+            "printed_page": "491",
+            "candidate_pages": [9],
+        },
+        {"entry_index": 4, "title": "索引", "printed_page": "568", "candidate_pages": [10]},
+    ]
+    assert "role" not in input_data["toc_entries"][0]
+    assert input_data["expected_output"] == {
+        "entry_roles": [
+            {
+                "entry_index": 0,
+                "role": "front_matter|body|back_matter",
+            }
+        ],
+        "first_body_entry_index": 0,
+        "first_body_entry_title": "",
+        "last_body_entry_index": 0,
+        "last_body_entry_title": "",
+        "first_back_matter_entry_index": None,
+        "first_back_matter_entry_title": None,
+        "uncertain_entries": [{"entry_index": 0, "title": "", "reason": ""}],
+    }
+
+
+def test_toc_llm_prompt_requests_toc_only_classification() -> None:
+    tool = _load_tool()
+    input_data = tool.build_toc_llm_input(_toc_document())
+
+    prompt = tool._toc_llm_prompt(input_data)
+
+    assert "Use only the table of contents" in prompt
+    assert "Do not classify TOC entries with hard-coded title word lists" in prompt
+    assert "first_body_entry_index" in prompt
+    assert "INPUT_JSON:" in prompt
 
 
 def test_toc_driven_skeleton_plan_does_not_verify_every_body_chapter() -> None:
