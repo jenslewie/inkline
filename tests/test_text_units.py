@@ -961,6 +961,60 @@ def test_layout_classifier_keeps_inset_body_line_without_display_gap_as_paragrap
     assert audit["unit_records"][1]["decision"] == "paragraph"
 
 
+def test_layout_classifier_promotes_set_off_run_with_outer_display_gaps() -> None:
+    units = [
+        _unit("tu000001", "Body before first line", [100, 100, 900, 130]),
+        _unit("tu000002", "Body before second line", [100, 136, 900, 166]),
+        _unit("tu000003", "Set off first paragraph", [148, 206, 900, 236]),
+        _unit("tu000004", "Set off second paragraph", [148, 242, 900, 272]),
+        _unit("tu000005", "Body after", [100, 312, 900, 342]),
+    ]
+
+    classified = classify_text_units_by_layout(
+        units,
+        [make_observed_page(1, width=1000, height=1000)],
+    )
+    audit = audit_text_unit_layout(units, [make_observed_page(1, width=1000, height=1000)])
+
+    assert [unit["unit_type"] for unit in classified] == [
+        "paragraph",
+        "paragraph",
+        "display_block",
+        "display_block",
+        "paragraph",
+    ]
+    assert "set_off_run_outer_display_gap" in audit["unit_records"][2]["signals"]
+    assert "set_off_run_outer_display_gap" in audit["unit_records"][3]["signals"]
+    assert audit["unit_records"][2]["decision"] == "display_block"
+    assert audit["unit_records"][3]["decision"] == "display_block"
+
+
+def test_layout_classifier_keeps_single_set_off_candidate_with_one_outer_gap_as_paragraph() -> None:
+    units = [
+        _unit("tu000001", "Body before first line", [100, 100, 900, 130]),
+        _unit("tu000002", "Body before second line", [100, 136, 900, 166]),
+        _unit("tu000003", "Indented single paragraph", [148, 206, 900, 236]),
+        _unit("tu000004", "Body after", [100, 242, 900, 272]),
+    ]
+
+    classified = classify_text_units_by_layout(
+        units,
+        [make_observed_page(1, width=1000, height=1000)],
+    )
+    audit = audit_text_unit_layout(units, [make_observed_page(1, width=1000, height=1000)])
+
+    assert [unit["unit_type"] for unit in classified] == [
+        "paragraph",
+        "paragraph",
+        "paragraph",
+        "paragraph",
+    ]
+    assert "display_gap_before" in audit["unit_records"][2]["signals"]
+    assert "display_gap_after" not in audit["unit_records"][2]["signals"]
+    assert "set_off_run_outer_display_gap" not in audit["unit_records"][2]["signals"]
+    assert audit["unit_records"][2]["decision"] == "paragraph"
+
+
 def test_layout_classifier_keeps_caption_candidates_out_of_display_blocks() -> None:
     units = [
         {

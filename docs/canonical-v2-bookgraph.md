@@ -273,6 +273,7 @@ ObservedDocument observations
 - `normal_gap_y` 只从接近正文左右边界的 full body references 中学习，display 候选不能反向污染正文间距基线。
 - display 判定使用相对几何组合，而不是单个 x/width 信号：`BookLayoutProfile` 缩进基线 + `PageLayoutProfile` 漂移修正 + 上下 display gap + right-aligned attribution + short-line-group。
 - 只有具备 display gap 或 short-line-group 等上下文证据时，缩进/宽度信号才会把 `paragraph` TextUnit 升格为 `display_block`；没有 display gap 的缩进正文行仍保持 `paragraph`。
+- 连续的 set-off prose TextUnits 可以作为 run 审计：如果 run 的外侧同时具备 display gap，则整组升格为 `display_block`，用于覆盖多段引文/摘录中首段或尾段只有单侧 gap 的情况。
 - 分类证据进入 internal/debug `attrs.layout_classification`，保留可审计 signals；public canonical 不暴露 profile 细节。
 - 单个孤立 TextUnit、`bbox = null` TextUnit、heading/list/footnote 不参与 display 分类。
 

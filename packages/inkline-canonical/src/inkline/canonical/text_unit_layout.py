@@ -46,12 +46,16 @@ def audit_text_unit_layout(
             unit_contexts.get(str(unit["unit_id"]), {}),
         )
         unit_records.append(record)
-        if record["decision"] == "display_block":
-            summary["classified_display_blocks"] += 1
-        elif record["decision"] == "skipped_no_bbox":
-            summary["skipped_no_bbox"] += 1
-        elif record["decision"] == "skipped_no_profile":
-            summary["skipped_no_profile"] += 1
+    _promote_set_off_runs(unit_records)
+    summary["classified_display_blocks"] = sum(
+        1 for record in unit_records if record["decision"] == "display_block"
+    )
+    summary["skipped_no_bbox"] = sum(
+        1 for record in unit_records if record["decision"] == "skipped_no_bbox"
+    )
+    summary["skipped_no_profile"] = sum(
+        1 for record in unit_records if record["decision"] == "skipped_no_profile"
+    )
     return {
         "summary": summary,
         "page_coverage": page_coverage,
@@ -217,6 +221,51 @@ def _has_extreme_body_width(body_width: float, page_width: float) -> bool:
         return False
     ratio = body_width / page_width
     return ratio < MIN_BODY_WIDTH_RATIO or ratio > MAX_BODY_WIDTH_RATIO
+
+
+def _promote_set_off_runs(unit_records: list[dict[str, Any]]) -> None:
+    run: list[dict[str, Any]] = []
+    current_page: int | None = None
+    for record in unit_records:
+        page = int(record["page"])
+        if page != current_page:
+            _promote_set_off_run(run)
+            run = []
+            current_page = page
+        if _is_set_off_run_member(record):
+            run.append(record)
+            continue
+        _promote_set_off_run(run)
+        run = []
+    _promote_set_off_run(run)
+
+
+def _promote_set_off_run(run: list[dict[str, Any]]) -> None:
+    if len(run) < 2:
+        return
+    if "display_gap_before" not in run[0]["signals"]:
+        return
+    if "display_gap_after" not in run[-1]["signals"]:
+        return
+    for record in run:
+        record["classified_type"] = "display_block"
+        record["decision"] = "display_block"
+        if "set_off_run_outer_display_gap" not in record["signals"]:
+            record["signals"].append("set_off_run_outer_display_gap")
+
+
+def _is_set_off_run_member(record: dict[str, Any]) -> bool:
+    if record["decision"] not in {"paragraph", "display_block"}:
+        return False
+    signals = set(record.get("signals") or [])
+    return bool(
+        signals
+        & {
+            "left_inset_set_off_text",
+            "slightly_inset_tall_block",
+            "book_indent_set_off_text",
+        }
+    )
 
 
 def _page_layout_profile_records(
