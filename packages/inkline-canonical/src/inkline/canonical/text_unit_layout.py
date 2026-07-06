@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from copy import deepcopy
+from itertools import pairwise
 from statistics import median
 from typing import Any
 
@@ -18,6 +19,7 @@ def audit_text_unit_layout(
     observations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     page_profiles, profile_quality = _page_profiles(units, pages)
+    book_layout_profile = _book_layout_profile(page_profiles, units)
     page_sizes = _page_sizes(pages)
     page_coverage = _page_coverage(pages, units, page_profiles, observations or [])
     unit_records: list[dict[str, Any]] = []
@@ -25,9 +27,7 @@ def audit_text_unit_layout(
         "total_pages": page_coverage["total_pages"],
         "pages_with_profiles": len(page_profiles),
         "pages_without_profiles": len(page_coverage["pages_without_profiles"]),
-        "pages_without_profiles_by_reason": page_coverage[
-            "pages_without_profiles_by_reason"
-        ],
+        "pages_without_profiles_by_reason": page_coverage["pages_without_profiles_by_reason"],
         "paragraph_units": 0,
         "classified_display_blocks": 0,
         "skipped_no_bbox": 0,
@@ -49,6 +49,8 @@ def audit_text_unit_layout(
         "summary": summary,
         "page_coverage": page_coverage,
         "profile_quality": profile_quality,
+        "book_layout_profile": book_layout_profile,
+        "page_layout_profiles": _page_layout_profile_records(page_profiles, book_layout_profile),
         "page_profiles": _page_profile_records(page_profiles),
         "unit_records": unit_records,
     }
@@ -228,6 +230,164 @@ def _page_profile_records(page_profiles: dict[int, dict[str, Any]]) -> list[dict
     return records
 
 
+def _page_layout_profile_records(
+    page_profiles: dict[int, dict[str, Any]], book_layout_profile: dict[str, Any]
+) -> list[dict[str, Any]]:
+    records = []
+    for page, profile in sorted(page_profiles.items()):
+        body_width_delta = None
+        book_body_width = book_layout_profile.get("body_width")
+        if isinstance(book_body_width, int | float):
+            body_width_delta = round(float(profile["body_width"]) - float(book_body_width), 4)
+        record = {
+            "page": page,
+            "profile_scope": "page",
+            "profile_source": str(profile.get("profile_source") or "local"),
+            "page_width": profile["page_width"],
+            "page_height": profile["page_height"],
+            "body_left": profile["body_left"],
+            "body_right": profile["body_right"],
+            "body_width": profile["body_width"],
+            "book_body_width": book_body_width,
+            "body_width_delta": body_width_delta,
+            "indent_unit": book_layout_profile.get("indent_unit"),
+            "line_height": book_layout_profile.get("line_height"),
+            "normal_gap_y": book_layout_profile.get("normal_gap_y"),
+            "display_gap_y": book_layout_profile.get("display_gap_y"),
+            "reference_unit_count": profile["reference_unit_count"],
+        }
+        if profile.get("profile_source"):
+            record["profile_source_page"] = profile["profile_source_page"]
+        records.append(record)
+    return records
+
+
+def _book_layout_profile(
+    page_profiles: dict[int, dict[str, Any]], units: list[dict[str, Any]]
+) -> dict[str, Any]:
+    local_profiles = [
+        profile for profile in page_profiles.values() if not profile.get("profile_source")
+    ]
+    return {
+        "profile_scope": "book",
+        "source_page_count": len(local_profiles),
+        "body_width": _median_or_none([float(profile["body_width"]) for profile in local_profiles]),
+        "indent_unit": _median_or_none(_indent_units(units)),
+        "line_height": _median_or_none(_line_heights(units)),
+        "normal_gap_y": _median_or_none(_normal_gaps(units, page_profiles)),
+        "display_gap_y": _median_or_none(_display_gaps(units, page_profiles)),
+    }
+
+
+def _indent_units(units: list[dict[str, Any]]) -> list[float]:
+    indents: list[float] = []
+    for metrics in _text_line_metrics(units):
+        indent = _metric_float(metrics, "first_line_indent")
+        if indent is None or indent <= 0:
+            continue
+        char_width = _metric_float(metrics, "char_width")
+        if char_width is not None and indent < char_width * 0.75:
+            continue
+        indents.append(indent)
+    return indents
+
+
+def _text_line_metrics(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for unit in units:
+        attrs = unit.get("attrs") if isinstance(unit.get("attrs"), dict) else {}
+        by_observation = attrs.get("text_line_metrics_by_observation")
+        if not isinstance(by_observation, dict):
+            continue
+        for metrics in by_observation.values():
+            if isinstance(metrics, dict):
+                records.append(metrics)
+    return records
+
+
+def _line_heights(units: list[dict[str, Any]]) -> list[float]:
+    heights: list[float] = []
+    for unit in units:
+        for bbox in _line_bboxes(unit):
+            height = _height(bbox)
+            if height > 0:
+                heights.append(height)
+    return heights
+
+
+def _normal_gaps(
+    units: list[dict[str, Any]], page_profiles: dict[int, dict[str, Any]]
+) -> list[float]:
+    gaps: list[float] = []
+    for bboxes in _body_like_line_bboxes_by_page(units, page_profiles).values():
+        sorted_bboxes = sorted(bboxes, key=lambda bbox: (bbox[1], bbox[0]))
+        for previous, current in pairwise(sorted_bboxes):
+            gap = float(current[1]) - float(previous[3])
+            if 0 <= gap <= max(48.0, _height(previous) * 2.0):
+                gaps.append(gap)
+    return gaps
+
+
+def _display_gaps(
+    units: list[dict[str, Any]], page_profiles: dict[int, dict[str, Any]]
+) -> list[float]:
+    normal_gap = _median_or_none(_normal_gaps(units, page_profiles))
+    if normal_gap is None:
+        return []
+    threshold = max(normal_gap * 2.5, normal_gap + 18.0)
+    gaps: list[float] = []
+    for bboxes in _body_like_line_bboxes_by_page(units, page_profiles).values():
+        sorted_bboxes = sorted(bboxes, key=lambda bbox: (bbox[1], bbox[0]))
+        for previous, current in pairwise(sorted_bboxes):
+            gap = float(current[1]) - float(previous[3])
+            if gap >= threshold:
+                gaps.append(gap)
+    return gaps
+
+
+def _body_like_line_bboxes_by_page(
+    units: list[dict[str, Any]], page_profiles: dict[int, dict[str, Any]]
+) -> dict[int, list[list[float]]]:
+    grouped: dict[int, list[list[float]]] = {}
+    for unit in units:
+        if unit.get("unit_type") != "paragraph":
+            continue
+        page = int(unit["page"])
+        profile = page_profiles.get(page)
+        if not profile or profile.get("profile_source"):
+            continue
+        for bbox in _line_bboxes(unit):
+            if _is_body_like_bbox(bbox, profile):
+                grouped.setdefault(page, []).append(bbox)
+    return grouped
+
+
+def _is_body_like_bbox(bbox: list[float], profile: dict[str, Any]) -> bool:
+    body_width = float(profile["body_width"])
+    if body_width <= 0:
+        return False
+    left_delta = abs(float(bbox[0]) - float(profile["body_left"]))
+    right_delta = abs(float(bbox[2]) - float(profile["body_right"]))
+    return (
+        _width(bbox) >= body_width * 0.70
+        and left_delta <= max(24.0, body_width * 0.06)
+        and right_delta <= max(32.0, body_width * 0.08)
+    )
+
+
+def _median_or_none(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return float(median(values))
+
+
+def _metric_float(metrics: dict[str, Any], key: str) -> float | None:
+    try:
+        return float(metrics[key])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _nearest_profile_page(page: int, page_profiles: dict[int, dict[str, Any]]) -> int | None:
     if not page_profiles:
         return None
@@ -242,9 +402,7 @@ def _page_coverage(
 ) -> dict[str, Any]:
     page_numbers = sorted(int(page["page"]) for page in pages)
     units_by_page: dict[int, Counter[str]] = {page: Counter() for page in page_numbers}
-    observation_kinds_by_page: dict[int, Counter[str]] = {
-        page: Counter() for page in page_numbers
-    }
+    observation_kinds_by_page: dict[int, Counter[str]] = {page: Counter() for page in page_numbers}
     for unit in units:
         page = int(unit["page"])
         if page in units_by_page:
@@ -276,8 +434,7 @@ def _page_coverage(
             "heading_with_paragraph_units": [
                 page
                 for page in page_numbers
-                if units_by_page[page].get("heading")
-                and units_by_page[page].get("paragraph")
+                if units_by_page[page].get("heading") and units_by_page[page].get("paragraph")
             ],
             "image_with_text_units": [
                 page
@@ -295,9 +452,7 @@ def _page_coverage(
     }
 
 
-def _page_without_profile_reason(
-    unit_types: Counter[str], observation_kinds: Counter[str]
-) -> str:
+def _page_without_profile_reason(unit_types: Counter[str], observation_kinds: Counter[str]) -> str:
     if unit_types.get("paragraph"):
         return "paragraph_without_profile"
     if unit_types and set(unit_types) == {"heading"}:
@@ -470,9 +625,11 @@ def _display_signals(bbox: list[float], profile: dict[str, float]) -> list[str]:
 
 
 def _is_display_candidate(signals: list[str]) -> bool:
-    return signals == ["narrower_than_body_lane", "inset_from_body_lane"] or signals == [
-        "left_inset_set_off_text"
-    ] or signals == ["slightly_inset_tall_block"]
+    return (
+        signals == ["narrower_than_body_lane", "inset_from_body_lane"]
+        or signals == ["left_inset_set_off_text"]
+        or signals == ["slightly_inset_tall_block"]
+    )
 
 
 def _short_line_group(unit: dict[str, Any], page_sizes: dict[int, dict[str, float]]) -> str | None:

@@ -1170,6 +1170,125 @@ def test_layout_profile_uses_widest_stable_lane_when_page_has_many_short_lines()
     assert audit["page_profiles"][0]["reference_unit_count"] == 3
 
 
+def test_layout_audit_reports_book_and_page_layout_profiles() -> None:
+    document = _document_with_pages(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="First body paragraph",
+                page=1,
+                bbox=[100, 100, 900, 130],
+                role_hint="body_text",
+                attrs={
+                    "reading_order": 1,
+                    "text_line_metrics": {
+                        "line_count": 2,
+                        "first_line_indent": 20,
+                        "char_width": 10,
+                    },
+                },
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Second body paragraph",
+                page=1,
+                bbox=[100, 136, 900, 166],
+                role_hint="body_text",
+                attrs={
+                    "reading_order": 2,
+                    "text_line_metrics": {
+                        "line_count": 2,
+                        "first_line_indent": 21,
+                        "char_width": 10,
+                    },
+                },
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Third body paragraph",
+                page=1,
+                bbox=[100, 172, 900, 202],
+                role_hint="body_text",
+                attrs={
+                    "reading_order": 3,
+                    "text_line_metrics": {
+                        "line_count": 2,
+                        "first_line_indent": 19,
+                        "char_width": 10,
+                    },
+                },
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="Sparse inherited page",
+                page=2,
+                bbox=[150, 100, 870, 130],
+                role_hint="body_text",
+                attrs={"reading_order": 4},
+            ),
+        ],
+        [
+            make_observed_page(1, width=1000, height=1000),
+            make_observed_page(2, width=1000, height=1000),
+        ],
+    )
+    units, _ = build_text_units(document)
+
+    audit = audit_text_unit_layout(units, document["pages"])
+
+    assert audit["book_layout_profile"] == {
+        "profile_scope": "book",
+        "source_page_count": 1,
+        "body_width": 800.0,
+        "indent_unit": 20.0,
+        "line_height": 30.0,
+        "normal_gap_y": 6.0,
+        "display_gap_y": None,
+    }
+    assert audit["page_layout_profiles"] == [
+        {
+            "page": 1,
+            "profile_scope": "page",
+            "profile_source": "local",
+            "page_width": 1000.0,
+            "page_height": 1000.0,
+            "body_left": 100.0,
+            "body_right": 900.0,
+            "body_width": 800.0,
+            "book_body_width": 800.0,
+            "body_width_delta": 0.0,
+            "indent_unit": 20.0,
+            "line_height": 30.0,
+            "normal_gap_y": 6.0,
+            "display_gap_y": None,
+            "reference_unit_count": 3,
+        },
+        {
+            "page": 2,
+            "profile_scope": "page",
+            "profile_source": "nearest_page",
+            "profile_source_page": 1,
+            "page_width": 1000.0,
+            "page_height": 1000.0,
+            "body_left": 100.0,
+            "body_right": 900.0,
+            "body_width": 800.0,
+            "book_body_width": 800.0,
+            "body_width_delta": 0.0,
+            "indent_unit": 20.0,
+            "line_height": 30.0,
+            "normal_gap_y": 6.0,
+            "display_gap_y": None,
+            "reference_unit_count": 1,
+        },
+    ]
+    assert "profile_source" not in audit["page_profiles"][0]
+
+
 def test_layout_profile_uses_nearest_stable_profile_for_sparse_page() -> None:
     document = _document_with_pages(
         [
