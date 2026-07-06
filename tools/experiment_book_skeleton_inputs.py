@@ -27,6 +27,7 @@ MAX_PAGE_TEXT_CHARS = 320
 MAX_PROMPT_JSON_CHARS = 90000
 TOC_ENTRY_RE = re.compile(r"^\s*(?P<title>.+?)\s*(?:[/／.·•…\-\s]+)?(?P<page>[ivxlcdmIVXLCDM\d]+)\s*$")
 BODY_TITLE_RE = re.compile(r"^(?:第[一二三四五六七八九十百千万\d]+(?:章节|部分|[章节部卷篇])|序章)")
+NUMERIC_BODY_TITLE_RE = re.compile(r"^\d{1,3}\s+\S")
 FRONT_MATTER_TITLE_KEYWORDS = {
     "中文版序言",
     "新版序言",
@@ -40,7 +41,6 @@ FRONT_MATTER_TITLE_KEYWORDS = {
     "凡例",
     "献词",
     "年表",
-    "关于日期的说明",
 }
 BACK_MATTER_TITLE_KEYWORDS = {
     "附录",
@@ -54,7 +54,6 @@ BACK_MATTER_TITLE_KEYWORDS = {
     "译后记",
     "后记",
     "版权页",
-    "对照表",
 }
 
 
@@ -100,12 +99,12 @@ def build_toc_driven_skeleton_plan(document: dict[str, Any]) -> dict[str, Any]:
         entry["candidate_pages"] = locate_title_pages(package, entry["title"], exclude_pages=toc_pages)
     _infer_missing_back_matter_pages_from_printed_offsets(entries, page_count=package["page_count"])
 
-    body_start_candidates = [
-        page
-        for entry in entries
-        if entry["role"] == "body"
-        for page in entry.get("candidate_pages", [])[:1]
-    ]
+    first_body_entry = _first_body_entry(entries)
+    body_start_candidates = (
+        [int(first_body_entry["candidate_pages"][0])]
+        if first_body_entry is not None and first_body_entry.get("candidate_pages")
+        else []
+    )
     all_back_matter_candidates = [
         page
         for entry in entries
@@ -171,6 +170,7 @@ def parse_toc_entries(text: str) -> list[dict[str, Any]]:
                         "title": structural_title,
                         "printed_page": None,
                         "role": classify_toc_entry_role(structural_title),
+                        "_role_source": _toc_entry_role_source(structural_title),
                     }
                 )
             continue
@@ -182,20 +182,84 @@ def parse_toc_entries(text: str) -> list[dict[str, Any]]:
                 "title": title,
                 "printed_page": match.group("page"),
                 "role": classify_toc_entry_role(title),
+                "_role_source": _toc_entry_role_source(title),
             }
         )
+    _apply_toc_sequence_roles(entries)
+    for entry in entries:
+        entry.pop("_role_source", None)
     return entries
 
 
 def classify_toc_entry_role(title: str) -> str:
-    normalized = _normalize_title(title)
-    if any(_normalize_title(keyword) in normalized for keyword in BACK_MATTER_TITLE_KEYWORDS):
+    source = _toc_entry_role_source(title)
+    if source == "explicit_back":
         return "back_matter"
-    if BODY_TITLE_RE.match(title.strip()):
+    if source == "explicit_body":
         return "body"
-    if any(_normalize_title(keyword) in normalized for keyword in FRONT_MATTER_TITLE_KEYWORDS):
+    if source == "explicit_front":
         return "front_matter"
     return "body"
+
+
+def _toc_entry_role_source(title: str) -> str:
+    normalized = _normalize_title(title)
+    if any(_normalize_title(keyword) in normalized for keyword in BACK_MATTER_TITLE_KEYWORDS):
+        return "explicit_back"
+    if _looks_like_body_toc_title(title):
+        return "explicit_body"
+    if any(_normalize_title(keyword) in normalized for keyword in FRONT_MATTER_TITLE_KEYWORDS):
+        return "explicit_front"
+    return "default"
+
+
+def _apply_toc_sequence_roles(entries: list[dict[str, Any]]) -> None:
+    first_body_index = _first_entry_index(entries, source="explicit_body")
+    if first_body_index is not None:
+        for entry in entries[:first_body_index]:
+            if entry.get("_role_source") != "explicit_back":
+                entry["role"] = "front_matter"
+
+    first_back_index = _first_entry_index(entries, source="explicit_back", start=first_body_index)
+    if first_back_index is None:
+        return
+
+    previous_index = first_back_index - 1
+    if (
+        first_body_index is not None
+        and previous_index > first_body_index
+        and entries[previous_index].get("_role_source") == "default"
+        and _should_bridge_tail_entry_to_back_matter(entries[previous_index], entries[first_back_index])
+    ):
+        entries[previous_index]["role"] = "back_matter"
+
+    for entry in entries[first_back_index:]:
+        entry["role"] = "back_matter"
+
+
+def _first_entry_index(
+    entries: list[dict[str, Any]], *, source: str, start: int | None = None
+) -> int | None:
+    start_index = 0 if start is None else start
+    for index, entry in enumerate(entries[start_index:], start=start_index):
+        if entry.get("_role_source") == source:
+            return index
+    return None
+
+
+def _looks_like_body_toc_title(title: str) -> bool:
+    stripped = title.strip()
+    return BODY_TITLE_RE.match(stripped) is not None or NUMERIC_BODY_TITLE_RE.match(stripped) is not None
+
+
+def _should_bridge_tail_entry_to_back_matter(
+    previous_entry: dict[str, Any], back_entry: dict[str, Any]
+) -> bool:
+    previous_page = previous_entry.get("printed_page")
+    back_page = back_entry.get("printed_page")
+    if not (_is_decimal_page(previous_page) and _is_decimal_page(back_page)):
+        return False
+    return 0 < int(back_page) - int(previous_page) <= 8
 
 
 def locate_title_pages(

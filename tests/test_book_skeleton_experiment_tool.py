@@ -496,6 +496,7 @@ def test_toc_driven_skeleton_plan_does_not_verify_every_body_chapter() -> None:
 
     plan = tool.build_toc_driven_skeleton_plan(document)
 
+    assert plan["body_start_candidates"] == [3]
     assert plan["llm_page_tasks"] == [
         {"page": 2, "task": "verify_toc_entry_page", "title": "前言", "role": "front_matter"},
         {"page": 3, "task": "verify_toc_entry_page", "title": "第一章 开始", "role": "body"},
@@ -556,6 +557,7 @@ def test_toc_driven_skeleton_plan_skips_index_continuation_pages_before_residual
 
 def test_toc_driven_skeleton_plan_treats_named_gazetteer_as_back_matter_start() -> None:
     tool = _load_tool()
+    assert "对照表" not in tool.BACK_MATTER_TITLE_KEYWORDS
     document = _document_with_pages(
         doc_id="silk-like",
         page_count=324,
@@ -591,6 +593,7 @@ def test_toc_driven_skeleton_plan_treats_named_gazetteer_as_back_matter_start() 
 
 def test_toc_driven_skeleton_plan_infers_missing_back_matter_pages_from_printed_offsets() -> None:
     tool = _load_tool()
+    assert "关于日期的说明" not in tool.FRONT_MATTER_TITLE_KEYWORDS
     document = _document_with_pages(
         doc_id="imjin-like",
         page_count=520,
@@ -606,7 +609,7 @@ def test_toc_driven_skeleton_plan_infers_missing_back_matter_pages_from_printed_
             make_observation(
                 "toc-2",
                 "text_region",
-                text="参考书目 441\n注释 455\n出版后记 493",
+                text="30 战争之后 423\n参考书目 441\n注释 455\n出版后记 493",
                 page=27,
                 bbox=[40, 80, 360, 500],
                 role_hint="toc_text",
@@ -627,6 +630,7 @@ def test_toc_driven_skeleton_plan_infers_missing_back_matter_pages_from_printed_
                 bbox=[40, 80, 360, 500],
                 role_hint="title_text",
             ),
+            make_observation("chapter-30", "text_region", text="30 战争之后", page=449, bbox=[40, 80, 360, 500]),
             make_observation("afterword", "text_region", text="出版后记", page=519, bbox=[40, 80, 360, 500]),
         ],
     )
@@ -636,6 +640,7 @@ def test_toc_driven_skeleton_plan_infers_missing_back_matter_pages_from_printed_
     located = {entry["title"]: entry for entry in plan["toc_entries"]}
     assert located["关于日期的说明"]["role"] == "front_matter"
     assert located["第一部分 东亚三国"]["candidate_pages"] == [28]
+    assert located["30 战争之后"]["role"] == "body"
     assert located["参考书目"]["candidate_pages"] == [467]
     assert located["注释"]["candidate_pages"] == [481]
     assert plan["body_start_candidates"][0] == 28
@@ -699,12 +704,20 @@ def test_toc_driven_skeleton_plan_prefers_true_note_title_over_running_header() 
             make_observation(
                 "toc",
                 "text_region",
-                text="目录\n第一章 正文 25\n注释 491\n参考书目 540\n索引 568",
+                text="目录\n第一章 正文 25\n与他们的文献 381\n注释 460\n参考书目 508\n索引 536",
                 page=9,
                 bbox=[40, 80, 360, 500],
                 role_hint="toc_text",
             ),
             make_observation("body", "text_region", text="第一章 正文", page=25, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "appendix-like",
+                "text_region",
+                text="附录 克伦威尔时期英格兰的自由灵：浮嚣派与他们的文献",
+                page=413,
+                bbox=[40, 80, 360, 500],
+                role_hint="title_text",
+            ),
             make_observation(
                 "notes-title",
                 "text_region",
@@ -726,5 +739,6 @@ def test_toc_driven_skeleton_plan_prefers_true_note_title_over_running_header() 
     plan = tool.build_toc_driven_skeleton_plan(document)
 
     located = {entry["title"]: entry for entry in plan["toc_entries"]}
+    assert located["与他们的文献"]["role"] == "body"
     assert located["注释"]["candidate_pages"][0] == 492
     assert plan["back_matter_start_candidates"] == [492]
