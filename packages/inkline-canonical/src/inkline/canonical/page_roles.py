@@ -26,11 +26,7 @@ def classify_observed_page_roles(
     resolved_layout_audit = (
         layout_audit if layout_audit is not None else _build_layout_audit(document)
     )
-    profile_pages = {
-        int(record["page"])
-        for record in resolved_layout_audit.get("page_profiles", [])
-        if isinstance(record, dict) and isinstance(record.get("page"), int)
-    }
+    profile_pages = _profile_pages(resolved_layout_audit)
     observations_by_page = _observations_by_page(document["observations"])
     pages = sorted(document["pages"], key=lambda page: int(page["page"]))
     page_numbers = [int(page["page"]) for page in pages]
@@ -65,6 +61,16 @@ def classify_observed_page_roles(
 
 def page_roles_by_page(records: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
     return {int(record["page"]): record for record in records}
+
+
+def _profile_pages(layout_audit: dict[str, Any]) -> set[int]:
+    return {
+        int(record["page"])
+        for record in layout_audit.get("page_layout_profiles", [])
+        if isinstance(record, dict)
+        and isinstance(record.get("page"), int)
+        and record.get("profile_scope") == "page"
+    }
 
 
 def _build_layout_audit(document: dict[str, Any]) -> dict[str, Any]:
@@ -669,10 +675,9 @@ def _has_note_section_hint(metrics: dict[str, Any]) -> bool:
 
 def _is_body_start_candidate(metrics: dict[str, Any]) -> bool:
     role_hint_counts = metrics.get("role_hint_counts") or {}
-    return (
-        (role_hint_counts.get("title_text") or 0) >= 2
-        and (role_hint_counts.get("body_text") or 0) > 0
-    )
+    return (role_hint_counts.get("title_text") or 0) >= 2 and (
+        role_hint_counts.get("body_text") or 0
+    ) > 0
 
 
 def _has_text_flow_hint(metrics: dict[str, Any]) -> bool:

@@ -41,6 +41,14 @@ def _metadata() -> dict:
     }
 
 
+def _layout_audit_with_body_profiles(pages: list[int]) -> dict:
+    return {
+        "page_layout_profiles": [
+            {"page": page, "profile_scope": "page", "profile_source": "local"} for page in pages
+        ]
+    }
+
+
 def test_canonical_v2_doc_defines_all_phase3_page_roles() -> None:
     doc = Path("docs/canonical-v2-bookgraph.md").read_text(encoding="utf-8")
 
@@ -181,7 +189,7 @@ def test_classify_observed_page_roles_marks_unnumbered_decorative_title_as_front
             ),
         ],
     )
-    layout_audit = {"page_profiles": [{"page": 2}]}
+    layout_audit = _layout_audit_with_body_profiles([2])
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
 
@@ -265,7 +273,7 @@ def test_classify_observed_page_roles_keeps_sparse_visual_caption_page_as_text_f
             ),
         ],
     )
-    layout_audit = {"page_profiles": [{"page": 50}]}
+    layout_audit = _layout_audit_with_body_profiles([50])
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
     role_by_page = {record["page"]: record for record in roles}
@@ -301,7 +309,7 @@ def test_classify_observed_page_roles_marks_large_visual_with_one_caption_as_vis
             ),
         ],
     )
-    layout_audit = {"page_profiles": [{"page": 50}]}
+    layout_audit = _layout_audit_with_body_profiles([50])
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
     role_by_page = {record["page"]: record for record in roles}
@@ -336,7 +344,7 @@ def test_classify_observed_page_roles_keeps_visual_body_mixed_page_in_body() -> 
             ],
         ],
     )
-    layout_audit = {"page_profiles": [{"page": 50}]}
+    layout_audit = _layout_audit_with_body_profiles([50])
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
 
@@ -367,7 +375,7 @@ def test_classify_observed_page_roles_marks_mid_book_sparse_centered_text_as_tit
             ),
         ],
     )
-    layout_audit = {"page_profiles": []}
+    layout_audit = _layout_audit_with_body_profiles([])
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
     role_by_page = {record["page"]: record for record in roles}
@@ -377,7 +385,9 @@ def test_classify_observed_page_roles_marks_mid_book_sparse_centered_text_as_tit
     assert role_by_page[308]["signals"] == ["sparse_centered_text", "no_body_profile"]
 
 
-def test_classify_observed_page_roles_keeps_sparse_centered_body_text_as_text_flow_candidate() -> None:
+def test_classify_observed_page_roles_keeps_sparse_centered_body_text_as_text_flow_candidate() -> (
+    None
+):
     document = make_observed_document(
         _metadata(),
         [make_observed_page(page, width=1000, height=1000) for page in range(1, 321)],
@@ -392,7 +402,7 @@ def test_classify_observed_page_roles_keeps_sparse_centered_body_text_as_text_fl
             ),
         ],
     )
-    layout_audit = {"page_profiles": []}
+    layout_audit = _layout_audit_with_body_profiles([])
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
     role_by_page = {record["page"]: record for record in roles}
@@ -580,9 +590,7 @@ def test_classify_observed_page_roles_keeps_preface_and_toc_prefix_out_of_body_s
             role_hint="body_text",
         ),
     ]
-    layout_audit = {
-        "page_profiles": [{"page": page} for page in range(2, 9)],
-    }
+    layout_audit = _layout_audit_with_body_profiles(list(range(2, 9)))
     document = make_observed_document(_metadata(), pages, observations)
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
@@ -636,9 +644,7 @@ def test_classify_observed_page_roles_marks_long_tail_note_zone_as_back_matter()
                 ),
             ]
         )
-    layout_audit = {
-        "page_profiles": [{"page": page} for page in range(1, 11)],
-    }
+    layout_audit = _layout_audit_with_body_profiles(list(range(1, 11)))
     document = make_observed_document(_metadata(), pages, observations)
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
@@ -675,9 +681,7 @@ def test_classify_observed_page_roles_keeps_page_footnote_heavy_body_in_body_sco
                     role_hint="footnote_text",
                 )
             )
-    layout_audit = {
-        "page_profiles": [{"page": page} for page in range(1, 201)],
-    }
+    layout_audit = _layout_audit_with_body_profiles(list(range(1, 201)))
     document = make_observed_document(_metadata(), pages, observations)
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
@@ -762,9 +766,7 @@ def test_classify_observed_page_roles_does_not_extend_note_zone_to_plain_tail_te
                 role_hint="body_text",
             )
         )
-    layout_audit = {
-        "page_profiles": [{"page": page} for page in range(1, 13)],
-    }
+    layout_audit = _layout_audit_with_body_profiles(list(range(1, 13)))
     document = make_observed_document(_metadata(), pages, observations)
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
@@ -807,7 +809,7 @@ def test_classify_observed_page_roles_fills_small_gaps_inside_note_clusters() ->
                 role_hint="body_text",
             )
         )
-    layout_audit = {"page_profiles": [{"page": page} for page in range(1, 8)]}
+    layout_audit = _layout_audit_with_body_profiles(list(range(1, 8)))
     document = make_observed_document(_metadata(), pages, observations)
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
@@ -872,7 +874,7 @@ def test_classify_observed_page_roles_fills_three_page_note_gap_until_visual_bar
             ),
         ]
     )
-    layout_audit = {"page_profiles": [{"page": page} for page in range(1, 7)]}
+    layout_audit = _layout_audit_with_body_profiles(list(range(1, 7)))
     document = make_observed_document(_metadata(), pages, observations)
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
@@ -926,9 +928,7 @@ def test_classify_observed_page_roles_keeps_visual_runs_as_visual_pages() -> Non
                 role_hint="body_text",
             )
         )
-    layout_audit = {
-        "page_profiles": [{"page": page} for page in range(1, 13)],
-    }
+    layout_audit = _layout_audit_with_body_profiles(list(range(1, 13)))
     document = make_observed_document(_metadata(), pages, observations)
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
@@ -981,9 +981,7 @@ def test_classify_observed_page_roles_keeps_known_flow_scopes_contiguous() -> No
             role_hint="unknown",
         )
     )
-    layout_audit = {
-        "page_profiles": [{"page": page} for page in [1, 2, 3, 4, 5, 6, 8]],
-    }
+    layout_audit = _layout_audit_with_body_profiles([1, 2, 3, 4, 5, 6, 8])
     document = make_observed_document(_metadata(), pages, observations)
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)
@@ -993,7 +991,9 @@ def test_classify_observed_page_roles_keeps_known_flow_scopes_contiguous() -> No
     assert "late_page" in roles[6]["signals"]
 
 
-def test_classify_observed_page_roles_marks_last_visual_mixed_page_as_back_cover_candidate() -> None:
+def test_classify_observed_page_roles_marks_last_visual_mixed_page_as_back_cover_candidate() -> (
+    None
+):
     pages = [make_observed_page(page, width=1000, height=1000) for page in range(1, 4)]
     observations = [
         make_observation(
@@ -1027,7 +1027,7 @@ def test_classify_observed_page_roles_marks_last_visual_mixed_page_as_back_cover
             role_hint="body_text",
         ),
     ]
-    layout_audit = {"page_profiles": [{"page": page} for page in range(1, 4)]}
+    layout_audit = _layout_audit_with_body_profiles(list(range(1, 4)))
     document = make_observed_document(_metadata(), pages, observations)
 
     roles = classify_observed_page_roles(document, layout_audit=layout_audit)

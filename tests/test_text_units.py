@@ -960,7 +960,7 @@ def test_layout_classifier_builds_body_lane_from_text_unit_spans() -> None:
         "skipped_no_bbox": 0,
         "skipped_no_profile": 0,
     }
-    assert audit["page_profiles"][0]["reference_unit_count"] == 3
+    assert audit["page_layout_profiles"][0]["reference_unit_count"] == 3
 
 
 def test_layout_audit_reports_page_coverage_reasons() -> None:
@@ -1122,9 +1122,9 @@ def test_layout_profile_ignores_short_line_outliers_when_estimating_body_lane() 
     assert audit["summary"]["skipped_no_profile"] == 0
     assert audit["profile_quality"]["accepted"] == 1
     assert audit["profile_quality"]["rejected_unstable_widths"] == 0
-    assert audit["page_profiles"][0]["body_left"] == 100.0
-    assert audit["page_profiles"][0]["body_right"] == 900.0
-    assert audit["page_profiles"][0]["body_width"] == 800.0
+    assert audit["page_layout_profiles"][0]["body_left"] == 100.0
+    assert audit["page_layout_profiles"][0]["body_right"] == 900.0
+    assert audit["page_layout_profiles"][0]["body_width"] == 800.0
 
 
 def test_layout_profile_uses_widest_stable_lane_when_page_has_many_short_lines() -> None:
@@ -1164,10 +1164,10 @@ def test_layout_profile_uses_widest_stable_lane_when_page_has_many_short_lines()
     assert audit["summary"]["skipped_no_profile"] == 0
     assert audit["profile_quality"]["accepted"] == 1
     assert audit["profile_quality"]["rejected_unstable_widths"] == 0
-    assert audit["page_profiles"][0]["body_left"] == 100.0
-    assert audit["page_profiles"][0]["body_right"] == 900.0
-    assert audit["page_profiles"][0]["body_width"] == 800.0
-    assert audit["page_profiles"][0]["reference_unit_count"] == 3
+    assert audit["page_layout_profiles"][0]["body_left"] == 100.0
+    assert audit["page_layout_profiles"][0]["body_right"] == 900.0
+    assert audit["page_layout_profiles"][0]["body_width"] == 800.0
+    assert audit["page_layout_profiles"][0]["reference_unit_count"] == 3
 
 
 def test_layout_audit_reports_book_and_page_layout_profiles() -> None:
@@ -1286,7 +1286,14 @@ def test_layout_audit_reports_book_and_page_layout_profiles() -> None:
             "reference_unit_count": 1,
         },
     ]
-    assert "profile_source" not in audit["page_profiles"][0]
+    assert set(audit) == {
+        "summary",
+        "page_coverage",
+        "profile_quality",
+        "book_layout_profile",
+        "page_layout_profiles",
+        "unit_records",
+    }
 
 
 def test_layout_profile_uses_nearest_stable_profile_for_sparse_page() -> None:
@@ -1330,17 +1337,13 @@ def test_layout_profile_uses_nearest_stable_profile_for_sparse_page() -> None:
     assert audit["summary"]["skipped_no_profile"] == 0
     assert audit["profile_quality"]["accepted"] == 1
     assert audit["profile_quality"]["filled_from_nearest_profile"] == 1
-    assert audit["page_profiles"][1] == {
-        "page": 2,
-        "page_width": 1000.0,
-        "page_height": 1000.0,
-        "body_left": 100.0,
-        "body_right": 900.0,
-        "body_width": 800.0,
-        "reference_unit_count": 1,
-        "profile_source": "nearest_page",
-        "profile_source_page": 1,
-    }
+    assert audit["page_layout_profiles"][1]["page"] == 2
+    assert audit["page_layout_profiles"][1]["profile_source"] == "nearest_page"
+    assert audit["page_layout_profiles"][1]["profile_source_page"] == 1
+    assert audit["page_layout_profiles"][1]["body_left"] == 100.0
+    assert audit["page_layout_profiles"][1]["body_right"] == 900.0
+    assert audit["page_layout_profiles"][1]["body_width"] == 800.0
+    assert audit["page_layout_profiles"][1]["reference_unit_count"] == 1
     assert audit["unit_records"][1]["profile_source"] == "nearest_page"
     assert audit["unit_records"][1]["signals"] == []
 
@@ -1389,8 +1392,8 @@ def test_layout_profile_uses_nearest_stable_profile_for_narrow_local_references(
     assert audit["summary"]["skipped_no_profile"] == 0
     assert audit["profile_quality"]["filled_from_nearest_profile"] == 1
     assert audit["profile_quality"]["rejected_extreme_body_width"] == 0
-    assert audit["page_profiles"][1]["profile_source"] == "nearest_page"
-    assert audit["page_profiles"][1]["profile_source_page"] == 1
+    assert audit["page_layout_profiles"][1]["profile_source"] == "nearest_page"
+    assert audit["page_layout_profiles"][1]["profile_source_page"] == 1
     assert audit["unit_records"][1]["body_width"] == 800.0
 
 
@@ -1429,7 +1432,7 @@ def test_layout_profile_quality_rejects_page_without_dominant_body_lane() -> Non
     audit = audit_text_unit_layout(units, document["pages"])
 
     assert [unit["unit_type"] for unit in classified] == ["paragraph", "paragraph"]
-    assert audit["page_profiles"] == []
+    assert audit["page_layout_profiles"] == []
     assert audit["profile_quality"]["rejected_no_stable_profile"] == 1
 
 
@@ -1467,11 +1470,11 @@ def test_layout_profile_quality_rejects_extremely_narrow_body_width() -> None:
     audit = audit_text_unit_layout(units, document["pages"])
 
     assert [unit["unit_type"] for unit in classified] == ["paragraph", "paragraph"]
-    assert audit["page_profiles"] == []
+    assert audit["page_layout_profiles"] == []
     assert audit["profile_quality"]["rejected_extreme_body_width"] == 1
 
 
-def test_layout_audit_reports_page_profiles_and_candidate_signals_without_text() -> None:
+def test_layout_audit_reports_page_layout_profiles_and_candidate_signals_without_text() -> None:
     document = _document(
         [
             make_observation(
@@ -1517,17 +1520,12 @@ def test_layout_audit_reports_page_profiles_and_candidate_signals_without_text()
         "skipped_no_bbox": 0,
         "skipped_no_profile": 0,
     }
-    assert audit["page_profiles"] == [
-        {
-            "page": 1,
-            "page_width": 1000.0,
-            "page_height": 1000.0,
-            "body_left": 100.0,
-            "body_right": 900.0,
-            "body_width": 800.0,
-            "reference_unit_count": 2,
-        }
-    ]
+    assert audit["page_layout_profiles"][0]["page"] == 1
+    assert audit["page_layout_profiles"][0]["profile_source"] == "local"
+    assert audit["page_layout_profiles"][0]["body_left"] == 100.0
+    assert audit["page_layout_profiles"][0]["body_right"] == 900.0
+    assert audit["page_layout_profiles"][0]["body_width"] == 800.0
+    assert audit["page_layout_profiles"][0]["reference_unit_count"] == 2
     assert audit["unit_records"][1] == {
         "unit_id": "tu000002",
         "page": 1,
