@@ -22,6 +22,7 @@ def audit_text_unit_layout(
     book_layout_profile = _book_layout_profile(page_layout_profile_map, units)
     page_sizes = _page_sizes(pages)
     page_coverage = _page_coverage(pages, units, page_layout_profile_map, observations or [])
+    unit_contexts = _unit_layout_contexts(units, book_layout_profile)
     unit_records: list[dict[str, Any]] = []
     summary = {
         "total_pages": page_coverage["total_pages"],
@@ -37,7 +38,13 @@ def audit_text_unit_layout(
         if unit.get("unit_type") != "paragraph":
             continue
         summary["paragraph_units"] += 1
-        record = _unit_record(unit, page_layout_profile_map, page_sizes)
+        record = _unit_record(
+            unit,
+            page_layout_profile_map,
+            page_sizes,
+            book_layout_profile,
+            unit_contexts.get(str(unit["unit_id"]), {}),
+        )
         unit_records.append(record)
         if record["decision"] == "display_block":
             summary["classified_display_blocks"] += 1
@@ -74,7 +81,7 @@ def classify_text_units_by_layout(
             if record.get("alignment"):
                 attrs["alignment"] = record["alignment"]
             attrs["layout_classification"] = {
-                "method": "page_body_lane_geometry_v1",
+                "method": "book_page_layout_profile_geometry_v2",
                 "signals": list(record["signals"]),
             }
     return classified
@@ -300,14 +307,25 @@ def _line_heights(units: list[dict[str, Any]]) -> list[float]:
 def _normal_gaps(
     units: list[dict[str, Any]], page_layout_profile_map: dict[int, dict[str, Any]]
 ) -> list[float]:
-    gaps: list[float] = []
-    for bboxes in _body_like_line_bboxes_by_page(units, page_layout_profile_map).values():
+    candidate_gaps: list[float] = []
+    for bboxes in _normal_gap_line_bboxes_by_page(units, page_layout_profile_map).values():
         sorted_bboxes = sorted(bboxes, key=lambda bbox: (bbox[1], bbox[0]))
         for previous, current in pairwise(sorted_bboxes):
             gap = float(current[1]) - float(previous[3])
-            if 0 <= gap <= max(48.0, _height(previous) * 2.0):
-                gaps.append(gap)
-    return gaps
+            if 0 <= gap <= max(12.0, _height(previous) * 0.45):
+                candidate_gaps.append(gap)
+    return _lower_gap_cluster(candidate_gaps)
+
+
+def _lower_gap_cluster(gaps: list[float]) -> list[float]:
+    if not gaps:
+        return []
+    positive_gaps = [gap for gap in gaps if gap > 0]
+    if not positive_gaps:
+        return gaps
+    anchor = min(positive_gaps)
+    threshold = max(anchor * 1.8, anchor + 4.0)
+    return [gap for gap in gaps if gap <= threshold]
 
 
 def _display_gaps(
@@ -327,6 +345,23 @@ def _display_gaps(
     return gaps
 
 
+def _normal_gap_line_bboxes_by_page(
+    units: list[dict[str, Any]], page_layout_profile_map: dict[int, dict[str, Any]]
+) -> dict[int, list[list[float]]]:
+    grouped: dict[int, list[list[float]]] = {}
+    for unit in units:
+        if unit.get("unit_type") != "paragraph":
+            continue
+        page = int(unit["page"])
+        profile = page_layout_profile_map.get(page)
+        if not profile or profile.get("profile_source"):
+            continue
+        for bbox in _line_bboxes(unit):
+            if _is_normal_gap_reference_bbox(bbox, profile):
+                grouped.setdefault(page, []).append(bbox)
+    return grouped
+
+
 def _body_like_line_bboxes_by_page(
     units: list[dict[str, Any]], page_layout_profile_map: dict[int, dict[str, Any]]
 ) -> dict[int, list[list[float]]]:
@@ -344,6 +379,62 @@ def _body_like_line_bboxes_by_page(
     return grouped
 
 
+def _unit_layout_contexts(
+    units: list[dict[str, Any]], book_layout_profile: dict[str, Any]
+) -> dict[str, dict[str, float | bool]]:
+    threshold = _display_gap_threshold(book_layout_profile)
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for unit in units:
+        bbox = unit.get("bbox")
+        if unit.get("unit_type") == "paragraph" and _valid_bbox(bbox):
+            grouped.setdefault(int(unit["page"]), []).append(unit)
+
+    contexts: dict[str, dict[str, float | bool]] = {}
+    for page_units in grouped.values():
+        ordered = sorted(
+            page_units,
+            key=lambda unit: (
+                float(unit["bbox"][1]),
+                float(unit["bbox"][0]),
+                str(unit["unit_id"]),
+            ),
+        )
+        for index, unit in enumerate(ordered):
+            bbox = unit["bbox"]
+            context: dict[str, float | bool] = {
+                "display_gap_threshold": threshold,
+                "display_gap_before": False,
+                "display_gap_after": False,
+            }
+            if index > 0:
+                gap_before = float(bbox[1]) - float(ordered[index - 1]["bbox"][3])
+                context["gap_before"] = gap_before
+                context["display_gap_before"] = gap_before >= threshold
+            if index + 1 < len(ordered):
+                gap_after = float(ordered[index + 1]["bbox"][1]) - float(bbox[3])
+                context["gap_after"] = gap_after
+                context["display_gap_after"] = gap_after >= threshold
+            contexts[str(unit["unit_id"])] = context
+    return contexts
+
+
+def _display_gap_threshold(book_layout_profile: dict[str, Any]) -> float:
+    normal_gap = _float_or_none(book_layout_profile.get("normal_gap_y"))
+    if normal_gap is not None:
+        return max(normal_gap * 2.5, normal_gap + 18.0)
+    line_height = _float_or_none(book_layout_profile.get("line_height"))
+    if line_height is not None:
+        return max(24.0, line_height * 0.45)
+    return 24.0
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _is_body_like_bbox(bbox: list[float], profile: dict[str, Any]) -> bool:
     body_width = float(profile["body_width"])
     if body_width <= 0:
@@ -354,6 +445,19 @@ def _is_body_like_bbox(bbox: list[float], profile: dict[str, Any]) -> bool:
         _width(bbox) >= body_width * 0.70
         and left_delta <= max(24.0, body_width * 0.06)
         and right_delta <= max(32.0, body_width * 0.08)
+    )
+
+
+def _is_normal_gap_reference_bbox(bbox: list[float], profile: dict[str, Any]) -> bool:
+    body_width = float(profile["body_width"])
+    if body_width <= 0:
+        return False
+    left_delta = abs(float(bbox[0]) - float(profile["body_left"]))
+    right_delta = abs(float(bbox[2]) - float(profile["body_right"]))
+    return (
+        _width(bbox) >= body_width * 0.96
+        and left_delta <= max(12.0, body_width * 0.015)
+        and right_delta <= max(16.0, body_width * 0.02)
     )
 
 
@@ -487,6 +591,8 @@ def _unit_record(
     unit: dict[str, Any],
     page_layout_profile_map: dict[int, dict[str, Any]],
     page_sizes: dict[int, dict[str, float]],
+    book_layout_profile: dict[str, Any],
+    layout_context: dict[str, float | bool],
 ) -> dict[str, Any]:
     bbox = unit.get("bbox")
     base = {
@@ -553,15 +659,19 @@ def _unit_record(
             "alignment": short_line_group,
             "decision": "display_block",
         }
-    signals = _display_signals(bbox, profile)
+    signals = _display_signals(bbox, profile, book_layout_profile, layout_context)
     decision = "display_block" if _is_display_candidate(signals) else "paragraph"
-    return {
+    record = {
         **base,
         "classified_type": decision,
         **metrics,
         "signals": signals,
         "decision": decision,
     }
+    if decision == "display_block" and "right_aligned_attribution" in signals:
+        record["layout_form"] = "attribution"
+        record["alignment"] = "right"
+    return record
 
 
 def _is_caption_candidate(unit: dict[str, Any]) -> bool:
@@ -583,36 +693,101 @@ def _unit_metrics(bbox: list[float], profile: dict[str, Any]) -> dict[str, float
     }
 
 
-def _display_signals(bbox: list[float], profile: dict[str, float]) -> list[str]:
+def _display_signals(
+    bbox: list[float],
+    profile: dict[str, Any],
+    book_layout_profile: dict[str, Any],
+    layout_context: dict[str, float | bool],
+) -> list[str]:
     signals: list[str] = []
-    body_width = profile["body_width"]
-    left_inset = float(bbox[0]) - profile["body_left"]
-    right_inset = profile["body_right"] - float(bbox[2])
-    if _width(bbox) <= body_width * 0.72:
+    body_width = float(profile["body_width"])
+    body_left = float(profile["body_left"])
+    body_right = float(profile["body_right"])
+    width = _width(bbox)
+    left_inset = float(bbox[0]) - body_left
+    right_inset = body_right - float(bbox[2])
+    indent_unit = _profile_indent_unit(book_layout_profile, body_width)
+    if width <= body_width * 0.72:
         signals.append("narrower_than_body_lane")
     if left_inset >= body_width * 0.12 and right_inset >= body_width * 0.08:
         signals.append("inset_from_body_lane")
     elif (
-        _width(bbox) <= body_width * 0.96
+        width <= body_width * 0.96
         and left_inset >= body_width * 0.05
         and right_inset >= body_width * -0.03
     ):
         signals.append("left_inset_set_off_text")
     elif (
-        body_width * 0.94 <= _width(bbox) <= body_width * 0.98
+        body_width * 0.94 <= width <= body_width * 0.98
         and left_inset >= max(24.0, body_width * 0.03)
         and right_inset >= body_width * -0.03
         and _height(bbox) >= 80.0
     ):
         signals.append("slightly_inset_tall_block")
+    if _book_indent_set_off(bbox, body_width, left_inset, right_inset, indent_unit):
+        signals.append("book_indent_set_off_text")
+    if _right_aligned_attribution(bbox, body_left, body_right, body_width, indent_unit):
+        signals.append("right_aligned_attribution")
+    if layout_context.get("display_gap_before") is True:
+        signals.append("display_gap_before")
+    if layout_context.get("display_gap_after") is True:
+        signals.append("display_gap_after")
     return signals
 
 
-def _is_display_candidate(signals: list[str]) -> bool:
+def _profile_indent_unit(book_layout_profile: dict[str, Any], body_width: float) -> float:
+    indent_unit = _float_or_none(book_layout_profile.get("indent_unit"))
+    if indent_unit is not None and indent_unit > 0:
+        return indent_unit
+    return max(24.0, body_width * 0.04)
+
+
+def _book_indent_set_off(
+    bbox: list[float],
+    body_width: float,
+    left_inset: float,
+    right_inset: float,
+    indent_unit: float,
+) -> bool:
     return (
-        signals == ["narrower_than_body_lane", "inset_from_body_lane"]
-        or signals == ["left_inset_set_off_text"]
-        or signals == ["slightly_inset_tall_block"]
+        _width(bbox) <= body_width - indent_unit * 0.5
+        and left_inset >= max(12.0, indent_unit * 0.85)
+        and right_inset >= -indent_unit
+    )
+
+
+def _right_aligned_attribution(
+    bbox: list[float],
+    body_left: float,
+    body_right: float,
+    body_width: float,
+    indent_unit: float,
+) -> bool:
+    near_right = abs(float(bbox[2]) - body_right) <= max(24.0, indent_unit * 1.5)
+    compact = _width(bbox) <= body_width * 0.55
+    right_lane = float(bbox[0]) >= body_left + body_width * 0.40
+    return near_right and compact and right_lane
+
+
+def _is_display_candidate(signals: list[str]) -> bool:
+    has_gap_before = "display_gap_before" in signals
+    has_gap_after = "display_gap_after" in signals
+    has_any_display_gap = has_gap_before or has_gap_after
+    has_display_gap_pair = has_gap_before and has_gap_after
+    strong_inset = "narrower_than_body_lane" in signals and "inset_from_body_lane" in signals
+    right_aligned = "right_aligned_attribution" in signals
+    set_off_prose = any(
+        signal in signals
+        for signal in (
+            "left_inset_set_off_text",
+            "slightly_inset_tall_block",
+            "book_indent_set_off_text",
+        )
+    )
+    return (
+        (right_aligned and has_any_display_gap)
+        or (strong_inset and has_any_display_gap)
+        or (set_off_prose and has_display_gap_pair)
     )
 
 

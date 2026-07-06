@@ -268,10 +268,12 @@ ObservedDocument observations
 
 这一层的职责是把已经聚合好的正文候选，从 `paragraph` 中保守地区分出 `display_block`。它仍然只消费 parser-neutral 字段和版面关系，不读取文本含义：
 
-- 用同页 `paragraph` TextUnits 建立 page-local body lane。
-- 只在同页有足够 body lane 参考时分类。
-- 只把明显窄于 body lane、且左右都相对 body lane 内缩的 `paragraph` TextUnit 标记为 `display_block`。
-- 分类证据进入 node `attrs.layout_classification`，保留可审计 signals。
+- 先从全书稳定页中建立 `BookLayoutProfile`，记录 body lane 宽度、缩进单位、行高和正文 normal gap 基线。
+- 再为每页建立 `PageLayoutProfile`，记录该页 body lane 以及相对全书基线的扫描/裁切漂移。
+- `normal_gap_y` 只从接近正文左右边界的 full body references 中学习，display 候选不能反向污染正文间距基线。
+- display 判定使用相对几何组合，而不是单个 x/width 信号：`BookLayoutProfile` 缩进基线 + `PageLayoutProfile` 漂移修正 + 上下 display gap + right-aligned attribution + short-line-group。
+- 只有具备 display gap 或 short-line-group 等上下文证据时，缩进/宽度信号才会把 `paragraph` TextUnit 升格为 `display_block`；没有 display gap 的缩进正文行仍保持 `paragraph`。
+- 分类证据进入 internal/debug `attrs.layout_classification`，保留可审计 signals；public canonical 不暴露 profile 细节。
 - 单个孤立 TextUnit、`bbox = null` TextUnit、heading/list/footnote 不参与 display 分类。
 
 Phase 3.2 仍然不改变 v1 `canonical.json`、EPUB 或 RAG 默认消费路径。它只是让 observed shadow BookGraph 从“段落候选级 node”前进到“版面分类后的文本 node”。

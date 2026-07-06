@@ -37,6 +37,29 @@ def _document_with_pages(observations: list[dict], pages: list[dict]) -> dict:
     return make_observed_document(_metadata(), pages, observations)
 
 
+def _unit(
+    unit_id: str,
+    text: str,
+    bbox: list[float],
+    *,
+    page: int = 1,
+    attrs: dict | None = None,
+) -> dict:
+    return {
+        "unit_id": unit_id,
+        "unit_type": "paragraph",
+        "text": text,
+        "page": page,
+        "pages": [page],
+        "bbox": bbox,
+        "spans": [{"page": page, "bbox": bbox}],
+        "observation_ids": [unit_id.replace("tu", "obs")],
+        "role_hints": ["body_text"],
+        "attrs": attrs or {},
+        "parser_payloads": [],
+    }
+
+
 def test_adjacent_body_observations_merge_into_one_text_unit() -> None:
     document = _document(
         [
@@ -682,10 +705,11 @@ def test_layout_classifier_marks_inset_narrow_body_unit_as_display_block() -> No
         "paragraph",
     ]
     assert classified[1]["attrs"]["layout_role"] == "set_off"
-    assert classified[1]["attrs"]["layout_classification"]["signals"] == [
-        "narrower_than_body_lane",
-        "inset_from_body_lane",
-    ]
+    signals = classified[1]["attrs"]["layout_classification"]["signals"]
+    assert "narrower_than_body_lane" in signals
+    assert "inset_from_body_lane" in signals
+    assert "display_gap_before" in signals
+    assert "display_gap_after" in signals
 
 
 def test_layout_classifier_marks_right_aligned_short_line_group_as_display_block() -> None:
@@ -792,6 +816,149 @@ def test_layout_classifier_marks_left_inset_set_off_text_as_display_block() -> N
     assert classified[1]["text"] == "Set off quotation"
     assert classified[1]["attrs"]["layout_role"] == "set_off"
     assert "left_inset_set_off_text" in classified[1]["attrs"]["layout_classification"]["signals"]
+
+
+def test_layout_classifier_uses_book_indent_and_display_gap_for_slight_inset_prose() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body before",
+                page=1,
+                bbox=[100, 100, 900, 166],
+                spans=[
+                    {"page": 1, "bbox": [100, 100, 900, 130]},
+                    {"page": 1, "bbox": [100, 136, 900, 166]},
+                ],
+                role_hint="body_text",
+                attrs={
+                    "reading_order": 1,
+                    "text_line_metrics": {
+                        "line_count": 2,
+                        "first_line_indent": 20,
+                        "char_width": 10,
+                    },
+                },
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Slightly inset display prose",
+                page=1,
+                bbox=[122, 206, 900, 236],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Body after",
+                page=1,
+                bbox=[100, 276, 900, 306],
+                role_hint="body_text",
+                attrs={"reading_order": 3},
+            ),
+        ]
+    )
+    units, _ = build_text_units(document)
+
+    classified = classify_text_units_by_layout(units, document["pages"])
+    audit = audit_text_unit_layout(units, document["pages"])
+
+    assert [unit["unit_type"] for unit in classified] == [
+        "paragraph",
+        "display_block",
+        "paragraph",
+    ]
+    signals = classified[1]["attrs"]["layout_classification"]["signals"]
+    assert "book_indent_set_off_text" in signals
+    assert "display_gap_before" in signals
+    assert "display_gap_after" in signals
+    assert audit["book_layout_profile"]["indent_unit"] == 20.0
+    assert audit["book_layout_profile"]["normal_gap_y"] == 6.0
+
+
+def test_layout_classifier_marks_single_right_aligned_attribution_as_display_block() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body before",
+                page=1,
+                bbox=[100, 100, 900, 166],
+                spans=[
+                    {"page": 1, "bbox": [100, 100, 900, 130]},
+                    {"page": 1, "bbox": [100, 136, 900, 166]},
+                ],
+                role_hint="body_text",
+                attrs={
+                    "reading_order": 1,
+                    "text_line_metrics": {
+                        "line_count": 2,
+                        "first_line_indent": 20,
+                        "char_width": 10,
+                    },
+                },
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Right aligned attribution",
+                page=1,
+                bbox=[650, 206, 900, 236],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Body after",
+                page=1,
+                bbox=[100, 276, 900, 306],
+                role_hint="body_text",
+                attrs={"reading_order": 3},
+            ),
+        ]
+    )
+    units, _ = build_text_units(document)
+
+    classified = classify_text_units_by_layout(units, document["pages"])
+
+    assert [unit["unit_type"] for unit in classified] == [
+        "paragraph",
+        "display_block",
+        "paragraph",
+    ]
+    assert classified[1]["attrs"]["layout_form"] == "attribution"
+    assert classified[1]["attrs"]["alignment"] == "right"
+    assert "right_aligned_attribution" in classified[1]["attrs"]["layout_classification"]["signals"]
+
+
+def test_layout_classifier_keeps_inset_body_line_without_display_gap_as_paragraph() -> None:
+    units = [
+        _unit("tu000001", "Body before", [100, 100, 900, 130]),
+        _unit("tu000002", "Indented body line", [150, 136, 890, 166]),
+        _unit("tu000003", "Body after", [100, 172, 900, 202]),
+    ]
+
+    classified = classify_text_units_by_layout(
+        units,
+        [make_observed_page(1, width=1000, height=1000)],
+    )
+    audit = audit_text_unit_layout(units, [make_observed_page(1, width=1000, height=1000)])
+
+    assert [unit["unit_type"] for unit in classified] == [
+        "paragraph",
+        "paragraph",
+        "paragraph",
+    ]
+    assert "left_inset_set_off_text" in audit["unit_records"][1]["signals"]
+    assert "book_indent_set_off_text" in audit["unit_records"][1]["signals"]
+    assert "display_gap_before" not in audit["unit_records"][1]["signals"]
+    assert "display_gap_after" not in audit["unit_records"][1]["signals"]
+    assert audit["unit_records"][1]["decision"] == "paragraph"
 
 
 def test_layout_classifier_keeps_caption_candidates_out_of_display_blocks() -> None:
@@ -1537,7 +1704,13 @@ def test_layout_audit_reports_page_layout_profiles_and_candidate_signals_without
         "width_ratio": 0.5875,
         "left_inset": 160.0,
         "right_inset": 170.0,
-        "signals": ["narrower_than_body_lane", "inset_from_body_lane"],
+        "signals": [
+            "narrower_than_body_lane",
+            "inset_from_body_lane",
+            "book_indent_set_off_text",
+            "display_gap_before",
+            "display_gap_after",
+        ],
         "decision": "display_block",
     }
     assert "text" not in audit["unit_records"][1]

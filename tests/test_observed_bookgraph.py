@@ -510,10 +510,11 @@ def test_build_bookgraph_from_observed_uses_layout_classification() -> None:
     ]
     assert graph["nodes"][1]["attrs"]["layout_role"] == "set_off"
     internal = build_internal_canonical_from_observed(_inset_body_document())
-    assert internal["nodes"][1]["debug"]["attrs"]["layout_classification"]["signals"] == [
-        "narrower_than_body_lane",
-        "inset_from_body_lane",
-    ]
+    signals = internal["nodes"][1]["debug"]["attrs"]["layout_classification"]["signals"]
+    assert "narrower_than_body_lane" in signals
+    assert "inset_from_body_lane" in signals
+    assert "display_gap_before" in signals
+    assert "display_gap_after" in signals
 
 
 def test_build_bookgraph_from_observed_records_layout_audit_summary() -> None:
