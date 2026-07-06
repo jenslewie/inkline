@@ -522,22 +522,21 @@ def test_toc_llm_input_uses_toc_text_without_rule_roles() -> None:
         }
     ]
     assert input_data["toc_entries"] == [
-        {"entry_index": 0, "title": "前言", "printed_page": "1", "candidate_pages": [3]},
+        {"entry_index": 0, "title": "前言", "candidate_pages": [3]},
         {
             "entry_index": 1,
             "title": "第一章 千年王国的期待",
-            "printed_page": "25",
             "candidate_pages": [5],
         },
-        {"entry_index": 2, "title": "附录", "printed_page": "413", "candidate_pages": [8]},
+        {"entry_index": 2, "title": "附录", "candidate_pages": [8]},
         {
             "entry_index": 3,
             "title": "注释和参考书目",
-            "printed_page": "491",
             "candidate_pages": [9],
         },
-        {"entry_index": 4, "title": "索引", "printed_page": "568", "candidate_pages": [10]},
+        {"entry_index": 4, "title": "索引", "candidate_pages": [10]},
     ]
+    assert "printed_page" not in input_data["toc_entries"][0]
     assert "role" not in input_data["toc_entries"][0]
     assert input_data["expected_output"] == {
         "entry_roles": [
@@ -657,7 +656,7 @@ def test_toc_driven_skeleton_plan_skips_index_continuation_pages_before_residual
     ]
 
 
-def test_toc_driven_skeleton_plan_treats_named_gazetteer_as_back_matter_start() -> None:
+def test_toc_driven_skeleton_plan_does_not_force_named_gazetteer_to_back_matter() -> None:
     tool = _load_tool()
     assert "对照表" not in tool.BACK_MATTER_TITLE_KEYWORDS
     document = _document_with_pages(
@@ -688,12 +687,12 @@ def test_toc_driven_skeleton_plan_treats_named_gazetteer_as_back_matter_start() 
     plan = tool.build_toc_driven_skeleton_plan(document)
 
     located = {entry["title"]: entry for entry in plan["toc_entries"]}
-    assert located["丝绸之路主要地名中英古今对照表"]["role"] == "back_matter"
+    assert located["丝绸之路主要地名中英古今对照表"]["role"] == "body"
     assert located["丝绸之路主要地名中英古今对照表"]["candidate_pages"] == [317]
-    assert plan["back_matter_start_candidates"] == [317]
+    assert plan["back_matter_start_candidates"] == [321]
 
 
-def test_toc_driven_skeleton_plan_infers_missing_back_matter_pages_from_printed_offsets() -> None:
+def test_toc_driven_skeleton_plan_does_not_infer_pages_from_printed_offsets() -> None:
     tool = _load_tool()
     assert "关于日期的说明" not in tool.FRONT_MATTER_TITLE_KEYWORDS
     document = _document_with_pages(
@@ -743,10 +742,10 @@ def test_toc_driven_skeleton_plan_infers_missing_back_matter_pages_from_printed_
     assert located["关于日期的说明"]["role"] == "front_matter"
     assert located["第一部分 东亚三国"]["candidate_pages"] == [28]
     assert located["30 战争之后"]["role"] == "body"
-    assert located["参考书目"]["candidate_pages"] == [467]
-    assert located["注释"]["candidate_pages"] == [481]
+    assert located["参考书目"]["candidate_pages"] == []
+    assert located["注释"]["candidate_pages"] == []
     assert plan["body_start_candidates"][0] == 28
-    assert plan["back_matter_start_candidates"] == [467]
+    assert plan["back_matter_start_candidates"] == []
 
 
 def test_toc_driven_skeleton_plan_uses_unpaged_body_part_title_as_body_start() -> None:

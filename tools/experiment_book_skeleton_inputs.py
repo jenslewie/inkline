@@ -97,7 +97,6 @@ def build_toc_driven_skeleton_plan(document: dict[str, Any]) -> dict[str, Any]:
     entries = parse_toc_entries(toc_text)
     for entry in entries:
         entry["candidate_pages"] = locate_title_pages(package, entry["title"], exclude_pages=toc_pages)
-    _infer_missing_back_matter_pages_from_printed_offsets(entries, page_count=package["page_count"])
 
     first_body_entry = _first_body_entry(entries)
     body_start_candidates = (
@@ -105,13 +104,12 @@ def build_toc_driven_skeleton_plan(document: dict[str, Any]) -> dict[str, Any]:
         if first_body_entry is not None and first_body_entry.get("candidate_pages")
         else []
     )
-    all_back_matter_candidates = [
-        page
-        for entry in entries
-        if entry["role"] == "back_matter"
-        for page in entry.get("candidate_pages", [])[:1]
-    ]
-    back_matter_start_candidates = all_back_matter_candidates[:1]
+    first_back_entry = _first_back_matter_entry(entries)
+    back_matter_start_candidates = (
+        [int(first_back_entry["candidate_pages"][0])]
+        if first_back_entry is not None and first_back_entry.get("candidate_pages")
+        else []
+    )
     last_back_entry_page = _estimated_last_back_entry_end_page(package, entries)
     first_entry_page = _first_located_entry_page(entries)
     llm_page_tasks = _toc_driven_llm_page_tasks(
@@ -148,7 +146,6 @@ def build_toc_llm_input(document: dict[str, Any]) -> dict[str, Any]:
             {
                 "entry_index": index,
                 "title": entry["title"],
-                "printed_page": entry.get("printed_page"),
                 "candidate_pages": locate_title_pages(
                     package,
                     entry["title"],
@@ -284,15 +281,6 @@ def _apply_toc_sequence_roles(entries: list[dict[str, Any]]) -> None:
     if first_back_index is None:
         return
 
-    previous_index = first_back_index - 1
-    if (
-        first_body_index is not None
-        and previous_index > first_body_index
-        and entries[previous_index].get("_role_source") == "default"
-        and _should_bridge_tail_entry_to_back_matter(entries[previous_index], entries[first_back_index])
-    ):
-        entries[previous_index]["role"] = "back_matter"
-
     for entry in entries[first_back_index:]:
         entry["role"] = "back_matter"
 
@@ -310,16 +298,6 @@ def _first_entry_index(
 def _looks_like_body_toc_title(title: str) -> bool:
     stripped = title.strip()
     return BODY_TITLE_RE.match(stripped) is not None or NUMERIC_BODY_TITLE_RE.match(stripped) is not None
-
-
-def _should_bridge_tail_entry_to_back_matter(
-    previous_entry: dict[str, Any], back_entry: dict[str, Any]
-) -> bool:
-    previous_page = previous_entry.get("printed_page")
-    back_page = back_entry.get("printed_page")
-    if not (_is_decimal_page(previous_page) and _is_decimal_page(back_page)):
-        return False
-    return 0 < int(back_page) - int(previous_page) <= 8
 
 
 def locate_title_pages(
@@ -654,54 +632,6 @@ def _first_nonempty_line(text: str) -> str:
     return ""
 
 
-def _infer_missing_back_matter_pages_from_printed_offsets(
-    entries: list[dict[str, Any]], *, page_count: int
-) -> None:
-    anchors = [
-        (int(entry["printed_page"]), int(entry["candidate_pages"][0]))
-        for entry in entries
-        if entry.get("role") == "back_matter"
-        and _is_decimal_page(entry.get("printed_page"))
-        and entry.get("candidate_pages")
-    ]
-    if not anchors:
-        return
-    for entry in entries:
-        if entry.get("role") != "back_matter" or entry.get("candidate_pages"):
-            continue
-        if not _is_decimal_page(entry.get("printed_page")):
-            continue
-        printed_page = int(entry["printed_page"])
-        anchor = _nearest_following_anchor(printed_page, anchors) or _nearest_anchor(
-            printed_page, anchors
-        )
-        if anchor is None:
-            continue
-        anchor_printed_page, anchor_physical_page = anchor
-        inferred_page = printed_page + (anchor_physical_page - anchor_printed_page)
-        if 1 <= inferred_page <= page_count:
-            entry["candidate_pages"] = [inferred_page]
-
-
-def _is_decimal_page(value: Any) -> bool:
-    return isinstance(value, str) and value.isdecimal()
-
-
-def _nearest_following_anchor(
-    printed_page: int, anchors: list[tuple[int, int]]
-) -> tuple[int, int] | None:
-    following = [anchor for anchor in anchors if anchor[0] >= printed_page]
-    if not following:
-        return None
-    return min(following, key=lambda anchor: anchor[0] - printed_page)
-
-
-def _nearest_anchor(printed_page: int, anchors: list[tuple[int, int]]) -> tuple[int, int] | None:
-    if not anchors:
-        return None
-    return min(anchors, key=lambda anchor: abs(anchor[0] - printed_page))
-
-
 def _last_located_entry_page(entries: list[dict[str, Any]], *, role: str) -> int | None:
     pages = [
         int(entry["candidate_pages"][0])
@@ -800,6 +730,13 @@ def _toc_driven_llm_page_tasks(
 def _first_body_entry(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
     for entry in entries:
         if entry.get("role") == "body" and entry.get("candidate_pages"):
+            return entry
+    return None
+
+
+def _first_back_matter_entry(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for entry in entries:
+        if entry.get("role") == "back_matter":
             return entry
     return None
 
