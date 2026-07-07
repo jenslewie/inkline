@@ -1,6 +1,7 @@
 from inkline.canonical.book_skeleton import (
     BOOK_SKELETON_SCHEMA_NAME,
     BOOK_SKELETON_SCHEMA_VERSION,
+    audit_book_skeleton,
     book_skeleton_toc_llm_prompt,
     build_book_skeleton_from_observed,
     build_book_skeleton_toc_llm_input,
@@ -79,6 +80,7 @@ __all__ = [
     "MigrationError",
     "NoteRef",
     "ValidationError",
+    "audit_book_skeleton",
     "audit_bookgraph",
     "audit_bookgraph_notes",
     "audit_text_unit_layout",

@@ -5,6 +5,7 @@ import pytest
 from inkline.canonical import (
     BOOK_SKELETON_SCHEMA_NAME,
     BOOK_SKELETON_SCHEMA_VERSION,
+    audit_book_skeleton,
     build_book_skeleton_from_observed,
     make_observation,
     make_observed_document,
@@ -427,6 +428,125 @@ def test_build_book_skeleton_from_observed_downranks_footnote_heavy_title_matche
     assert entry["selected_start_page"] == 483
 
 
+def test_build_book_skeleton_from_observed_selects_monotonic_start_pages() -> None:
+    pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 540)]
+    document = make_observed_document(
+        {
+            "doc_id": "millennium",
+            "title": "追寻千禧年",
+            "language": "zh-CN",
+            "source_file": "millennium.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        pages,
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text=(
+                    "目录\n第一章 启示预言的传统 1\n中世纪欧洲的启示文学传统 17\n"
+                    "第二章 宗教异议的传统 28"
+                ),
+                page=9,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="第一章 启示预言的传统",
+                page=25,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="中世纪欧洲的启示文学传统",
+                page=41,
+                role_hint="body_text",
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="中世纪欧洲的启示文学传统",
+                page=493,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000005",
+                "text_region",
+                text="第二章 宗教异议的传统",
+                page=52,
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+    entries = {entry["title"]: entry for entry in skeleton["toc_entries"]}
+
+    assert entries["中世纪欧洲的启示文学传统"]["candidate_start_pages"] == [493, 41]
+    assert entries["中世纪欧洲的启示文学传统"]["selected_start_page"] == 41
+
+
+def test_build_book_skeleton_from_observed_preserves_local_best_when_order_allows() -> None:
+    pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 60)]
+    document = make_observed_document(
+        {
+            "doc_id": "agincourt",
+            "title": "阿金库尔战役",
+            "language": "zh-CN",
+            "source_file": "agincourt.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        pages,
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\n2015年版序言 1\n序言 13\n第一章 正当继承权 31",
+                page=33,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="2015年版序言",
+                page=9,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="序言",
+                page=21,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="2015年版序言",
+                page=9,
+                role_hint="body_text",
+            ),
+            make_observation(
+                "obs000005",
+                "text_region",
+                text="第一章 正当继承权",
+                page=41,
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+    entries = {entry["title"]: entry for entry in skeleton["toc_entries"]}
+
+    assert entries["序言"]["candidate_start_pages"] == [21, 9]
+    assert entries["序言"]["selected_start_page"] == 21
+
+
 def test_validate_book_skeleton_rejects_invalid_entry_role() -> None:
     skeleton = build_book_skeleton_from_observed(_document())
     skeleton["toc_entries"][0]["role"] = "cover"
@@ -454,3 +574,54 @@ def test_validate_book_skeleton_rejects_unlocated_glued_toc_title() -> None:
 
     with pytest.raises(ValidationError, match="glued TOC"):
         validate_book_skeleton(skeleton)
+
+
+def test_validate_book_skeleton_rejects_selected_start_page_outside_candidates() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+    skeleton["toc_entries"][0]["candidate_start_pages"] = [5]
+    skeleton["toc_entries"][0]["selected_start_page"] = 99
+
+    with pytest.raises(ValidationError, match="selected_start_page"):
+        validate_book_skeleton(skeleton)
+
+
+def test_validate_book_skeleton_rejects_non_contiguous_entry_roles() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+    skeleton["toc_entries"][0]["role"] = "front_matter"
+    skeleton["toc_entries"][1]["role"] = "body"
+    skeleton["toc_entries"][2]["role"] = "back_matter"
+    skeleton["toc_entries"][3]["role"] = "body"
+
+    with pytest.raises(ValidationError, match="contiguous"):
+        validate_book_skeleton(skeleton)
+
+
+def test_audit_book_skeleton_reports_entry_level_quality_issues() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+    skeleton["toc_entries"][0]["candidate_start_pages"] = []
+    skeleton["toc_entries"][0]["selected_start_page"] = None
+    skeleton["toc_entries"][1]["selected_start_page"] = 999
+    skeleton["toc_entries"][2]["role"] = "back_matter"
+    skeleton["toc_entries"][3]["role"] = "body"
+
+    audit = audit_book_skeleton(skeleton)
+
+    assert audit["summary"]["toc_entry_count"] == len(skeleton["toc_entries"])
+    assert audit["summary"]["issue_count"] == 4
+    assert {
+        issue["issue_type"]
+        for issue in audit["issues"]
+    } == {
+        "unlocated_entry",
+        "selected_start_page_not_in_candidates",
+        "non_monotonic_selected_start_page",
+        "roles_not_contiguous",
+    }
+
+
+def test_audit_book_skeleton_reports_clean_summary_for_valid_skeleton() -> None:
+    audit = audit_book_skeleton(build_book_skeleton_from_observed(_document()))
+
+    assert audit["summary"]["issue_count"] == 0
+    assert audit["summary"]["unlocated_entry_count"] == 0
+    assert audit["issues"] == []

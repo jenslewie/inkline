@@ -13,6 +13,7 @@ BOOK_SKELETON_SCHEMA_NAME = "inkline_book_skeleton"
 BOOK_SKELETON_SCHEMA_VERSION = "0.1-shadow"
 
 BOOK_SKELETON_ENTRY_ROLES = {"front_matter", "body", "back_matter", "unknown"}
+BOOK_SKELETON_ENTRY_ROLE_ORDER = {"front_matter": 0, "body": 1, "back_matter": 2}
 
 TEXT_KINDS = {"text_region", "footnote_region", "page_marker"}
 TITLE_LOCATION_ROLE_HINTS = {"title_text", "body_text", "list_text", "unknown"}
@@ -89,7 +90,7 @@ def build_book_skeleton_from_observed(
     for entry in entries:
         candidates = _locate_title_pages(page_records, entry["title"], exclude_pages=toc_pages)
         entry["candidate_start_pages"] = candidates
-        entry["selected_start_page"] = candidates[0] if candidates else None
+        entry["selected_start_page"] = None
     _apply_structural_roles(entries)
     llm_summary = _apply_llm_classification(
         entries,
@@ -97,6 +98,7 @@ def build_book_skeleton_from_observed(
         llm_model=llm_model,
         llm_source=llm_source,
     )
+    _select_monotonic_start_pages(entries)
     skeleton = {
         "metadata": _metadata(document),
         "toc_pages": toc_pages,
@@ -172,6 +174,26 @@ def validate_book_skeleton(skeleton: dict[str, Any]) -> None:
     _validate_toc_entries(skeleton["toc_entries"])
     _validate_boundaries(skeleton["boundaries"], len(skeleton["toc_entries"]))
     _validate_llm(skeleton["llm"])
+
+
+def audit_book_skeleton(skeleton: dict[str, Any]) -> dict[str, Any]:
+    entries = [entry for entry in skeleton.get("toc_entries", []) if isinstance(entry, dict)]
+    issues = _audit_toc_entry_issues(entries)
+    role_counts = Counter(str(entry.get("role") or "") for entry in entries)
+    located_count = sum(
+        1 for entry in entries if isinstance(entry.get("selected_start_page"), int)
+    )
+    return {
+        "summary": {
+            "toc_entry_count": len(entries),
+            "located_entry_count": located_count,
+            "unlocated_entry_count": len(entries) - located_count,
+            "issue_count": len(issues),
+            "role_counts": dict(role_counts),
+            "boundaries": deepcopy(skeleton.get("boundaries") or {}),
+        },
+        "issues": issues,
+    }
 
 
 def _metadata(document: dict[str, Any]) -> dict[str, Any]:
@@ -394,6 +416,43 @@ def _apply_llm_classification(
     }
 
 
+def _select_monotonic_start_pages(entries: list[dict[str, Any]]) -> None:
+    selections = _choose_monotonic_start_pages(
+        [entry["candidate_start_pages"] for entry in entries]
+    )
+    for entry, selected_start_page in zip(entries, selections, strict=True):
+        entry["selected_start_page"] = selected_start_page
+
+
+def _choose_monotonic_start_pages(candidate_lists: list[list[int]]) -> list[int | None]:
+    states: dict[int | None, tuple[int, list[int | None]]] = {None: (0, [])}
+    for candidates in candidate_lists:
+        if not candidates:
+            states = {
+                last_page: (cost, [*path, None])
+                for last_page, (cost, path) in states.items()
+            }
+            continue
+        next_states: dict[int, tuple[int, list[int | None]]] = {}
+        for last_page, (cost, path) in states.items():
+            for rank, candidate in enumerate(candidates):
+                if last_page is not None and candidate < last_page:
+                    continue
+                new_cost = cost + rank
+                existing = next_states.get(candidate)
+                if existing is None or new_cost < existing[0]:
+                    next_states[candidate] = (new_cost, [*path, candidate])
+        if not next_states:
+            return _choose_local_best_start_pages(candidate_lists)
+        states = next_states
+    _last_page, (_cost, path) = min(states.items(), key=lambda item: (item[1][0], item[0] or 0))
+    return path
+
+
+def _choose_local_best_start_pages(candidate_lists: list[list[int]]) -> list[int | None]:
+    return [candidates[0] if candidates else None for candidates in candidate_lists]
+
+
 def _boundaries(
     entries: list[dict[str, Any]], *, llm_classification: dict[str, Any] | None
 ) -> dict[str, int | None]:
@@ -607,39 +666,139 @@ def _validate_toc_pages(toc_pages: list[Any]) -> None:
 
 def _validate_toc_entries(entries: list[dict[str, Any]]) -> None:
     seen: set[int] = set()
+    previous_known_role_rank = -1
     for index, entry in enumerate(entries):
-        if not isinstance(entry, dict):
-            raise ValidationError(f"toc_entries[{index}] must be object")
-        for field, expected_type in REQUIRED_ENTRY_FIELDS.items():
-            value = entry.get(field)
-            if not isinstance(value, expected_type):
-                raise ValidationError(f"toc_entries[{index}].{field} is invalid")
-        entry_index = entry["entry_index"]
-        if entry_index in seen:
-            raise ValidationError(f"duplicate toc entry index: {entry_index}")
-        if entry_index != index:
-            raise ValidationError(f"toc_entries[{index}].entry_index must equal list index")
-        seen.add(entry_index)
-        if entry["role"] not in BOOK_SKELETON_ENTRY_ROLES:
-            raise ValidationError(f"toc_entries[{index}].role is invalid: {entry['role']}")
-        if "candidate_pages" in entry:
-            raise ValidationError(
-                f"toc_entries[{index}].candidate_pages is ambiguous; use candidate_start_pages"
-            )
-        if "selected_page" in entry:
-            raise ValidationError(
-                f"toc_entries[{index}].selected_page is ambiguous; use selected_start_page"
-            )
-        if not all(isinstance(page, int) for page in entry["candidate_start_pages"]):
-            raise ValidationError(
-                f"toc_entries[{index}].candidate_start_pages must contain integers"
-            )
-        if not entry["candidate_start_pages"] and _looks_like_glued_toc_title(entry["title"]):
-            raise ValidationError(f"toc_entries[{index}].title looks like glued TOC entries")
+        _validate_toc_entry_shape(entry, index, seen)
+        _validate_toc_entry_pages(entry, index)
+        previous_known_role_rank = _validate_toc_entry_role_order(
+            entry, previous_known_role_rank
+        )
+
+
+def _validate_toc_entry_shape(
+    entry: dict[str, Any], index: int, seen: set[int]
+) -> None:
+    if not isinstance(entry, dict):
+        raise ValidationError(f"toc_entries[{index}] must be object")
+    for field, expected_type in REQUIRED_ENTRY_FIELDS.items():
+        value = entry.get(field)
+        if not isinstance(value, expected_type):
+            raise ValidationError(f"toc_entries[{index}].{field} is invalid")
+    entry_index = entry["entry_index"]
+    if entry_index in seen:
+        raise ValidationError(f"duplicate toc entry index: {entry_index}")
+    if entry_index != index:
+        raise ValidationError(f"toc_entries[{index}].entry_index must equal list index")
+    seen.add(entry_index)
+    if entry["role"] not in BOOK_SKELETON_ENTRY_ROLES:
+        raise ValidationError(f"toc_entries[{index}].role is invalid: {entry['role']}")
+    if "candidate_pages" in entry:
+        raise ValidationError(
+            f"toc_entries[{index}].candidate_pages is ambiguous; use candidate_start_pages"
+        )
+    if "selected_page" in entry:
+        raise ValidationError(
+            f"toc_entries[{index}].selected_page is ambiguous; use selected_start_page"
+        )
+
+
+def _validate_toc_entry_pages(entry: dict[str, Any], index: int) -> None:
+    candidate_start_pages = entry["candidate_start_pages"]
+    if not all(isinstance(page, int) for page in candidate_start_pages):
+        raise ValidationError(f"toc_entries[{index}].candidate_start_pages must contain integers")
+    selected_start_page = entry["selected_start_page"]
+    if selected_start_page is not None and selected_start_page not in candidate_start_pages:
+        raise ValidationError(
+            f"toc_entries[{index}].selected_start_page must be one of candidate_start_pages"
+        )
+    if not candidate_start_pages and _looks_like_glued_toc_title(entry["title"]):
+        raise ValidationError(f"toc_entries[{index}].title looks like glued TOC entries")
+
+
+def _validate_toc_entry_role_order(
+    entry: dict[str, Any], previous_known_role_rank: int
+) -> int:
+    role_rank = BOOK_SKELETON_ENTRY_ROLE_ORDER.get(entry["role"])
+    if role_rank is None:
+        return previous_known_role_rank
+    if role_rank < previous_known_role_rank:
+        raise ValidationError("toc_entries roles must be contiguous")
+    return role_rank
 
 
 def _looks_like_glued_toc_title(title: str) -> bool:
     return len(title) >= 40 and len(list(TOC_ENTRY_PART_RE.finditer(title))) >= 2
+
+
+def _audit_toc_entry_issues(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    previous_selected_start_page: int | None = None
+    previous_known_role_rank = -1
+    for index, entry in enumerate(entries):
+        entry_index = entry.get("entry_index", index)
+        title = str(entry.get("title") or "")
+        candidate_start_pages = entry.get("candidate_start_pages")
+        if not isinstance(candidate_start_pages, list):
+            candidate_start_pages = []
+        selected_start_page = entry.get("selected_start_page")
+        if not candidate_start_pages:
+            issues.append(
+                _toc_entry_issue(
+                    "unlocated_entry",
+                    entry_index=entry_index,
+                    title=title,
+                    message="TOC entry has no located physical start page.",
+                )
+            )
+        if selected_start_page is not None and selected_start_page not in candidate_start_pages:
+            issues.append(
+                _toc_entry_issue(
+                    "selected_start_page_not_in_candidates",
+                    entry_index=entry_index,
+                    title=title,
+                    message="selected_start_page is not present in candidate_start_pages.",
+                )
+            )
+        if (
+            isinstance(selected_start_page, int)
+            and previous_selected_start_page is not None
+            and selected_start_page < previous_selected_start_page
+        ):
+            issues.append(
+                _toc_entry_issue(
+                    "non_monotonic_selected_start_page",
+                    entry_index=entry_index,
+                    title=title,
+                    message="selected_start_page moves backwards from the previous located TOC entry.",
+                )
+            )
+        if isinstance(selected_start_page, int):
+            previous_selected_start_page = selected_start_page
+        role_rank = BOOK_SKELETON_ENTRY_ROLE_ORDER.get(str(entry.get("role") or ""))
+        if role_rank is not None:
+            if role_rank < previous_known_role_rank:
+                issues.append(
+                    _toc_entry_issue(
+                        "roles_not_contiguous",
+                        entry_index=entry_index,
+                        title=title,
+                        message="Known TOC roles must progress front_matter -> body -> back_matter.",
+                    )
+                )
+            previous_known_role_rank = role_rank
+    return issues
+
+
+def _toc_entry_issue(
+    issue_type: str, *, entry_index: Any, title: str, message: str
+) -> dict[str, Any]:
+    return {
+        "severity": "warning",
+        "issue_type": issue_type,
+        "entry_index": entry_index,
+        "title": title,
+        "message": message,
+    }
 
 
 def _validate_boundaries(boundaries: dict[str, Any], entry_count: int) -> None:
