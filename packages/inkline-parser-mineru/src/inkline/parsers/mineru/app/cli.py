@@ -18,7 +18,7 @@ from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_OLLAMA_KEEP_ALIVE, DEFA
 
 from ..analysis.note_gap_report import write_note_ref_gap_report
 from ..bridge import find_mineru_run_version_info, get_mineru_version_info
-from ..extraction.io import load_inputs
+from ..extraction.io import load_inputs, load_json
 from ..normalize.assets import materialize_image_assets
 from ..normalize.bookgraph_shadow import build_bookgraph_shadow
 from ..normalize.core import (
@@ -165,6 +165,7 @@ def main() -> None:
     args.mineru_vl_utils_version = version_info.get("mineru_vl_utils_version")
     args.vlm_model = version_info.get("vlm_model")
     pages, page_sizes = load_inputs(args)
+    args._middle = load_json(args.middle)
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -208,6 +209,7 @@ def _write_observed_shadow_outputs(args, pages, page_sizes, canonical) -> None:
         page_sizes=page_sizes,
         metadata=canonical["metadata"],
         assets=canonical.get("assets") or {},
+        middle=getattr(args, "_middle", None),
         source_pdf=args.source_pdf,
         allow_missing_pdf_text=args.allow_missing_pdf_text,
     )

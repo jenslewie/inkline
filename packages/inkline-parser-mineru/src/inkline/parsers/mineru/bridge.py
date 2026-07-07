@@ -105,7 +105,7 @@ def normalize_mineru_outputs(
     """
 
     from inkline.parsers.mineru.analysis.note_gap_report import write_note_ref_gap_report
-    from inkline.parsers.mineru.extraction.io import load_inputs
+    from inkline.parsers.mineru.extraction.io import load_inputs, load_json
     from inkline.parsers.mineru.normalize.assets import materialize_image_assets
     from inkline.parsers.mineru.normalize.core import (
         _normalize_qwen_evidence_paths,
@@ -153,6 +153,7 @@ def normalize_mineru_outputs(
         vlm_model=vlm_model,
     )
     pages, page_sizes = load_inputs(args)
+    args._middle = load_json(args.middle)
     canonical = build_canonical(pages, page_sizes, args)
     out = Path(output)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -174,6 +175,7 @@ def normalize_mineru_outputs(
         canonical,
         args.source_pdf,
         args.allow_missing_pdf_text,
+        args._middle,
         args.observed_output,
         args.bookgraph_from_observed_output,
         args.internal_canonical_output,
@@ -390,6 +392,7 @@ def _write_observed_shadow_if_requested(
     canonical: dict[str, Any],
     source_pdf: str | Path | None,
     allow_missing_pdf_text: bool,
+    middle: Any | None,
     observed_output: str | Path | None,
     bookgraph_from_observed_output: str | Path | None,
     internal_canonical_output: str | Path | None,
@@ -405,6 +408,7 @@ def _write_observed_shadow_if_requested(
         page_sizes=page_sizes,
         metadata=canonical["metadata"],
         assets=canonical.get("assets") or {},
+        middle=middle,
         source_pdf=str(source_pdf) if source_pdf else None,
         allow_missing_pdf_text=allow_missing_pdf_text,
     )

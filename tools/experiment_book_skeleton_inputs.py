@@ -222,7 +222,6 @@ def parse_toc_entries(text: str) -> list[dict[str, Any]]:
                 entries.append(
                     {
                         "title": structural_title,
-                        "printed_page": None,
                         "role": classify_toc_entry_role(structural_title),
                         "_role_source": _toc_entry_role_source(structural_title),
                     }
@@ -236,7 +235,6 @@ def parse_toc_entries(text: str) -> list[dict[str, Any]]:
         entries.append(
             {
                 "title": title,
-                "printed_page": match.group("page"),
                 "role": classify_toc_entry_role(title),
                 "_role_source": _toc_entry_role_source(title),
             }
@@ -312,7 +310,12 @@ def locate_title_pages(
         page = int(record["page"])
         if page in excluded:
             continue
-        text = str(record.get("content_text_snippet") or record.get("text_snippet") or "")
+        text = str(
+            record.get("title_text_snippet")
+            or record.get("content_text_snippet")
+            or record.get("text_snippet")
+            or ""
+        )
         page_key = _normalize_title(text)
         if title_key and title_key in page_key:
             candidates.append((page, _title_location_score(record, title_key, text, page_key)))
@@ -613,7 +616,7 @@ def _title_location_score(
     if role_hint_counts.get("title_text", 0) > 0:
         score += 0.5
     if role_hint_counts.get("reference_text", 0) > 0:
-        score -= 1.5
+        score -= 3.0
     if page_key.startswith(title_key):
         score += 1.5
     first_line = _normalize_title(_first_nonempty_line(text))
@@ -803,6 +806,7 @@ def _page_record(
         "visual_area_ratio": round(_area_ratio(visual_observations, page_area), 4),
         "text_snippet": _page_text_snippet(text_observations),
         "content_text_snippet": _page_text_snippet(_content_text_observations(text_observations)),
+        "title_text_snippet": _page_text_snippet(_role_hint_observations(text_observations, "title_text")),
         "signals": sorted(set(signals)),
     }
 
@@ -855,6 +859,16 @@ def _content_text_observations(text_observations: list[dict[str, Any]]) -> list[
         observation
         for observation in text_observations
         if observation.get("kind") != "page_marker"
+    ]
+
+
+def _role_hint_observations(
+    text_observations: list[dict[str, Any]], role_hint: str
+) -> list[dict[str, Any]]:
+    return [
+        observation
+        for observation in text_observations
+        if observation.get("role_hint") == role_hint
     ]
 
 

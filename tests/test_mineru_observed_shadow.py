@@ -119,3 +119,131 @@ def test_build_observed_document_shadow_does_not_map_late_mineru_index_to_toc_hi
     assert observation["role_hint"] == "unknown"
     assert observation["parser_payload"]["raw_type"] == "index"
     assert "raw_type" not in observation
+
+
+def test_build_observed_document_shadow_adds_middle_title_observation_with_physical_page() -> None:
+    middle = {
+        "pdf_info": [
+            {},
+            {
+                "page_idx": 466,
+                "para_blocks": [
+                    {
+                        "type": "title",
+                        "bbox": [187, 129, 257, 149],
+                        "lines": [
+                            {
+                                "spans": [
+                                    {
+                                        "type": "text",
+                                        "content": "参考书目",
+                                        "bbox": [187, 129, 257, 149],
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]
+    }
+
+    document = build_observed_document_shadow(
+        pages={467: []},
+        page_sizes={467: (1000, 1000)},
+        metadata=_metadata(),
+        middle=middle,
+    )
+
+    validate_observed_document(document)
+    observation = document["observations"][0]
+    assert observation["kind"] == "text_region"
+    assert observation["text"] == "参考书目"
+    assert observation["page"] == 467
+    assert observation["bbox"] == [187, 129, 257, 149]
+    assert observation["role_hint"] == "title_text"
+    assert observation["parser_payload"]["raw_type"] == "title"
+    assert observation["parser_payload"]["source"] == "mineru_middle"
+    assert observation["parser_payload"]["page_idx"] == 466
+
+
+def test_build_observed_document_shadow_deduplicates_middle_title_observation() -> None:
+    middle = {
+        "pdf_info": [
+            {
+                "page_idx": 0,
+                "para_blocks": [
+                    {
+                        "type": "title",
+                        "bbox": [10, 20, 200, 50],
+                        "lines": [{"spans": [{"type": "text", "content": "Chapter"}]}],
+                    }
+                ],
+            }
+        ]
+    }
+
+    document = build_observed_document_shadow(
+        pages={1: [_raw("title", "Chapter", [10, 20, 200, 50], page=1, index=1)]},
+        page_sizes={1: (1000, 1000)},
+        metadata=_metadata(),
+        middle=middle,
+    )
+
+    assert [observation["text"] for observation in document["observations"]] == ["Chapter"]
+    assert document["observations"][0]["parser_payload"]["middle_title_sources"][0]["page_idx"] == 0
+
+
+def test_build_observed_document_shadow_deduplicates_middle_title_by_page_and_text() -> None:
+    middle = {
+        "pdf_info": [
+            {
+                "page_idx": 0,
+                "para_blocks": [
+                    {
+                        "type": "title",
+                        "bbox": [10, 20, 200, 50],
+                        "lines": [{"spans": [{"type": "text", "content": "Chapter"}]}],
+                    }
+                ],
+            }
+        ]
+    }
+
+    document = build_observed_document_shadow(
+        pages={1: [_raw("title", "Chapter", [20, 30, 210, 60], page=1, index=1)]},
+        page_sizes={1: (1000, 1000)},
+        metadata=_metadata(),
+        middle=middle,
+    )
+
+    assert [observation["text"] for observation in document["observations"]] == ["Chapter"]
+    middle_sources = document["observations"][0]["parser_payload"]["middle_title_sources"]
+    assert middle_sources[0]["source"] == "mineru_middle"
+    assert middle_sources[0]["bbox"] == [10, 20, 200, 50]
+
+
+def test_build_observed_document_shadow_deduplicates_middle_title_collections() -> None:
+    middle_title = {
+        "type": "title",
+        "bbox": [10, 20, 200, 50],
+        "lines": [{"spans": [{"type": "text", "content": "Chapter"}]}],
+    }
+    middle = {
+        "pdf_info": [
+            {
+                "page_idx": 0,
+                "para_blocks": [middle_title],
+                "preproc_blocks": [middle_title],
+            }
+        ]
+    }
+
+    document = build_observed_document_shadow(
+        pages={1: []},
+        page_sizes={1: (1000, 1000)},
+        metadata=_metadata(),
+        middle=middle,
+    )
+
+    assert [observation["text"] for observation in document["observations"]] == ["Chapter"]

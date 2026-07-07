@@ -412,11 +412,11 @@ def test_parse_toc_entries_extracts_titles_and_roles() -> None:
     entries = tool.parse_toc_entries(toc_text)
 
     assert entries == [
-        {"title": "前言", "printed_page": "1", "role": "front_matter"},
-        {"title": "第一章 千年王国的期待", "printed_page": "25", "role": "body"},
-        {"title": "附录", "printed_page": "413", "role": "back_matter"},
-        {"title": "注释和参考书目", "printed_page": "491", "role": "back_matter"},
-        {"title": "索引", "printed_page": "568", "role": "back_matter"},
+        {"title": "前言", "role": "front_matter"},
+        {"title": "第一章 千年王国的期待", "role": "body"},
+        {"title": "附录", "role": "back_matter"},
+        {"title": "注释和参考书目", "role": "back_matter"},
+        {"title": "索引", "role": "back_matter"},
     ]
 
 
@@ -427,7 +427,7 @@ def test_parse_toc_entries_ignores_standalone_page_labels_and_publication_noise(
     entries = tool.parse_toc_entries(toc_text)
 
     assert entries == [
-        {"title": "第一章 正文", "printed_page": "7", "role": "body"},
+        {"title": "第一章 正文", "role": "body"},
     ]
 
 
@@ -438,13 +438,12 @@ def test_parse_toc_entries_joins_wrapped_title_lines() -> None:
     entries = tool.parse_toc_entries(toc_text)
 
     assert entries == [
-        {"title": "结论", "printed_page": "373", "role": "body"},
+        {"title": "结论", "role": "body"},
         {
             "title": "附录 克伦威尔时期英格兰的自由灵：浮嚣派 与他们的文献",
-            "printed_page": "381",
             "role": "back_matter",
         },
-        {"title": "注释", "printed_page": "460", "role": "back_matter"},
+        {"title": "注释", "role": "back_matter"},
     ]
 
 
@@ -613,6 +612,44 @@ def test_locate_title_pages_handles_title_split_across_leading_lines() -> None:
     package = tool.build_skeleton_evidence_package(document)
 
     assert tool.locate_title_pages(package, title, exclude_pages=[1])[:2] == [3, 7]
+
+
+def test_locate_title_pages_uses_title_hint_even_when_page_snippet_starts_with_references() -> None:
+    tool = _load_tool()
+    document = _document_with_pages(
+        doc_id="title-after-references",
+        page_count=2,
+        observations=[
+            make_observation(
+                "toc",
+                "text_region",
+                text="目录\n参考书目 441",
+                page=1,
+                bbox=[40, 80, 360, 500],
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "refs",
+                "text_region",
+                text="Cory, Ralph. Some Notes on Korea. " * 20,
+                page=2,
+                bbox=[40, 80, 360, 500],
+                role_hint="reference_text",
+            ),
+            make_observation(
+                "title",
+                "text_region",
+                text="参考书目",
+                page=2,
+                bbox=[160, 50, 240, 70],
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    package = tool.build_skeleton_evidence_package(document)
+
+    assert tool.locate_title_pages(package, "参考书目", exclude_pages=[1]) == [2]
 
 
 def test_toc_llm_input_uses_toc_text_without_rule_roles() -> None:
