@@ -508,6 +508,113 @@ def test_build_toc_driven_skeleton_plan_locates_entry_pages_and_residuals() -> N
     ]
 
 
+def test_locate_title_pages_prefers_content_title_over_running_header() -> None:
+    tool = _load_tool()
+    title = "附录 克伦威尔时期英格兰的自由灵：浮嚣派与他们的文献"
+    document = _document_with_pages(
+        doc_id="running-header-title",
+        page_count=6,
+        observations=[
+            make_observation(
+                "toc",
+                "text_region",
+                text=f"目录\n第一章 正文 1\n{title} 381",
+                page=1,
+                bbox=[40, 80, 360, 500],
+                role_hint="toc_text",
+            ),
+            make_observation("body", "text_region", text="第一章 正文", page=2, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "appendix-title",
+                "text_region",
+                text=f"{title}*\n附录正文开始。",
+                page=3,
+                bbox=[90, 110, 360, 500],
+            ),
+            make_observation("running-header", "page_marker", text=title, page=5, bbox=[90, 40, 360, 60]),
+            make_observation("printed-page", "page_marker", text="/385", page=5, bbox=[365, 40, 390, 60]),
+            make_observation("continued", "text_region", text="附录正文续页。", page=5, bbox=[40, 80, 360, 500]),
+        ],
+    )
+
+    package = tool.build_skeleton_evidence_package(document)
+
+    assert tool.locate_title_pages(package, title, exclude_pages=[1])[:2] == [3]
+
+
+def test_locate_title_pages_prefers_first_section_title_over_later_note_heading() -> None:
+    tool = _load_tool()
+    title = "附录 克伦威尔时期英格兰的自由灵：浮嚣派与他们的文献"
+    document = _document_with_pages(
+        doc_id="appendix-note-heading",
+        page_count=8,
+        observations=[
+            make_observation("toc", "text_region", text=f"目录\n{title} 381", page=1, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "appendix-title",
+                "text_region",
+                text=f"{title}*\n附录正文开始。",
+                page=3,
+                bbox=[90, 110, 360, 500],
+                role_hint="title_text",
+            ),
+            make_observation(
+                "note-heading",
+                "text_region",
+                text=f"{title}\n1 对浮嚣派的简短叙述见参考书目。",
+                page=7,
+                bbox=[90, 110, 360, 180],
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    package = tool.build_skeleton_evidence_package(document)
+
+    assert tool.locate_title_pages(package, title, exclude_pages=[1])[:2] == [3, 7]
+
+
+def test_locate_title_pages_handles_title_split_across_leading_lines() -> None:
+    tool = _load_tool()
+    title = "附录 1 关于人数的一个问题"
+    document = _document_with_pages(
+        doc_id="split-title",
+        page_count=8,
+        observations=[
+            make_observation("toc", "text_region", text=f"目录\n{title} 433", page=1, bbox=[40, 80, 360, 500]),
+            make_observation("title-part-1", "text_region", text="附录1", page=3, bbox=[180, 100, 220, 120]),
+            make_observation(
+                "title-part-2",
+                "text_region",
+                text="关于人数的一个问题",
+                page=3,
+                bbox=[120, 140, 300, 160],
+            ),
+            make_observation("body", "text_region", text="附录正文开始。", page=3, bbox=[40, 220, 360, 500]),
+            make_observation(
+                "note-heading",
+                "text_region",
+                text="附录1 关于人数的一个问题",
+                page=7,
+                bbox=[40, 80, 300, 100],
+                role_hint="title_text",
+            ),
+            make_observation(
+                "notes",
+                "text_region",
+                text="1. Curry, AANH, pp. 191-201.",
+                page=7,
+                bbox=[40, 120, 360, 500],
+                role_hint="reference_text",
+            ),
+        ],
+    )
+
+    package = tool.build_skeleton_evidence_package(document)
+
+    assert tool.locate_title_pages(package, title, exclude_pages=[1])[:2] == [3, 7]
+
+
 def test_toc_llm_input_uses_toc_text_without_rule_roles() -> None:
     tool = _load_tool()
 

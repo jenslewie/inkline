@@ -312,7 +312,7 @@ def locate_title_pages(
         page = int(record["page"])
         if page in excluded:
             continue
-        text = str(record.get("text_snippet") or "")
+        text = str(record.get("content_text_snippet") or record.get("text_snippet") or "")
         page_key = _normalize_title(text)
         if title_key and title_key in page_key:
             candidates.append((page, _title_location_score(record, title_key, text, page_key)))
@@ -599,7 +599,7 @@ def _unpaged_structural_toc_title(line: str) -> str | None:
 
 
 def _normalize_title(text: str) -> str:
-    return re.sub(r"[\s　,，.。:：;；/／\\\-—–·•…《》〈〉（）()【】\[\]]+", "", text)
+    return re.sub(r"[\s　,，.。:：;；/／\\\-—–·•…*＊《》〈〉（）()【】\[\]]+", "", text)
 
 
 def _title_location_score(
@@ -611,7 +611,9 @@ def _title_location_score(
     score = 1.0
     role_hint_counts = record.get("role_hint_counts") or {}
     if role_hint_counts.get("title_text", 0) > 0:
-        score += 2.0
+        score += 0.5
+    if role_hint_counts.get("reference_text", 0) > 0:
+        score -= 1.5
     if page_key.startswith(title_key):
         score += 1.5
     first_line = _normalize_title(_first_nonempty_line(text))
@@ -619,8 +621,16 @@ def _title_location_score(
         score += 2.0
     elif first_line.startswith(title_key):
         score += 0.75
-    if float(record.get("text_area_ratio") or 0.0) < 0.25:
-        score += 0.5
+    leading_two_lines = _normalize_title(_leading_nonempty_lines(text, limit=2))
+    if leading_two_lines == title_key:
+        score += 3.0
+    elif leading_two_lines.startswith(title_key):
+        score += 2.0
+    leading_lines = _normalize_title(_leading_nonempty_lines(text, limit=3))
+    if leading_lines == title_key:
+        score += 2.0
+    elif leading_lines.startswith(title_key):
+        score += 1.5
     return score
 
 
@@ -630,6 +640,17 @@ def _first_nonempty_line(text: str) -> str:
         if stripped:
             return stripped
     return ""
+
+
+def _leading_nonempty_lines(text: str, *, limit: int) -> str:
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            lines.append(stripped)
+        if len(lines) >= limit:
+            break
+    return "".join(lines)
 
 
 def _last_located_entry_page(entries: list[dict[str, Any]], *, role: str) -> int | None:
@@ -781,6 +802,7 @@ def _page_record(
         "text_area_ratio": round(_area_ratio(text_observations, page_area), 4),
         "visual_area_ratio": round(_area_ratio(visual_observations, page_area), 4),
         "text_snippet": _page_text_snippet(text_observations),
+        "content_text_snippet": _page_text_snippet(_content_text_observations(text_observations)),
         "signals": sorted(set(signals)),
     }
 
@@ -826,6 +848,14 @@ def _page_text_snippet(text_observations: list[dict[str, Any]]) -> str:
         if str(observation.get("text") or "").strip()
     )
     return text[:MAX_PAGE_TEXT_CHARS]
+
+
+def _content_text_observations(text_observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        observation
+        for observation in text_observations
+        if observation.get("kind") != "page_marker"
+    ]
 
 
 def _candidate_record(record: dict[str, Any]) -> dict[str, Any] | None:
