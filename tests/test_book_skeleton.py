@@ -113,7 +113,8 @@ def test_build_book_skeleton_from_observed_uses_toc_titles_and_observed_title_pa
     assert "printed_page" not in skeleton["toc_entries"][0]
     assert "candidate_pages" not in skeleton["toc_entries"][0]
     assert "selected_page" not in skeleton["toc_entries"][0]
-    entries = {entry["title"]: entry for entry in skeleton["toc_entries"]}
+    entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
+    assert entries["第一章 米兰达"]["title"] == "米兰达"
     assert entries["第一章 米兰达"]["selected_start_page"] == 42
     assert entries["丝绸之路主要地名中英古今对照表"]["selected_start_page"] == 317
     assert entries["注释"]["candidate_start_pages"] == [319]
@@ -230,18 +231,123 @@ def test_build_book_skeleton_from_observed_splits_glued_toc_entries() -> None:
     )
 
     skeleton = build_book_skeleton_from_observed(document)
-    titles = [entry["title"] for entry in skeleton["toc_entries"]]
+    display_titles = [entry["display_title"] for entry in skeleton["toc_entries"]]
 
-    assert "I 日本：从战国时代到世界强权 32 中国：衰落中的明王朝 213 有子名 “舍” 384 朝鲜：通向战利品的大道" not in titles
-    assert titles == [
-        "I 日本：从战国时代到世界强权",
+    assert "I 日本：从战国时代到世界强权 32 中国：衰落中的明王朝 213 有子名 “舍” 384 朝鲜：通向战利品的大道" not in display_titles
+    assert display_titles == [
+        "1 日本：从战国时代到世界强权",
         "中国：衰落中的明王朝",
         "有子名 “舍”",
         "朝鲜：通向战利品的大道",
     ]
     entries = {entry["title"]: entry for entry in skeleton["toc_entries"]}
-    assert entries["I 日本：从战国时代到世界强权"]["selected_start_page"] == 32
+    assert entries["日本：从战国时代到世界强权"]["raw_label"] == "I"
+    assert entries["日本：从战国时代到世界强权"]["label"] == "1"
+    assert entries["日本：从战国时代到世界强权"]["attrs"]["label_correction"] == {
+        "from": "I",
+        "to": "1",
+        "reason": "ocr_roman_i_in_numeric_toc",
+    }
+    assert entries["日本：从战国时代到世界强权"]["selected_start_page"] == 32
     assert entries["中国：衰落中的明王朝"]["selected_start_page"] == 21
+
+
+def test_build_book_skeleton_from_observed_preserves_toc_labels_pages_and_hierarchy() -> None:
+    pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 90)]
+    document = make_observed_document(
+        {
+            "doc_id": "imjin",
+            "title": "壬辰战争",
+            "language": "zh-CN",
+            "source_file": "imjin.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        pages,
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text=(
+                    "目录\n"
+                    "第一部分 东亚三国 1\n"
+                    "I 日本：从战国时代到世界强权 3\n"
+                    "2 中国：衰落中的明王朝 21\n"
+                    "3 有子名 “舍” 38\n"
+                    "4 朝鲜：通向战利品的大道 41\n"
+                    "第二部分 战争前夜 57"
+                ),
+                page=26,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="第一部分\n东亚三国",
+                page=28,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="日本：从战国时代到世界强权",
+                page=30,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="中国：衰落中的明王朝",
+                page=48,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000005",
+                "text_region",
+                text="有子名 “舍”",
+                page=65,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000006",
+                "text_region",
+                text="朝鲜：通向战利品的大道",
+                page=68,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000007",
+                "text_region",
+                text="第二部分\n战争前夜",
+                page=84,
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+    entries = skeleton["toc_entries"]
+
+    assert entries[0]["title"] == "东亚三国"
+    assert entries[0]["display_title"] == "第一部分 东亚三国"
+    assert entries[0]["label"] == "第一部分"
+    assert entries[0]["printed_start_page"] == "1"
+    assert entries[0]["level"] == 1
+    assert entries[0]["parent_entry_index"] is None
+    assert entries[1]["title"] == "日本：从战国时代到世界强权"
+    assert entries[1]["display_title"] == "1 日本：从战国时代到世界强权"
+    assert entries[1]["raw_label"] == "I"
+    assert entries[1]["label"] == "1"
+    assert entries[1]["printed_start_page"] == "3"
+    assert entries[1]["level"] == 2
+    assert entries[1]["parent_entry_index"] == 0
+    assert entries[2]["display_title"] == "2 中国：衰落中的明王朝"
+    assert entries[2]["label"] == "2"
+    assert entries[2]["level"] == 2
+    assert entries[2]["parent_entry_index"] == 0
+    assert entries[5]["display_title"] == "第二部分 战争前夜"
+    assert entries[5]["level"] == 1
+    assert entries[5]["parent_entry_index"] is None
 
 
 def test_build_book_skeleton_from_observed_ignores_note_headers_when_locating_titles() -> None:
@@ -296,8 +402,11 @@ def test_build_book_skeleton_from_observed_ignores_note_headers_when_locating_ti
     )
 
     skeleton = build_book_skeleton_from_observed(document)
-    entry = next(entry for entry in skeleton["toc_entries"] if entry["title"] == "第八章 大行集结")
+    entry = next(
+        entry for entry in skeleton["toc_entries"] if entry["display_title"] == "第八章 大行集结"
+    )
 
+    assert entry["title"] == "大行集结"
     assert entry["selected_start_page"] == 172
     assert 522 not in entry["candidate_start_pages"]
 
@@ -350,7 +459,7 @@ def test_build_book_skeleton_from_observed_keeps_numbered_chapter_body_after_llm
         },
     )
 
-    entries = {entry["title"]: entry for entry in skeleton["toc_entries"]}
+    entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
     assert entries["第一章 米兰达"]["role"] == "body"
     assert skeleton["boundaries"]["first_back_matter_page"] == 317
 
@@ -625,3 +734,57 @@ def test_audit_book_skeleton_reports_clean_summary_for_valid_skeleton() -> None:
     assert audit["summary"]["issue_count"] == 0
     assert audit["summary"]["unlocated_entry_count"] == 0
     assert audit["issues"] == []
+
+
+def test_audit_book_skeleton_reports_label_ocr_corrections_for_llm_review() -> None:
+    pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 40)]
+    document = make_observed_document(
+        {
+            "doc_id": "imjin",
+            "title": "壬辰战争",
+            "language": "zh-CN",
+            "source_file": "imjin.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        pages,
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\n第一部分 东亚三国 1\nI 日本：从战国时代到世界强权 3",
+                page=26,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="第一部分\n东亚三国",
+                page=28,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="日本：从战国时代到世界强权",
+                page=30,
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    audit = audit_book_skeleton(build_book_skeleton_from_observed(document))
+
+    assert audit["summary"]["label_ocr_correction_count"] == 1
+    assert audit["issues"] == [
+        {
+            "severity": "info",
+            "issue_type": "label_ocr_corrected",
+            "entry_index": 1,
+            "title": "日本：从战国时代到世界强权",
+            "message": "TOC label was corrected from OCR-suspect raw_label.",
+            "raw_label": "I",
+            "label": "1",
+            "llm_review_recommended": True,
+        }
+    ]

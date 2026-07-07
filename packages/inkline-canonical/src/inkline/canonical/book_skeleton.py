@@ -31,6 +31,9 @@ TOC_ENTRY_RE = re.compile(
 TOC_ENTRY_PART_RE = re.compile(
     r"\s*(?P<title>.+?)\s+(?P<page>[ivxlcdmIVXLCDM\d]+)(?=\s+\S|$)"
 )
+TOC_PART_LABEL_RE = re.compile(r"^(?P<label>第[一二三四五六七八九十百千万\d]+部分)\s+(?P<title>.+)$")
+TOC_CHAPTER_LABEL_RE = re.compile(r"^(?P<label>第[一二三四五六七八九十百千万\d]+[章节])\s+(?P<title>.+)$")
+TOC_NUMBER_LABEL_RE = re.compile(r"^(?P<label>[0-9]+|[IVXLCDM]+|[ivxlcdm]+)\s+(?P<title>.+)$")
 BODY_TITLE_RE = re.compile(r"^(?:第[一二三四五六七八九十百千万\d]+(?:章节|部分|[章节部卷篇])|序章)")
 NUMERIC_BODY_TITLE_RE = re.compile(r"^\d{1,3}\s+\S")
 GENERIC_TITLES_REQUIRING_TITLE_HINT = {"注释", "索引", "参考文献", "参考书目"}
@@ -58,7 +61,14 @@ REQUIRED_METADATA_FIELDS = (
 
 REQUIRED_ENTRY_FIELDS = {
     "entry_index": int,
+    "raw_title": str,
     "title": str,
+    "display_title": str,
+    "raw_label": str | type(None),
+    "label": str | type(None),
+    "printed_start_page": str | type(None),
+    "level": int,
+    "parent_entry_index": int | type(None),
     "role": str,
     "candidate_start_pages": list,
     "selected_start_page": int | type(None),
@@ -87,8 +97,9 @@ def build_book_skeleton_from_observed(
     toc_pages = _detect_toc_pages(page_records)
     toc_text = "\n".join(_observed_page_text(document, page) for page in toc_pages)
     entries = _parse_toc_entries(toc_text)
+    _assign_toc_hierarchy(entries)
     for entry in entries:
-        candidates = _locate_title_pages(page_records, entry["title"], exclude_pages=toc_pages)
+        candidates = _locate_toc_entry_pages(page_records, entry, exclude_pages=toc_pages)
         entry["candidate_start_pages"] = candidates
         entry["selected_start_page"] = None
     _apply_structural_roles(entries)
@@ -116,16 +127,21 @@ def build_book_skeleton_toc_llm_input(document: dict[str, Any]) -> dict[str, Any
     toc_pages = _detect_toc_pages(page_records)
     toc_text = "\n".join(_observed_page_text(document, page) for page in toc_pages)
     entries = _parse_toc_entries(toc_text)
+    _assign_toc_hierarchy(entries)
     toc_entries = []
     for entry in entries:
         toc_entries.append(
             {
                 "entry_index": entry["entry_index"],
                 "title": entry["title"],
-                "candidate_start_pages": _locate_title_pages(
-                    page_records,
-                    entry["title"],
-                    exclude_pages=toc_pages,
+                "display_title": entry["display_title"],
+                "raw_label": entry["raw_label"],
+                "label": entry["label"],
+                "printed_start_page": entry["printed_start_page"],
+                "level": entry["level"],
+                "parent_entry_index": entry["parent_entry_index"],
+                "candidate_start_pages": _locate_toc_entry_pages(
+                    page_records, entry, exclude_pages=toc_pages
                 )[:5],
             }
         )
@@ -150,7 +166,8 @@ def build_book_skeleton_toc_llm_input(document: dict[str, Any]) -> dict[str, Any
 def book_skeleton_toc_llm_prompt(input_data: dict[str, Any]) -> str:
     return (
         "You classify a book skeleton from table-of-contents entries.\n"
-        "Use only entry_index and title to decide entry roles. Do not infer or output physical "
+        "Use entry_index, display_title, label, level, and title to decide entry roles. "
+        "Do not infer or output physical "
         "PDF page numbers; candidate_start_pages are rule-layer evidence only.\n\n"
         "Definitions:\n"
         "- front_matter: content before the main body, such as foreword, preface, acknowledgements, "
@@ -183,11 +200,17 @@ def audit_book_skeleton(skeleton: dict[str, Any]) -> dict[str, Any]:
     located_count = sum(
         1 for entry in entries if isinstance(entry.get("selected_start_page"), int)
     )
+    label_ocr_correction_count = sum(
+        1
+        for entry in entries
+        if isinstance(entry.get("attrs"), dict) and "label_correction" in entry["attrs"]
+    )
     return {
         "summary": {
             "toc_entry_count": len(entries),
             "located_entry_count": located_count,
             "unlocated_entry_count": len(entries) - located_count,
+            "label_ocr_correction_count": label_ocr_correction_count,
             "issue_count": len(issues),
             "role_counts": dict(role_counts),
             "boundaries": deepcopy(skeleton.get("boundaries") or {}),
@@ -314,12 +337,12 @@ def _parse_toc_entries(text: str) -> list[dict[str, Any]]:
     for line in (line.strip() for line in text.splitlines()):
         if not line or line == "目录":
             continue
-        for title in _parse_toc_line_entries(line):
-            entries.append(_toc_entry(len(entries), title))
+        for item in _parse_toc_line_entries(line):
+            entries.append(_toc_entry(len(entries), item))
     return entries
 
 
-def _parse_toc_line_entries(line: str) -> list[str]:
+def _parse_toc_line_entries(line: str) -> list[dict[str, str | None]]:
     normalized_line = _normalize_toc_line(line)
     matches = list(TOC_ENTRY_PART_RE.finditer(normalized_line))
     if _should_parse_as_single_toc_entry(normalized_line, matches):
@@ -327,13 +350,15 @@ def _parse_toc_line_entries(line: str) -> list[str]:
         if match is None:
             return []
         title = _clean_toc_title(match.group("title"))
-        return [title] if title and not _is_noise_toc_title(title) else []
-    titles = []
+        if not title or _is_noise_toc_title(title):
+            return []
+        return [_toc_entry_parts(title, match.group("page"))]
+    items = []
     for match in matches:
         title = _clean_toc_title(match.group("title"))
         if title and not _is_noise_toc_title(title):
-            titles.append(title)
-    return titles
+            items.append(_toc_entry_parts(title, match.group("page")))
+    return items
 
 
 def _should_parse_as_single_toc_entry(line: str, matches: list[re.Match[str]]) -> bool:
@@ -345,14 +370,78 @@ def _should_parse_as_single_toc_entry(line: str, matches: list[re.Match[str]]) -
     return title in {"附录", "Appendix", "appendix"} and len(page_token) == 1
 
 
-def _toc_entry(index: int, title: str) -> dict[str, Any]:
+def _toc_entry_parts(raw_title: str, printed_start_page: str | None) -> dict[str, Any]:
+    raw_label, label, title, level, attrs = _split_toc_label(raw_title)
+    display_title = f"{label} {title}" if label else title
+    return {
+        "raw_title": raw_title,
+        "title": title,
+        "display_title": display_title,
+        "raw_label": raw_label,
+        "label": label,
+        "printed_start_page": printed_start_page,
+        "level": level,
+        "attrs": attrs,
+    }
+
+
+def _split_toc_label(raw_title: str) -> tuple[str | None, str | None, str, int, dict[str, Any]]:
+    for pattern, level in (
+        (TOC_PART_LABEL_RE, 1),
+        (TOC_CHAPTER_LABEL_RE, 1),
+        (TOC_NUMBER_LABEL_RE, 2),
+    ):
+        match = pattern.match(raw_title)
+        if match is None:
+            continue
+        raw_label = match.group("label")
+        label, attrs = _normalize_toc_label(raw_label)
+        return raw_label, label, match.group("title").strip(), level, attrs
+    return None, None, raw_title, 1, {}
+
+
+def _normalize_toc_label(raw_label: str) -> tuple[str, dict[str, Any]]:
+    if raw_label == "I":
+        return (
+            "1",
+            {
+                "label_correction": {
+                    "from": raw_label,
+                    "to": "1",
+                    "reason": "ocr_roman_i_in_numeric_toc",
+                }
+            },
+        )
+    return raw_label, {}
+
+
+def _assign_toc_hierarchy(entries: list[dict[str, Any]]) -> None:
+    stack_by_level: dict[int, int] = {}
+    for entry in entries:
+        level = int(entry["level"])
+        parent_level = max((candidate for candidate in stack_by_level if candidate < level), default=None)
+        entry["parent_entry_index"] = stack_by_level[parent_level] if parent_level is not None else None
+        stack_by_level[level] = int(entry["entry_index"])
+        for existing_level in list(stack_by_level):
+            if existing_level > level:
+                del stack_by_level[existing_level]
+
+
+def _toc_entry(index: int, parts: dict[str, Any]) -> dict[str, Any]:
     return {
         "entry_index": index,
-        "title": title,
+        "raw_title": parts["raw_title"],
+        "title": parts["title"],
+        "display_title": parts["display_title"],
+        "raw_label": parts["raw_label"],
+        "label": parts["label"],
+        "printed_start_page": parts["printed_start_page"],
+        "level": parts["level"],
+        "parent_entry_index": None,
         "role": "unknown",
         "candidate_start_pages": [],
         "selected_start_page": None,
-        "attrs": {},
+        "attrs": parts["attrs"],
     }
 
 
@@ -376,9 +465,23 @@ def _locate_title_pages(
     return [page for page, _score in sorted(candidates, key=lambda item: (-item[1], item[0]))]
 
 
+def _locate_toc_entry_pages(
+    page_records: list[dict[str, Any]], entry: dict[str, Any], *, exclude_pages: list[int]
+) -> list[int]:
+    candidates = []
+    seen = set()
+    for title in (entry["title"], entry["display_title"]):
+        for page in _locate_title_pages(page_records, title, exclude_pages=exclude_pages):
+            if page in seen:
+                continue
+            seen.add(page)
+            candidates.append(page)
+    return candidates
+
+
 def _apply_structural_roles(entries: list[dict[str, Any]]) -> None:
     first_body_index = _first_matching_entry_index(
-        entries, lambda entry: _looks_like_body_toc_title(entry["title"])
+        entries, _looks_like_body_toc_entry
     )
     if first_body_index is None:
         return
@@ -500,6 +603,12 @@ def _first_matching_entry_index(entries: list[dict[str, Any]], predicate) -> int
     return None
 
 
+def _looks_like_body_toc_entry(entry: dict[str, Any]) -> bool:
+    label = str(entry.get("label") or "")
+    display_title = str(entry.get("display_title") or "")
+    return _looks_like_body_toc_title(label) or _looks_like_body_toc_title(display_title)
+
+
 def _looks_like_body_toc_title(title: str) -> bool:
     stripped = title.strip()
     return BODY_TITLE_RE.match(stripped) is not None or NUMERIC_BODY_TITLE_RE.match(stripped) is not None
@@ -507,7 +616,7 @@ def _looks_like_body_toc_title(title: str) -> bool:
 
 def _apply_structural_role_guardrails(entries: list[dict[str, Any]]) -> None:
     for entry in entries:
-        if _looks_like_body_toc_title(entry["title"]):
+        if _looks_like_body_toc_entry(entry):
             entry["role"] = "body"
 
 
@@ -741,6 +850,23 @@ def _audit_toc_entry_issues(entries: list[dict[str, Any]]) -> list[dict[str, Any
         if not isinstance(candidate_start_pages, list):
             candidate_start_pages = []
         selected_start_page = entry.get("selected_start_page")
+        attrs = entry.get("attrs") if isinstance(entry.get("attrs"), dict) else {}
+        label_correction = attrs.get("label_correction")
+        if isinstance(label_correction, dict):
+            issues.append(
+                {
+                    **_toc_entry_issue(
+                        "label_ocr_corrected",
+                        entry_index=entry_index,
+                        title=title,
+                        message="TOC label was corrected from OCR-suspect raw_label.",
+                        severity="info",
+                    ),
+                    "raw_label": label_correction.get("from"),
+                    "label": label_correction.get("to"),
+                    "llm_review_recommended": True,
+                }
+            )
         if not candidate_start_pages:
             issues.append(
                 _toc_entry_issue(
@@ -790,10 +916,10 @@ def _audit_toc_entry_issues(entries: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 def _toc_entry_issue(
-    issue_type: str, *, entry_index: Any, title: str, message: str
+    issue_type: str, *, entry_index: Any, title: str, message: str, severity: str = "warning"
 ) -> dict[str, Any]:
     return {
-        "severity": "warning",
+        "severity": severity,
         "issue_type": issue_type,
         "entry_index": entry_index,
         "title": title,
