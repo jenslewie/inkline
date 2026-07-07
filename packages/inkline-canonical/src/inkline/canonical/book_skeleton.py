@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from copy import deepcopy
 from typing import Any
 
@@ -14,6 +15,15 @@ BOOK_SKELETON_SCHEMA_VERSION = "0.1-shadow"
 BOOK_SKELETON_ENTRY_ROLES = {"front_matter", "body", "back_matter", "unknown"}
 
 TEXT_KINDS = {"text_region", "footnote_region", "page_marker"}
+TITLE_LOCATION_ROLE_HINTS = {"title_text", "body_text", "list_text", "unknown"}
+TITLE_LOCATION_EXCLUDED_ROLE_HINTS = {
+    "footnote_text",
+    "reference_text",
+    "page_number",
+    "header",
+    "footer",
+    "caption_text",
+}
 TOC_ENTRY_RE = re.compile(
     r"^\s*(?P<title>.+?)\s*(?:[/／.·•…\-\s]+)?(?P<page>[ivxlcdmIVXLCDM\d]+)\s*$"
 )
@@ -188,17 +198,18 @@ def _page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
         text_observations = [
             observation for observation in observations if observation.get("kind") in TEXT_KINDS
         ]
+        title_location_observations = [
+            observation
+            for observation in text_observations
+            if _is_title_location_observation(observation)
+        ]
+        role_hint_counts = Counter(str(observation.get("role_hint") or "") for observation in observations)
         records.append(
             {
                 "page": page_number,
+                "role_hint_counts": dict(role_hint_counts),
                 "text": _page_text(text_observations),
-                "content_text": _page_text(
-                    [
-                        observation
-                        for observation in text_observations
-                        if observation.get("kind") != "page_marker"
-                    ]
-                ),
+                "content_text": _page_text(title_location_observations),
                 "title_text": _page_text(
                     [
                         observation
@@ -215,6 +226,15 @@ def _page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
     return records
 
 
+def _is_title_location_observation(observation: dict[str, Any]) -> bool:
+    role_hint = str(observation.get("role_hint") or "")
+    if observation.get("kind") == "page_marker":
+        return False
+    if role_hint in TITLE_LOCATION_EXCLUDED_ROLE_HINTS:
+        return False
+    return role_hint in TITLE_LOCATION_ROLE_HINTS
+
+
 def _page_text(observations: list[dict[str, Any]]) -> str:
     return "\n".join(
         str(observation.get("text") or "").strip()
@@ -224,7 +244,7 @@ def _page_text(observations: list[dict[str, Any]]) -> str:
 
 
 def _detect_toc_pages(page_records: list[dict[str, Any]]) -> list[int]:
-    pages = []
+    pages: set[int] = set()
     for record in page_records:
         text = str(record.get("text") or "")
         toc_like_lines = sum(
@@ -236,8 +256,27 @@ def _detect_toc_pages(page_records: list[dict[str, Any]]) -> list[int]:
         if (record.get("has_toc_hint") and (has_toc_title or toc_like_lines >= 3)) or (
             has_toc_title and toc_like_lines >= 2
         ):
-            pages.append(int(record["page"]))
-    return pages
+            pages.add(int(record["page"]))
+    if not pages:
+        return []
+    records_by_page = {int(record["page"]): record for record in page_records}
+    for page in sorted(pages):
+        next_page = page + 1
+        while next_page in records_by_page:
+            text = str(records_by_page[next_page].get("text") or "")
+            if _toc_like_line_count(text) < 2:
+                break
+            pages.add(next_page)
+            next_page += 1
+    return sorted(pages)
+
+
+def _toc_like_line_count(text: str) -> int:
+    return sum(
+        1
+        for line in text.splitlines()
+        if TOC_ENTRY_RE.match(_normalize_toc_line(line.strip())) is not None
+    )
 
 
 def _observed_page_text(document: dict[str, Any], page_number: int) -> str:
@@ -325,6 +364,7 @@ def _apply_llm_classification(
             continue
         if index in entries_by_index:
             entries_by_index[index]["role"] = role
+    _apply_structural_role_guardrails(entries)
     return {
         "used": True,
         "model": llm_model,
@@ -336,18 +376,9 @@ def _apply_llm_classification(
 def _boundaries(
     entries: list[dict[str, Any]], *, llm_classification: dict[str, Any] | None
 ) -> dict[str, int | None]:
-    if llm_classification is None:
-        first_body = _first_role_index(entries, "body")
-        last_body = _last_role_index(entries, "body")
-        first_back = _first_role_index(entries, "back_matter")
-    else:
-        first_body = _valid_boundary_index(
-            llm_classification.get("first_body_entry_index"), entries
-        )
-        last_body = _valid_boundary_index(llm_classification.get("last_body_entry_index"), entries)
-        first_back = _valid_boundary_index(
-            llm_classification.get("first_back_matter_entry_index"), entries
-        )
+    first_body = _first_role_index(entries, "body")
+    last_body = _last_role_index(entries, "body")
+    first_back = _first_role_index(entries, "back_matter")
     return {
         "first_body_entry_index": first_body,
         "first_body_page": _selected_page(entries, first_body),
@@ -394,6 +425,12 @@ def _looks_like_body_toc_title(title: str) -> bool:
     return BODY_TITLE_RE.match(stripped) is not None or NUMERIC_BODY_TITLE_RE.match(stripped) is not None
 
 
+def _apply_structural_role_guardrails(entries: list[dict[str, Any]]) -> None:
+    for entry in entries:
+        if _looks_like_body_toc_title(entry["title"]):
+            entry["role"] = "body"
+
+
 def _normalize_toc_line(line: str) -> str:
     return (
         line.replace("／", "/")
@@ -438,14 +475,55 @@ def _title_matches_record(record: dict[str, Any], title_key: str, page_key: str)
         return False
     title_text_key = _normalize_title(str(record.get("title_text") or ""))
     if title_key in GENERIC_TITLES_REQUIRING_TITLE_HINT:
-        return title_key in title_text_key
-    return title_key in page_key
+        return title_key in title_text_key or _near_title_match(title_key, title_text_key)
+    return title_key in page_key or _near_title_match(title_key, title_text_key)
+
+
+def _near_title_match(title_key: str, text_key: str) -> bool:
+    if len(title_key) < 5 or not text_key:
+        return False
+    max_distance = max(1, len(title_key) // 8)
+    for candidate in _title_substrings(text_key, len(title_key)):
+        if _edit_distance_at_most(title_key, candidate, max_distance):
+            return True
+    return False
+
+
+def _title_substrings(text: str, length: int) -> list[str]:
+    if len(text) <= length:
+        return [text]
+    return [text[index : index + length] for index in range(0, len(text) - length + 1)]
+
+
+def _edit_distance_at_most(left: str, right: str, limit: int) -> bool:
+    if abs(len(left) - len(right)) > limit:
+        return False
+    previous = list(range(len(right) + 1))
+    for row_index, left_char in enumerate(left, start=1):
+        current = [row_index]
+        row_min = current[0]
+        for column_index, right_char in enumerate(right, start=1):
+            cost = 0 if left_char == right_char else 1
+            value = min(
+                previous[column_index] + 1,
+                current[column_index - 1] + 1,
+                previous[column_index - 1] + cost,
+            )
+            current.append(value)
+            row_min = min(row_min, value)
+        if row_min > limit:
+            return False
+        previous = current
+    return previous[-1] <= limit
 
 
 def _title_location_score(
     record: dict[str, Any], title_key: str, text: str, page_key: str
 ) -> float:
     score = 1.0
+    role_hint_counts = record.get("role_hint_counts") or {}
+    if _is_footnote_heavy_location(role_hint_counts):
+        score -= 4.0
     title_text_key = _normalize_title(str(record.get("title_text") or ""))
     if title_text_key:
         score += 0.5
@@ -462,6 +540,14 @@ def _title_location_score(
     elif leading_two_lines.startswith(title_key):
         score += 2.0
     return score
+
+
+def _is_footnote_heavy_location(role_hint_counts: dict[str, Any]) -> bool:
+    footnote_count = int(role_hint_counts.get("footnote_text") or 0)
+    reference_count = int(role_hint_counts.get("reference_text") or 0)
+    body_count = int(role_hint_counts.get("body_text") or 0)
+    list_count = int(role_hint_counts.get("list_text") or 0)
+    return footnote_count + reference_count >= max(2, body_count + list_count + 1)
 
 
 def _first_nonempty_line(text: str) -> str:

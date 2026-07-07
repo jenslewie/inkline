@@ -117,6 +117,118 @@ def test_build_book_skeleton_from_observed_uses_toc_titles_and_observed_title_pa
     assert skeleton["boundaries"]["first_body_page"] == 14
 
 
+def test_build_book_skeleton_from_observed_includes_toc_continuation_pages() -> None:
+    pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 494)]
+    document = make_observed_document(
+        {
+            "doc_id": "imjin",
+            "title": "壬辰战争",
+            "language": "zh-CN",
+            "source_file": "imjin.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        pages,
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\n新版序言 1\n第一部分 东亚三国 1\n第一章 日本 32",
+                page=26,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="第五部分 丁酉再乱 329\n第六部分 余波 421\n参考书目 441\n注释 455\n出版后记 493",
+                page=27,
+                role_hint="body_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="第一部分\n东亚三国",
+                page=28,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="参考书目",
+                page=467,
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+
+    assert skeleton["toc_pages"] == [26, 27]
+    assert [entry["title"] for entry in skeleton["toc_entries"]][-3:] == [
+        "参考书目",
+        "注释",
+        "出版后记",
+    ]
+
+
+def test_build_book_skeleton_from_observed_ignores_note_headers_when_locating_titles() -> None:
+    pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 530)]
+    document = make_observed_document(
+        {
+            "doc_id": "agincourt",
+            "title": "阿金库尔战役",
+            "language": "zh-CN",
+            "source_file": "agincourt.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        pages,
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\n第七章 金钱与人力 115\n第八章 大行集结 138",
+                page=33,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="第八章",
+                page=172,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="大军集结",
+                page=172,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000004",
+                "footnote_region",
+                text="第八章 大行集结 相关注释很多很多。",
+                page=522,
+                role_hint="footnote_text",
+            ),
+            make_observation(
+                "obs000005",
+                "page_marker",
+                text="第八章 大行集结",
+                page=522,
+                role_hint="header",
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+    entry = next(entry for entry in skeleton["toc_entries"] if entry["title"] == "第八章 大行集结")
+
+    assert entry["selected_page"] == 172
+    assert 522 not in entry["candidate_pages"]
+
+
 def test_build_book_skeleton_from_observed_accepts_llm_roles_but_not_llm_pages() -> None:
     skeleton = build_book_skeleton_from_observed(
         _document(),
@@ -146,6 +258,101 @@ def test_build_book_skeleton_from_observed_accepts_llm_roles_but_not_llm_pages()
     assert skeleton["boundaries"]["first_back_matter_page"] == 317
     assert skeleton["llm"]["used"] is True
     assert skeleton["llm"]["model"] == "qwen-test"
+
+
+def test_build_book_skeleton_from_observed_keeps_numbered_chapter_body_after_llm() -> None:
+    skeleton = build_book_skeleton_from_observed(
+        _document(),
+        llm_classification={
+            "entry_roles": [
+                {"entry_index": 1, "role": "body"},
+                {"entry_index": 2, "role": "back_matter"},
+                {"entry_index": 3, "role": "body"},
+                {"entry_index": 4, "role": "back_matter"},
+                {"entry_index": 5, "role": "back_matter"},
+            ],
+            "first_body_entry_index": 1,
+            "last_body_entry_index": 3,
+            "first_back_matter_entry_index": 4,
+        },
+    )
+
+    entries = {entry["title"]: entry for entry in skeleton["toc_entries"]}
+    assert entries["第一章 米兰达"]["role"] == "body"
+    assert skeleton["boundaries"]["first_back_matter_page"] == 317
+
+
+def test_build_book_skeleton_from_observed_downranks_footnote_heavy_title_matches() -> None:
+    pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 570)]
+    document = make_observed_document(
+        {
+            "doc_id": "agincourt",
+            "title": "阿金库尔战役",
+            "language": "zh-CN",
+            "source_file": "agincourt.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        pages,
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\n第十八章 胜利的奖赏 403\n附录 1 关于人数的一个问题 433",
+                page=33,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="附录1",
+                page=483,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="关于人数的一个问题",
+                page=483,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="附录正文。",
+                page=483,
+                role_hint="body_text",
+            ),
+            make_observation(
+                "obs000005",
+                "text_region",
+                text="附录1 关于人数的一个问题",
+                page=559,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000006",
+                "footnote_region",
+                text="1. 这里是附录注释。",
+                page=559,
+                role_hint="footnote_text",
+            ),
+            make_observation(
+                "obs000007",
+                "footnote_region",
+                text="2. 这里还是附录注释。",
+                page=559,
+                role_hint="footnote_text",
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+    entry = next(
+        entry for entry in skeleton["toc_entries"] if entry["title"] == "附录 1 关于人数的一个问题"
+    )
+
+    assert entry["selected_page"] == 483
 
 
 def test_validate_book_skeleton_rejects_invalid_entry_role() -> None:
