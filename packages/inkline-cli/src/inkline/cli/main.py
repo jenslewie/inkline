@@ -69,6 +69,33 @@ def _add_ingest_commands(subparsers: argparse._SubParsersAction) -> None:
         type=Path,
         help="Optional audit-first internal canonical output built from observed_document data.",
     )
+    ingest_pdf.add_argument(
+        "--book-skeleton-output",
+        type=Path,
+        help="Optional BookSkeleton shadow output built from observed_document data.",
+    )
+    ingest_pdf.add_argument(
+        "--book-skeleton-llm",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use local LLM TOC classification when writing --book-skeleton-output.",
+    )
+    ingest_pdf.add_argument(
+        "--book-skeleton-llm-model",
+        default="qwen3.6:35b-a3b",
+        help="Local Ollama model for BookSkeleton TOC classification.",
+    )
+    ingest_pdf.add_argument(
+        "--book-skeleton-llm-api-url",
+        default="http://127.0.0.1:11434/api/chat",
+        help="Local Ollama chat endpoint for BookSkeleton TOC classification.",
+    )
+    ingest_pdf.add_argument(
+        "--book-skeleton-llm-timeout-seconds",
+        type=int,
+        default=300,
+        help="Timeout for BookSkeleton TOC classification model calls.",
+    )
     ingest_pdf.add_argument("--output", required=True)
     ingest_pdf.set_defaults(handler=_ingest_pdf)
 
@@ -163,6 +190,11 @@ def _ingest_pdf(args: argparse.Namespace) -> int:
             "observed_output": args.observed_output,
             "bookgraph_from_observed_output": args.bookgraph_from_observed_output,
             "internal_canonical_output": args.internal_canonical_output,
+            "book_skeleton_output": args.book_skeleton_output,
+            "book_skeleton_llm": args.book_skeleton_llm,
+            "book_skeleton_llm_model": args.book_skeleton_llm_model,
+            "book_skeleton_llm_api_url": args.book_skeleton_llm_api_url,
+            "book_skeleton_llm_timeout_seconds": args.book_skeleton_llm_timeout_seconds,
         },
     )
     result = parse_document(request, args.parser_name)

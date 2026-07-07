@@ -80,6 +80,8 @@ Internal canonical 使用 audit-first 结构：
 Parser adapter
   -> ObservedDocument
        parser-neutral pages, regions, text runs, assets, geometry, raw evidence
+  -> BookSkeleton shadow
+       TOC entries, physical title locations, front/body/back entry roles
   -> BookGraph
        nodes: heading, paragraph, display_block, footnote, ...
        edges: contains, continues, references_note, appears_on_page, ...
@@ -94,6 +96,34 @@ Parser adapter
 ObservedDocument 负责表达“解析器观察到了什么”。BookGraph 负责表达“这本书的逻辑结构是什么”。projections 负责表达“某个下游如何消费这本书”。这三层必须分开，否则系统会不断把某个下游或某个解析器的局部需要写进 canonical 核心。
 
 所有 canonical 构建阶段都遵守 [Canonical Non-Semantic Construction Policy](canonical-non-semantic-policy.md)。结构判断只能使用 parser explicit structure、geometry、layout、reading order、style、markers、continuity 和 provenance 等可观察证据；不能使用文本含义、关键词语义、书籍主题或 LLM classifier。
+
+`BookSkeleton` 是 Phase 4/5 之间新增的 shadow 骨架层，用来把书籍宏观结构前移到 node 构造之前。它不改现有 `canonical.json`，也不直接改 public BookGraph node。规则层只负责：
+
+- 从 ObservedDocument 中检测 TOC pages。
+- 抽取 TOC entries 的标题；目录中印刷页码不进入契约，也不用来定位 PDF 物理页。
+- 用 ObservedDocument 的 `title_text` / text observations 定位标题出现的 PDF 物理页。
+
+可选 LLM 层只基于 TOC entry titles 输出 `front_matter` / `body` / `back_matter` 的 entry role 和 entry index 边界；它不能输出或决定 PDF 物理页码。物理页只来自规则层 title location evidence。这个约束是为了避免“LLM 猜页码”污染 pipeline，同时让后续 BookGraph 构造可以先拥有书的宏观骨架，再生成 paragraph / display_block / note 等节点。
+
+开发期 artifact：
+
+```bash
+uv run --extra mineru mineru-to-canonical \
+  ...existing args... \
+  --observed-output /tmp/observed_document.json \
+  --book-skeleton-output /tmp/book_skeleton.json
+```
+
+如果要启用本地 LLM TOC 分类：
+
+```bash
+uv run --extra mineru mineru-to-canonical \
+  ...existing args... \
+  --book-skeleton-output /tmp/book_skeleton.json \
+  --book-skeleton-llm
+```
+
+`BookSkeleton` 在 shadow 期属于 internal planning artifact。它可以使用 LLM verifier，但 public BookGraph 仍不能把未稳定的 flow scope、EPUB/RAG inclusion policy 或特殊页语义写入 public node attrs。
 
 Phase 2 在引入 ObservedDocument 前必须先完成两项前置清理：
 

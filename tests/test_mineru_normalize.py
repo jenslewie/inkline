@@ -7,6 +7,7 @@ from pathlib import Path
 import inkline.parsers.mineru.bridge as mineru_bridge
 from inkline.canonical import (
     BLOCK_TYPES,
+    validate_book_skeleton,
     validate_bookgraph,
     validate_document,
     validate_internal_canonical,
@@ -239,6 +240,132 @@ def test_normalize_mineru_outputs_writes_optional_observed_shadow_outputs(tmp_pa
     assert internal["evidence"][0]["debug"]["parser_payload"]["observation_ids"] == ["obs000001"]
 
 
+def test_normalize_mineru_outputs_writes_optional_book_skeleton_shadow(tmp_path) -> None:
+    content_list_v2 = tmp_path / "sample_content_list_v2.json"
+    middle = tmp_path / "sample_middle.json"
+    output = tmp_path / "canonical.json"
+    book_skeleton_output = tmp_path / "book_skeleton.json"
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    _text_item(
+                        "paragraph",
+                        "目录\n序章 1\n第一章 开端 2",
+                        [100, 100, 900, 260],
+                    )
+                ],
+                [_text_item("title", "序章", [120, 100, 300, 180])],
+                [
+                    _text_item("title", "第一章", [120, 100, 260, 150]),
+                    _text_item("title", "开端", [120, 170, 240, 220]),
+                ],
+            ]
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(
+        json.dumps(
+            {
+                "pdf_info": [
+                    {"page_size": [1000, 1400]},
+                    {"page_size": [1000, 1400]},
+                    {"page_size": [1000, 1400]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        model=None,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        book_skeleton_output=book_skeleton_output,
+        doc_id="sample",
+        title="Sample",
+        language="zh-CN",
+    )
+
+    skeleton = json.loads(book_skeleton_output.read_text(encoding="utf-8"))
+    validate_book_skeleton(skeleton)
+    assert skeleton["toc_pages"] == [1]
+    assert skeleton["boundaries"]["first_body_page"] == 2
+
+
+def test_normalize_mineru_outputs_can_use_llm_book_skeleton_roles(
+    tmp_path, monkeypatch
+) -> None:
+    content_list_v2 = tmp_path / "sample_content_list_v2.json"
+    middle = tmp_path / "sample_middle.json"
+    output = tmp_path / "canonical.json"
+    book_skeleton_output = tmp_path / "book_skeleton.json"
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    _text_item(
+                        "paragraph",
+                        "目录\n序章 1\n结论 20\n附录 21",
+                        [100, 100, 900, 260],
+                    )
+                ],
+                [_text_item("title", "序章", [120, 100, 300, 180])],
+                [_text_item("title", "结论", [120, 100, 300, 180])],
+                [_text_item("title", "附录", [120, 100, 300, 180])],
+            ]
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(
+        json.dumps({"pdf_info": [{"page_size": [1000, 1400]} for _ in range(4)]}),
+        encoding="utf-8",
+    )
+
+    def fake_chat_json(config, *, messages):
+        assert config.model == "qwen-test"
+        assert "Do not infer or output physical PDF page numbers" in messages[0]["content"]
+        return {
+            "entry_roles": [
+                {"entry_index": 0, "role": "body"},
+                {"entry_index": 1, "role": "body"},
+                {"entry_index": 2, "role": "back_matter", "page": 999},
+            ],
+            "first_body_entry_index": 0,
+            "last_body_entry_index": 1,
+            "first_back_matter_entry_index": 2,
+            "uncertain_entries": [],
+        }
+
+    monkeypatch.setattr(
+        "inkline.parsers.mineru.normalize.book_skeleton_shadow.chat_json",
+        fake_chat_json,
+    )
+
+    normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        model=None,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        book_skeleton_output=book_skeleton_output,
+        book_skeleton_llm=True,
+        book_skeleton_llm_model="qwen-test",
+        doc_id="sample",
+        title="Sample",
+        language="zh-CN",
+    )
+
+    skeleton = json.loads(book_skeleton_output.read_text(encoding="utf-8"))
+    validate_book_skeleton(skeleton)
+    assert skeleton["llm"]["used"] is True
+    assert skeleton["boundaries"]["first_back_matter_page"] == 4
+
+
 def test_normalize_mineru_outputs_does_not_write_bookgraph_shadow_by_default(tmp_path) -> None:
     content_list_v2 = tmp_path / "sample_content_list_v2.json"
     middle = tmp_path / "sample_middle.json"
@@ -283,6 +410,7 @@ def test_mineru_cli_accepts_bookgraph_output_argument(monkeypatch, tmp_path) -> 
     observed_output = tmp_path / "observed_document.json"
     observed_bookgraph_output = tmp_path / "canonical_v2_observed.json"
     internal_canonical_output = tmp_path / "internal_canonical.json"
+    book_skeleton_output = tmp_path / "book_skeleton.json"
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -301,6 +429,8 @@ def test_mineru_cli_accepts_bookgraph_output_argument(monkeypatch, tmp_path) -> 
             str(observed_bookgraph_output),
             "--internal-canonical-output",
             str(internal_canonical_output),
+            "--book-skeleton-output",
+            str(book_skeleton_output),
         ],
     )
 
@@ -310,6 +440,7 @@ def test_mineru_cli_accepts_bookgraph_output_argument(monkeypatch, tmp_path) -> 
     assert args.observed_output == str(observed_output)
     assert args.bookgraph_from_observed_output == str(observed_bookgraph_output)
     assert args.internal_canonical_output == str(internal_canonical_output)
+    assert args.book_skeleton_output == str(book_skeleton_output)
 
 
 def test_small_pdf_page_size_uses_content_coordinate_layout(tmp_path) -> None:
@@ -1297,6 +1428,7 @@ def test_mineru_parser_passes_optional_bookgraph_output(tmp_path, monkeypatch) -
     observed_output = tmp_path / "observed_document.json"
     observed_bookgraph_output = tmp_path / "canonical_v2_observed.json"
     internal_canonical_output = tmp_path / "internal_canonical.json"
+    book_skeleton_output = tmp_path / "book_skeleton.json"
     request = ParseRequest(
         tmp_path / "sample.pdf",
         tmp_path / "canonical.json",
@@ -1306,6 +1438,7 @@ def test_mineru_parser_passes_optional_bookgraph_output(tmp_path, monkeypatch) -
             "observed_output": observed_output,
             "bookgraph_from_observed_output": observed_bookgraph_output,
             "internal_canonical_output": internal_canonical_output,
+            "book_skeleton_output": book_skeleton_output,
         },
     )
 
@@ -1315,3 +1448,4 @@ def test_mineru_parser_passes_optional_bookgraph_output(tmp_path, monkeypatch) -
     assert captured["observed_output"] == observed_output
     assert captured["bookgraph_from_observed_output"] == observed_bookgraph_output
     assert captured["internal_canonical_output"] == internal_canonical_output
+    assert captured["book_skeleton_output"] == book_skeleton_output

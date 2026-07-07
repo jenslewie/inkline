@@ -9,6 +9,7 @@ from pathlib import Path
 from inkline.canonical import (
     build_bookgraph_from_observed,
     build_internal_canonical_from_observed,
+    validate_book_skeleton,
     validate_bookgraph,
     validate_document,
     validate_internal_canonical,
@@ -20,6 +21,7 @@ from ..analysis.note_gap_report import write_note_ref_gap_report
 from ..bridge import find_mineru_run_version_info, get_mineru_version_info
 from ..extraction.io import load_inputs, load_json
 from ..normalize.assets import materialize_image_assets
+from ..normalize.book_skeleton_shadow import build_book_skeleton_shadow
 from ..normalize.bookgraph_shadow import build_bookgraph_shadow
 from ..normalize.core import (
     _normalize_qwen_evidence_paths,
@@ -140,6 +142,32 @@ def parse_args() -> argparse.Namespace:
         "--internal-canonical-output",
         help="Optional audit-first internal canonical output built from observed_document data",
     )
+    p.add_argument(
+        "--book-skeleton-output",
+        help="Optional BookSkeleton shadow output built from observed_document data",
+    )
+    p.add_argument(
+        "--book-skeleton-llm",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use local LLM TOC classification when writing --book-skeleton-output",
+    )
+    p.add_argument(
+        "--book-skeleton-llm-model",
+        default=DEFAULT_QWEN_MODEL,
+        help="Local Ollama model for BookSkeleton TOC classification",
+    )
+    p.add_argument(
+        "--book-skeleton-llm-api-url",
+        default=DEFAULT_OLLAMA_CHAT_URL,
+        help="Local Ollama chat endpoint for BookSkeleton TOC classification",
+    )
+    p.add_argument(
+        "--book-skeleton-llm-timeout-seconds",
+        type=int,
+        default=300,
+        help="Timeout for BookSkeleton TOC classification model calls",
+    )
     p.add_argument("--doc-id", default=None)
     p.add_argument("--title", default=None)
     p.add_argument("--language", default="zh-CN")
@@ -202,6 +230,7 @@ def _write_observed_shadow_outputs(args, pages, page_sizes, canonical) -> None:
         args.observed_output
         or args.bookgraph_from_observed_output
         or args.internal_canonical_output
+        or args.book_skeleton_output
     ):
         return
     observed = build_observed_document_shadow(
@@ -224,6 +253,16 @@ def _write_observed_shadow_outputs(args, pages, page_sizes, canonical) -> None:
         internal_canonical = build_internal_canonical_from_observed(observed)
         validate_internal_canonical(internal_canonical)
         _write_json(Path(args.internal_canonical_output), internal_canonical)
+    if args.book_skeleton_output:
+        skeleton = build_book_skeleton_shadow(
+            observed,
+            use_llm=args.book_skeleton_llm,
+            llm_model=args.book_skeleton_llm_model,
+            llm_api_url=args.book_skeleton_llm_api_url,
+            llm_timeout_seconds=args.book_skeleton_llm_timeout_seconds,
+        )
+        validate_book_skeleton(skeleton)
+        _write_json(Path(args.book_skeleton_output), skeleton)
 
 
 def _write_json(path: Path, payload: dict) -> None:

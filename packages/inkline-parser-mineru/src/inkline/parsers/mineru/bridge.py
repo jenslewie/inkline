@@ -14,6 +14,7 @@ from typing import Any, TypedDict
 from inkline.canonical import (
     build_bookgraph_from_observed,
     build_internal_canonical_from_observed,
+    validate_book_skeleton,
     validate_bookgraph,
     validate_document,
     validate_internal_canonical,
@@ -53,6 +54,17 @@ class MinerUParser:
         observed_output = request.options.get("observed_output")
         bookgraph_from_observed_output = request.options.get("bookgraph_from_observed_output")
         internal_canonical_output = request.options.get("internal_canonical_output")
+        book_skeleton_output = request.options.get("book_skeleton_output")
+        book_skeleton_llm = bool(request.options.get("book_skeleton_llm", False))
+        book_skeleton_llm_model = str(
+            request.options.get("book_skeleton_llm_model", DEFAULT_QWEN_MODEL)
+        )
+        book_skeleton_llm_api_url = str(
+            request.options.get("book_skeleton_llm_api_url", DEFAULT_OLLAMA_CHAT_URL)
+        )
+        book_skeleton_llm_timeout_seconds = int(
+            request.options.get("book_skeleton_llm_timeout_seconds", 300)
+        )
         document = ingest_pdf_with_mineru(
             request.input_path,
             backend=backend,
@@ -69,6 +81,11 @@ class MinerUParser:
             internal_canonical_output=(
                 Path(internal_canonical_output) if internal_canonical_output else None
             ),
+            book_skeleton_output=Path(book_skeleton_output) if book_skeleton_output else None,
+            book_skeleton_llm=book_skeleton_llm,
+            book_skeleton_llm_model=book_skeleton_llm_model,
+            book_skeleton_llm_api_url=book_skeleton_llm_api_url,
+            book_skeleton_llm_timeout_seconds=book_skeleton_llm_timeout_seconds,
         )
         return ParseResult(
             document=document,
@@ -97,6 +114,11 @@ def normalize_mineru_outputs(
     observed_output: str | Path | None = None,
     bookgraph_from_observed_output: str | Path | None = None,
     internal_canonical_output: str | Path | None = None,
+    book_skeleton_output: str | Path | None = None,
+    book_skeleton_llm: bool = False,
+    book_skeleton_llm_model: str = DEFAULT_QWEN_MODEL,
+    book_skeleton_llm_api_url: str = DEFAULT_OLLAMA_CHAT_URL,
+    book_skeleton_llm_timeout_seconds: int = 300,
 ) -> dict[str, Any]:
     """Run the MinerU normalization pipeline programmatically.
 
@@ -147,6 +169,11 @@ def normalize_mineru_outputs(
         internal_canonical_output=(
             str(internal_canonical_output) if internal_canonical_output else None
         ),
+        book_skeleton_output=str(book_skeleton_output) if book_skeleton_output else None,
+        book_skeleton_llm=book_skeleton_llm,
+        book_skeleton_llm_model=book_skeleton_llm_model,
+        book_skeleton_llm_api_url=book_skeleton_llm_api_url,
+        book_skeleton_llm_timeout_seconds=book_skeleton_llm_timeout_seconds,
         parser_mode="vlm",
         mineru_version=mineru_version,
         mineru_vl_utils_version=mineru_vl_utils_version,
@@ -179,6 +206,11 @@ def normalize_mineru_outputs(
         args.observed_output,
         args.bookgraph_from_observed_output,
         args.internal_canonical_output,
+        args.book_skeleton_output,
+        args.book_skeleton_llm,
+        args.book_skeleton_llm_model,
+        args.book_skeleton_llm_api_url,
+        args.book_skeleton_llm_timeout_seconds,
     )
     write_note_ref_gap_report(canonical, out)
     return canonical
@@ -198,6 +230,11 @@ def ingest_pdf_with_mineru(
     observed_output: str | Path | None = None,
     bookgraph_from_observed_output: str | Path | None = None,
     internal_canonical_output: str | Path | None = None,
+    book_skeleton_output: str | Path | None = None,
+    book_skeleton_llm: bool = False,
+    book_skeleton_llm_model: str = DEFAULT_QWEN_MODEL,
+    book_skeleton_llm_api_url: str = DEFAULT_OLLAMA_CHAT_URL,
+    book_skeleton_llm_timeout_seconds: int = 300,
 ) -> dict[str, Any]:
     if engine != "mineru":
         raise ValueError(f"Unsupported PDF engine: {engine}")
@@ -227,6 +264,11 @@ def ingest_pdf_with_mineru(
         observed_output=observed_output,
         bookgraph_from_observed_output=bookgraph_from_observed_output,
         internal_canonical_output=internal_canonical_output,
+        book_skeleton_output=book_skeleton_output,
+        book_skeleton_llm=book_skeleton_llm,
+        book_skeleton_llm_model=book_skeleton_llm_model,
+        book_skeleton_llm_api_url=book_skeleton_llm_api_url,
+        book_skeleton_llm_timeout_seconds=book_skeleton_llm_timeout_seconds,
     )
 
 
@@ -396,8 +438,18 @@ def _write_observed_shadow_if_requested(
     observed_output: str | Path | None,
     bookgraph_from_observed_output: str | Path | None,
     internal_canonical_output: str | Path | None,
+    book_skeleton_output: str | Path | None,
+    book_skeleton_llm: bool,
+    book_skeleton_llm_model: str,
+    book_skeleton_llm_api_url: str,
+    book_skeleton_llm_timeout_seconds: int,
 ) -> None:
-    if not observed_output and not bookgraph_from_observed_output and not internal_canonical_output:
+    if not (
+        observed_output
+        or bookgraph_from_observed_output
+        or internal_canonical_output
+        or book_skeleton_output
+    ):
         return
     from inkline.parsers.mineru.normalize.observed_shadow import (
         build_observed_document_shadow,
@@ -429,6 +481,22 @@ def _write_observed_shadow_if_requested(
         out = Path(internal_canonical_output)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(internal, ensure_ascii=False, indent=2), encoding="utf-8")
+    if book_skeleton_output:
+        from inkline.parsers.mineru.normalize.book_skeleton_shadow import (
+            build_book_skeleton_shadow,
+        )
+
+        skeleton = build_book_skeleton_shadow(
+            observed,
+            use_llm=book_skeleton_llm,
+            llm_model=book_skeleton_llm_model,
+            llm_api_url=book_skeleton_llm_api_url,
+            llm_timeout_seconds=book_skeleton_llm_timeout_seconds,
+        )
+        validate_book_skeleton(skeleton)
+        out = Path(book_skeleton_output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(skeleton, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _now_iso() -> str:

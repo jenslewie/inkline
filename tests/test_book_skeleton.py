@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+import pytest
+
+from inkline.canonical import (
+    BOOK_SKELETON_SCHEMA_NAME,
+    BOOK_SKELETON_SCHEMA_VERSION,
+    build_book_skeleton_from_observed,
+    make_observation,
+    make_observed_document,
+    make_observed_page,
+    validate_book_skeleton,
+)
+from inkline.canonical.schema import ValidationError
+
+
+def _document() -> dict:
+    pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 321)]
+    observations = [
+        make_observation(
+            "obs000001",
+            "text_region",
+            text="目录\n前言 1\n序章 14\n第一章 米兰达 42\n结论 308\n丝绸之路主要地名中英古今对照表 317\n注释 319",
+            page=10,
+            role_hint="toc_text",
+        ),
+        make_observation(
+            "obs000002",
+            "text_region",
+            text="前言",
+            page=5,
+            role_hint="title_text",
+        ),
+        make_observation(
+            "obs000003",
+            "text_region",
+            text="序章",
+            page=14,
+            role_hint="title_text",
+        ),
+        make_observation(
+            "obs000004",
+            "text_region",
+            text="第一章",
+            page=42,
+            role_hint="title_text",
+        ),
+        make_observation(
+            "obs000005",
+            "text_region",
+            text="米兰达",
+            page=42,
+            role_hint="title_text",
+        ),
+        make_observation(
+            "obs000006",
+            "text_region",
+            text="结论",
+            page=308,
+            role_hint="title_text",
+        ),
+        make_observation(
+            "obs000007",
+            "text_region",
+            text="丝绸之路主要地名",
+            page=317,
+            role_hint="title_text",
+        ),
+        make_observation(
+            "obs000008",
+            "text_region",
+            text="中英古今对照表",
+            page=317,
+            role_hint="title_text",
+        ),
+        make_observation(
+            "obs000009",
+            "text_region",
+            text="正文中提到了注释这个词，但这不是注释章节标题。",
+            page=80,
+            role_hint="body_text",
+        ),
+        make_observation(
+            "obs000010",
+            "text_region",
+            text="① 注释",
+            page=319,
+            role_hint="title_text",
+        ),
+    ]
+    return make_observed_document(
+        {
+            "doc_id": "silk",
+            "title": "丝绸之路新史",
+            "language": "zh-CN",
+            "source_file": "silk.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        pages,
+        observations,
+    )
+
+
+def test_build_book_skeleton_from_observed_uses_toc_titles_and_observed_title_pages() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+
+    validate_book_skeleton(skeleton)
+    assert skeleton["metadata"]["schema_name"] == BOOK_SKELETON_SCHEMA_NAME
+    assert skeleton["metadata"]["schema_version"] == BOOK_SKELETON_SCHEMA_VERSION
+    assert skeleton["toc_pages"] == [10]
+    assert "printed_page" not in skeleton["toc_entries"][0]
+    entries = {entry["title"]: entry for entry in skeleton["toc_entries"]}
+    assert entries["第一章 米兰达"]["selected_page"] == 42
+    assert entries["丝绸之路主要地名中英古今对照表"]["selected_page"] == 317
+    assert entries["注释"]["candidate_pages"] == [319]
+    assert skeleton["boundaries"]["first_body_page"] == 14
+
+
+def test_build_book_skeleton_from_observed_accepts_llm_roles_but_not_llm_pages() -> None:
+    skeleton = build_book_skeleton_from_observed(
+        _document(),
+        llm_classification={
+            "entry_roles": [
+                {"entry_index": 0, "role": "front_matter"},
+                {"entry_index": 1, "role": "body"},
+                {"entry_index": 2, "role": "body"},
+                {"entry_index": 3, "role": "body"},
+                {"entry_index": 4, "role": "back_matter"},
+                {"entry_index": 5, "role": "back_matter", "page": 999},
+            ],
+            "first_body_entry_index": 1,
+            "last_body_entry_index": 3,
+            "first_back_matter_entry_index": 4,
+            "uncertain_entries": [{"entry_index": 5, "title": "注释", "reason": "short title"}],
+        },
+        llm_model="qwen-test",
+        llm_source="toc_llm",
+    )
+
+    assert skeleton["boundaries"]["first_body_entry_index"] == 1
+    assert skeleton["boundaries"]["first_body_page"] == 14
+    assert skeleton["boundaries"]["last_body_entry_index"] == 3
+    assert skeleton["boundaries"]["last_body_page"] == 308
+    assert skeleton["boundaries"]["first_back_matter_entry_index"] == 4
+    assert skeleton["boundaries"]["first_back_matter_page"] == 317
+    assert skeleton["llm"]["used"] is True
+    assert skeleton["llm"]["model"] == "qwen-test"
+
+
+def test_validate_book_skeleton_rejects_invalid_entry_role() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+    skeleton["toc_entries"][0]["role"] = "cover"
+
+    with pytest.raises(ValidationError, match="role"):
+        validate_book_skeleton(skeleton)

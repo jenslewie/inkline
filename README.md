@@ -50,7 +50,8 @@ uv run --extra mineru inkline ingest pdf data/samples/丝绸之路新史.pdf \
   --output data/outputs/丝绸之路新史/canonical.json \
   --observed-output data/outputs/丝绸之路新史/observed_document.json \
   --bookgraph-from-observed-output data/outputs/丝绸之路新史/canonical_v2_observed.json \
-  --internal-canonical-output data/outputs/丝绸之路新史/internal_canonical.json
+  --internal-canonical-output data/outputs/丝绸之路新史/internal_canonical.json \
+  --book-skeleton-output data/outputs/丝绸之路新史/book_skeleton.json
 ```
 
 MinerU ingestion keeps Qwen visual marker repair disabled by default. Enable it
@@ -127,7 +128,8 @@ uv run --extra mineru mineru-to-canonical \
   --output data/outputs/丝绸之路新史/canonical.json \
   --observed-output data/outputs/丝绸之路新史/observed_document.json \
   --bookgraph-from-observed-output data/outputs/丝绸之路新史/canonical_v2_observed.json \
-  --internal-canonical-output data/outputs/丝绸之路新史/internal_canonical.json
+  --internal-canonical-output data/outputs/丝绸之路新史/internal_canonical.json \
+  --book-skeleton-output data/outputs/丝绸之路新史/book_skeleton.json
 ```
 
 `canonical_v2_observed.json` is the public BookGraph projection for development.
@@ -135,6 +137,12 @@ uv run --extra mineru mineru-to-canonical \
 public projection plus per-page/node/edge/evidence debug provenance, TextUnits,
 layout audit, page-role candidates, and parser payload snapshots for internal
 troubleshooting.
+
+`book_skeleton.json` is a pre-release shadow artifact for TOC-driven book
+skeleton detection before BookGraph node construction. Add `--book-skeleton-llm`
+to use the local Ollama model to classify TOC entries into front matter, body,
+and back matter. The LLM is not allowed to decide PDF physical page numbers;
+those still come from ObservedDocument title evidence.
 
 To compare the v1-shadow and ObservedDocument-shadow BookGraph paths:
 

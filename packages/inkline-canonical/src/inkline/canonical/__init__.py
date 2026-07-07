@@ -1,3 +1,11 @@
+from inkline.canonical.book_skeleton import (
+    BOOK_SKELETON_SCHEMA_NAME,
+    BOOK_SKELETON_SCHEMA_VERSION,
+    book_skeleton_toc_llm_prompt,
+    build_book_skeleton_from_observed,
+    build_book_skeleton_toc_llm_input,
+    validate_book_skeleton,
+)
 from inkline.canonical.bookgraph import (
     BOOKGRAPH_SCHEMA_NAME,
     BOOKGRAPH_SCHEMA_VERSION,
@@ -58,6 +66,8 @@ __all__ = [
     "BLOCK_TYPES",
     "BOOKGRAPH_SCHEMA_NAME",
     "BOOKGRAPH_SCHEMA_VERSION",
+    "BOOK_SKELETON_SCHEMA_NAME",
+    "BOOK_SKELETON_SCHEMA_VERSION",
     "INTERNAL_CANONICAL_SCHEMA_NAME",
     "INTERNAL_CANONICAL_SCHEMA_VERSION",
     "OBSERVED_SCHEMA_NAME",
@@ -72,6 +82,9 @@ __all__ = [
     "audit_bookgraph",
     "audit_bookgraph_notes",
     "audit_text_unit_layout",
+    "book_skeleton_toc_llm_prompt",
+    "build_book_skeleton_from_observed",
+    "build_book_skeleton_toc_llm_input",
     "build_bookgraph_from_observed",
     "build_internal_canonical_from_observed",
     "build_text_units",
@@ -95,6 +108,7 @@ __all__ = [
     "resolve_page_footnote_refs",
     "sample_document",
     "strip_footnote_marker",
+    "validate_book_skeleton",
     "validate_bookgraph",
     "validate_document",
     "validate_internal_canonical",
