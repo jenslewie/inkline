@@ -27,6 +27,9 @@ TITLE_LOCATION_EXCLUDED_ROLE_HINTS = {
 TOC_ENTRY_RE = re.compile(
     r"^\s*(?P<title>.+?)\s*(?:[/／.·•…\-\s]+)?(?P<page>[ivxlcdmIVXLCDM\d]+)\s*$"
 )
+TOC_ENTRY_PART_RE = re.compile(
+    r"\s*(?P<title>.+?)\s+(?P<page>[ivxlcdmIVXLCDM\d]+)(?=\s+\S|$)"
+)
 BODY_TITLE_RE = re.compile(r"^(?:第[一二三四五六七八九十百千万\d]+(?:章节|部分|[章节部卷篇])|序章)")
 NUMERIC_BODY_TITLE_RE = re.compile(r"^\d{1,3}\s+\S")
 GENERIC_TITLES_REQUIRING_TITLE_HINT = {"注释", "索引", "参考文献", "参考书目"}
@@ -56,8 +59,8 @@ REQUIRED_ENTRY_FIELDS = {
     "entry_index": int,
     "title": str,
     "role": str,
-    "candidate_pages": list,
-    "selected_page": int | type(None),
+    "candidate_start_pages": list,
+    "selected_start_page": int | type(None),
     "attrs": dict,
 }
 
@@ -85,8 +88,8 @@ def build_book_skeleton_from_observed(
     entries = _parse_toc_entries(toc_text)
     for entry in entries:
         candidates = _locate_title_pages(page_records, entry["title"], exclude_pages=toc_pages)
-        entry["candidate_pages"] = candidates
-        entry["selected_page"] = candidates[0] if candidates else None
+        entry["candidate_start_pages"] = candidates
+        entry["selected_start_page"] = candidates[0] if candidates else None
     _apply_structural_roles(entries)
     llm_summary = _apply_llm_classification(
         entries,
@@ -117,7 +120,7 @@ def build_book_skeleton_toc_llm_input(document: dict[str, Any]) -> dict[str, Any
             {
                 "entry_index": entry["entry_index"],
                 "title": entry["title"],
-                "candidate_pages": _locate_title_pages(
+                "candidate_start_pages": _locate_title_pages(
                     page_records,
                     entry["title"],
                     exclude_pages=toc_pages,
@@ -146,7 +149,7 @@ def book_skeleton_toc_llm_prompt(input_data: dict[str, Any]) -> str:
     return (
         "You classify a book skeleton from table-of-contents entries.\n"
         "Use only entry_index and title to decide entry roles. Do not infer or output physical "
-        "PDF page numbers; candidate_pages are rule-layer evidence only.\n\n"
+        "PDF page numbers; candidate_start_pages are rule-layer evidence only.\n\n"
         "Definitions:\n"
         "- front_matter: content before the main body, such as foreword, preface, acknowledgements, "
         "dedication, editorial notes, or introductory front matter.\n"
@@ -247,11 +250,7 @@ def _detect_toc_pages(page_records: list[dict[str, Any]]) -> list[int]:
     pages: set[int] = set()
     for record in page_records:
         text = str(record.get("text") or "")
-        toc_like_lines = sum(
-            1
-            for line in text.splitlines()
-            if TOC_ENTRY_RE.match(_normalize_toc_line(line.strip())) is not None
-        )
+        toc_like_lines = _toc_like_line_count(text)
         has_toc_title = "目录" in text[:120]
         if (record.get("has_toc_hint") and (has_toc_title or toc_like_lines >= 3)) or (
             has_toc_title and toc_like_lines >= 2
@@ -273,9 +272,8 @@ def _detect_toc_pages(page_records: list[dict[str, Any]]) -> list[int]:
 
 def _toc_like_line_count(text: str) -> int:
     return sum(
-        1
+        len(_parse_toc_line_entries(line.strip()))
         for line in text.splitlines()
-        if TOC_ENTRY_RE.match(_normalize_toc_line(line.strip())) is not None
     )
 
 
@@ -294,23 +292,46 @@ def _parse_toc_entries(text: str) -> list[dict[str, Any]]:
     for line in (line.strip() for line in text.splitlines()):
         if not line or line == "目录":
             continue
-        match = TOC_ENTRY_RE.match(_normalize_toc_line(line))
-        if match is None:
-            continue
-        title = _clean_toc_title(match.group("title"))
-        if not title or _is_noise_toc_title(title):
-            continue
-        entries.append(
-            {
-                "entry_index": len(entries),
-                "title": title,
-                "role": "unknown",
-                "candidate_pages": [],
-                "selected_page": None,
-                "attrs": {},
-            }
-        )
+        for title in _parse_toc_line_entries(line):
+            entries.append(_toc_entry(len(entries), title))
     return entries
+
+
+def _parse_toc_line_entries(line: str) -> list[str]:
+    normalized_line = _normalize_toc_line(line)
+    matches = list(TOC_ENTRY_PART_RE.finditer(normalized_line))
+    if _should_parse_as_single_toc_entry(normalized_line, matches):
+        match = TOC_ENTRY_RE.match(normalized_line)
+        if match is None:
+            return []
+        title = _clean_toc_title(match.group("title"))
+        return [title] if title and not _is_noise_toc_title(title) else []
+    titles = []
+    for match in matches:
+        title = _clean_toc_title(match.group("title"))
+        if title and not _is_noise_toc_title(title):
+            titles.append(title)
+    return titles
+
+
+def _should_parse_as_single_toc_entry(line: str, matches: list[re.Match[str]]) -> bool:
+    if len(matches) <= 1:
+        return True
+    first = matches[0]
+    title = _clean_toc_title(first.group("title"))
+    page_token = first.group("page")
+    return title in {"附录", "Appendix", "appendix"} and len(page_token) == 1
+
+
+def _toc_entry(index: int, title: str) -> dict[str, Any]:
+    return {
+        "entry_index": index,
+        "title": title,
+        "role": "unknown",
+        "candidate_start_pages": [],
+        "selected_start_page": None,
+        "attrs": {},
+    }
 
 
 def _locate_title_pages(
@@ -381,11 +402,11 @@ def _boundaries(
     first_back = _first_role_index(entries, "back_matter")
     return {
         "first_body_entry_index": first_body,
-        "first_body_page": _selected_page(entries, first_body),
+        "first_body_page": _selected_start_page(entries, first_body),
         "last_body_entry_index": last_body,
-        "last_body_page": _selected_page(entries, last_body),
+        "last_body_page": _selected_start_page(entries, last_body),
         "first_back_matter_entry_index": first_back,
-        "first_back_matter_page": _selected_page(entries, first_back),
+        "first_back_matter_page": _selected_start_page(entries, first_back),
     }
 
 
@@ -395,10 +416,10 @@ def _valid_boundary_index(value: Any, entries: list[dict[str, Any]]) -> int | No
     return None
 
 
-def _selected_page(entries: list[dict[str, Any]], index: int | None) -> int | None:
+def _selected_start_page(entries: list[dict[str, Any]], index: int | None) -> int | None:
     if index is None:
         return None
-    page = entries[index].get("selected_page")
+    page = entries[index].get("selected_start_page")
     return int(page) if isinstance(page, int) else None
 
 
@@ -601,8 +622,24 @@ def _validate_toc_entries(entries: list[dict[str, Any]]) -> None:
         seen.add(entry_index)
         if entry["role"] not in BOOK_SKELETON_ENTRY_ROLES:
             raise ValidationError(f"toc_entries[{index}].role is invalid: {entry['role']}")
-        if not all(isinstance(page, int) for page in entry["candidate_pages"]):
-            raise ValidationError(f"toc_entries[{index}].candidate_pages must contain integers")
+        if "candidate_pages" in entry:
+            raise ValidationError(
+                f"toc_entries[{index}].candidate_pages is ambiguous; use candidate_start_pages"
+            )
+        if "selected_page" in entry:
+            raise ValidationError(
+                f"toc_entries[{index}].selected_page is ambiguous; use selected_start_page"
+            )
+        if not all(isinstance(page, int) for page in entry["candidate_start_pages"]):
+            raise ValidationError(
+                f"toc_entries[{index}].candidate_start_pages must contain integers"
+            )
+        if not entry["candidate_start_pages"] and _looks_like_glued_toc_title(entry["title"]):
+            raise ValidationError(f"toc_entries[{index}].title looks like glued TOC entries")
+
+
+def _looks_like_glued_toc_title(title: str) -> bool:
+    return len(title) >= 40 and len(list(TOC_ENTRY_PART_RE.finditer(title))) >= 2
 
 
 def _validate_boundaries(boundaries: dict[str, Any], entry_count: int) -> None:

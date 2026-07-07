@@ -110,10 +110,12 @@ def test_build_book_skeleton_from_observed_uses_toc_titles_and_observed_title_pa
     assert skeleton["metadata"]["schema_version"] == BOOK_SKELETON_SCHEMA_VERSION
     assert skeleton["toc_pages"] == [10]
     assert "printed_page" not in skeleton["toc_entries"][0]
+    assert "candidate_pages" not in skeleton["toc_entries"][0]
+    assert "selected_page" not in skeleton["toc_entries"][0]
     entries = {entry["title"]: entry for entry in skeleton["toc_entries"]}
-    assert entries["第一章 米兰达"]["selected_page"] == 42
-    assert entries["丝绸之路主要地名中英古今对照表"]["selected_page"] == 317
-    assert entries["注释"]["candidate_pages"] == [319]
+    assert entries["第一章 米兰达"]["selected_start_page"] == 42
+    assert entries["丝绸之路主要地名中英古今对照表"]["selected_start_page"] == 317
+    assert entries["注释"]["candidate_start_pages"] == [319]
     assert skeleton["boundaries"]["first_body_page"] == 14
 
 
@@ -171,6 +173,76 @@ def test_build_book_skeleton_from_observed_includes_toc_continuation_pages() -> 
     ]
 
 
+def test_build_book_skeleton_from_observed_splits_glued_toc_entries() -> None:
+    pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 50)]
+    document = make_observed_document(
+        {
+            "doc_id": "imjin",
+            "title": "壬辰战争",
+            "language": "zh-CN",
+            "source_file": "imjin.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        pages,
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text=(
+                    "目录\n"
+                    "I 日本：从战国时代到世界强权 32 中国：衰落中的明王朝 "
+                    "213 有子名 “舍” 384 朝鲜：通向战利品的大道 41"
+                ),
+                page=26,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="日本：从战国时代到世界强权",
+                page=32,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="中国：衰落中的明王朝",
+                page=21,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="有子名 “舍”",
+                page=38,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000005",
+                "text_region",
+                text="朝鲜：通向战利品的大道",
+                page=41,
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+    titles = [entry["title"] for entry in skeleton["toc_entries"]]
+
+    assert "I 日本：从战国时代到世界强权 32 中国：衰落中的明王朝 213 有子名 “舍” 384 朝鲜：通向战利品的大道" not in titles
+    assert titles == [
+        "I 日本：从战国时代到世界强权",
+        "中国：衰落中的明王朝",
+        "有子名 “舍”",
+        "朝鲜：通向战利品的大道",
+    ]
+    entries = {entry["title"]: entry for entry in skeleton["toc_entries"]}
+    assert entries["I 日本：从战国时代到世界强权"]["selected_start_page"] == 32
+    assert entries["中国：衰落中的明王朝"]["selected_start_page"] == 21
+
+
 def test_build_book_skeleton_from_observed_ignores_note_headers_when_locating_titles() -> None:
     pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 530)]
     document = make_observed_document(
@@ -225,8 +297,8 @@ def test_build_book_skeleton_from_observed_ignores_note_headers_when_locating_ti
     skeleton = build_book_skeleton_from_observed(document)
     entry = next(entry for entry in skeleton["toc_entries"] if entry["title"] == "第八章 大行集结")
 
-    assert entry["selected_page"] == 172
-    assert 522 not in entry["candidate_pages"]
+    assert entry["selected_start_page"] == 172
+    assert 522 not in entry["candidate_start_pages"]
 
 
 def test_build_book_skeleton_from_observed_accepts_llm_roles_but_not_llm_pages() -> None:
@@ -352,7 +424,7 @@ def test_build_book_skeleton_from_observed_downranks_footnote_heavy_title_matche
         entry for entry in skeleton["toc_entries"] if entry["title"] == "附录 1 关于人数的一个问题"
     )
 
-    assert entry["selected_page"] == 483
+    assert entry["selected_start_page"] == 483
 
 
 def test_validate_book_skeleton_rejects_invalid_entry_role() -> None:
@@ -360,4 +432,25 @@ def test_validate_book_skeleton_rejects_invalid_entry_role() -> None:
     skeleton["toc_entries"][0]["role"] = "cover"
 
     with pytest.raises(ValidationError, match="role"):
+        validate_book_skeleton(skeleton)
+
+
+def test_validate_book_skeleton_rejects_ambiguous_legacy_page_fields() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+    skeleton["toc_entries"][0]["candidate_pages"] = [1]
+
+    with pytest.raises(ValidationError, match="candidate_pages"):
+        validate_book_skeleton(skeleton)
+
+
+def test_validate_book_skeleton_rejects_unlocated_glued_toc_title() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+    skeleton["toc_entries"][0]["title"] = (
+        "I 日本：从战国时代到世界强权 32 中国：衰落中的明王朝 "
+        "213 有子名 “舍” 384 朝鲜：通向战利品的大道"
+    )
+    skeleton["toc_entries"][0]["candidate_start_pages"] = []
+    skeleton["toc_entries"][0]["selected_start_page"] = None
+
+    with pytest.raises(ValidationError, match="glued TOC"):
         validate_book_skeleton(skeleton)
