@@ -310,14 +310,9 @@ def locate_title_pages(
         page = int(record["page"])
         if page in excluded:
             continue
-        text = str(
-            record.get("title_text_snippet")
-            or record.get("content_text_snippet")
-            or record.get("text_snippet")
-            or ""
-        )
+        text = _title_location_text(record)
         page_key = _normalize_title(text)
-        if title_key and title_key in page_key:
+        if _title_matches_record(record, title_key, page_key):
             candidates.append((page, _title_location_score(record, title_key, text, page_key)))
     return [page for page, _score in sorted(candidates, key=lambda item: (-item[1], item[0]))]
 
@@ -602,7 +597,37 @@ def _unpaged_structural_toc_title(line: str) -> str | None:
 
 
 def _normalize_title(text: str) -> str:
-    return re.sub(r"[\s　,，.。:：;；/／\\\-—–·•…*＊《》〈〉（）()【】\[\]]+", "", text)
+    return re.sub(r"[\s　,，.。:：;；/／\\\-—–·•…*＊①②③④⑤⑥⑦⑧⑨⑩《》〈〉（）()【】\[\]]+", "", text)
+
+
+def _title_location_text(record: dict[str, Any]) -> str:
+    snippets = [
+        str(record.get("content_text_snippet") or ""),
+        str(record.get("title_text_snippet") or ""),
+    ]
+    lines = []
+    seen = set()
+    for snippet in snippets:
+        for line in snippet.splitlines():
+            stripped = line.strip()
+            if stripped and stripped not in seen:
+                seen.add(stripped)
+                lines.append(stripped)
+    return "\n".join(lines)
+
+
+def _title_matches_record(record: dict[str, Any], title_key: str, page_key: str) -> bool:
+    if not title_key:
+        return False
+    if not _requires_title_hint_match(title_key):
+        return title_key in page_key
+    title_text_key = _normalize_title(str(record.get("title_text_snippet") or ""))
+    return title_key in title_text_key
+
+
+def _requires_title_hint_match(title_key: str) -> bool:
+    generic_titles = {"注释", "索引", "参考文献", "参考书目"}
+    return title_key in generic_titles
 
 
 def _title_location_score(

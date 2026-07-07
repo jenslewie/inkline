@@ -614,6 +614,93 @@ def test_locate_title_pages_handles_title_split_across_leading_lines() -> None:
     assert tool.locate_title_pages(package, title, exclude_pages=[1])[:2] == [3, 7]
 
 
+def test_locate_title_pages_handles_title_split_across_role_hints() -> None:
+    tool = _load_tool()
+    title = "第一部分 通往阿金库尔之路"
+    document = _document_with_pages(
+        doc_id="split-title-role-hints",
+        page_count=3,
+        observations=[
+            make_observation("toc", "text_region", text=f"目录\n{title} 1", page=1, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "part",
+                "text_region",
+                text="第一部分",
+                page=2,
+                bbox=[180, 100, 220, 120],
+                role_hint="body_text",
+            ),
+            make_observation(
+                "title",
+                "text_region",
+                text="通往阿金库尔之路",
+                page=2,
+                bbox=[120, 140, 300, 160],
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    package = tool.build_skeleton_evidence_package(document)
+
+    assert tool.locate_title_pages(package, title, exclude_pages=[1]) == [2]
+
+
+def test_locate_title_pages_ignores_circled_note_marker_in_title() -> None:
+    tool = _load_tool()
+    title = "大事年表"
+    document = _document_with_pages(
+        doc_id="circled-note-title",
+        page_count=3,
+        observations=[
+            make_observation("toc", "text_region", text=f"目录\n{title} 896", page=1, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "title",
+                "text_region",
+                text="大事年表①",
+                page=2,
+                bbox=[120, 140, 300, 160],
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    package = tool.build_skeleton_evidence_package(document)
+
+    assert tool.locate_title_pages(package, title, exclude_pages=[1]) == [2]
+
+
+def test_locate_title_pages_requires_title_hint_for_generic_short_titles() -> None:
+    tool = _load_tool()
+    document = _document_with_pages(
+        doc_id="generic-title-body-mention",
+        page_count=3,
+        observations=[
+            make_observation("toc", "text_region", text="目录\n注释 500", page=1, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "body-mention",
+                "text_region",
+                text="在我的注释中，我清楚地注明了他们对我的帮助。",
+                page=2,
+                bbox=[40, 80, 360, 500],
+                role_hint="body_text",
+            ),
+            make_observation(
+                "note-title",
+                "text_region",
+                text="注释",
+                page=3,
+                bbox=[120, 140, 300, 160],
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    package = tool.build_skeleton_evidence_package(document)
+
+    assert tool.locate_title_pages(package, "注释", exclude_pages=[1]) == [3]
+
+
 def test_locate_title_pages_uses_title_hint_even_when_page_snippet_starts_with_references() -> None:
     tool = _load_tool()
     document = _document_with_pages(
@@ -771,7 +858,14 @@ def test_toc_driven_skeleton_plan_skips_index_continuation_pages_before_residual
                 role_hint="toc_text",
             ),
             make_observation("body", "text_region", text="第一章 正文", page=2, bbox=[40, 80, 360, 500]),
-            make_observation("index-title", "text_region", text="索引", page=5, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "index-title",
+                "text_region",
+                text="索引",
+                page=5,
+                bbox=[40, 80, 360, 500],
+                role_hint="title_text",
+            ),
             make_observation(
                 "index-1",
                 "text_region",
