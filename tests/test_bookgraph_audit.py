@@ -8,7 +8,7 @@ from inkline.canonical import (
     make_evidence,
     make_node,
 )
-from inkline.canonical.bookgraph_audit import audit_bookgraph
+from inkline.canonical.bookgraph.audit import audit_bookgraph
 
 
 def _metadata() -> dict:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from inkline.canonical.bookgraph import validate_bookgraph
+from inkline.canonical.bookgraph.schema import validate_bookgraph
 
 
 def bookgraph_to_blocks(graph: dict[str, Any]) -> list[dict[str, Any]]:

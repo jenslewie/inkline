@@ -4,8 +4,8 @@ import json
 from copy import deepcopy
 from typing import Any
 
-from inkline.canonical.book_skeleton_contract import BOOK_SKELETON_ENTRY_ROLES
-from inkline.canonical.book_skeleton_pages import (
+from inkline.canonical.book_skeleton.contract import BOOK_SKELETON_ENTRY_ROLES
+from inkline.canonical.book_skeleton.pages import (
     boundaries,
     detect_toc_pages,
     locate_toc_entry_pages,
@@ -15,7 +15,7 @@ from inkline.canonical.book_skeleton_pages import (
     prune_candidate_start_pages_to_toc_intervals,
     select_monotonic_start_pages,
 )
-from inkline.canonical.book_skeleton_toc import (
+from inkline.canonical.book_skeleton.toc import (
     apply_role_level_guardrails,
     apply_structural_role_guardrails,
     assign_toc_hierarchy,
@@ -23,8 +23,8 @@ from inkline.canonical.book_skeleton_toc import (
     looks_like_body_toc_entry,
     parse_toc_entries,
 )
-from inkline.canonical.book_skeleton_validation import validate_book_skeleton
-from inkline.canonical.observed import validate_observed_document
+from inkline.canonical.book_skeleton.validation import validate_book_skeleton
+from inkline.canonical.observed.schema import validate_observed_document
 
 
 def build_book_skeleton_from_observed(

@@ -8,8 +8,8 @@ from inkline.canonical import (
     make_observed_document,
     make_observed_page,
 )
-from inkline.canonical.text_unit_layout import classify_text_units_by_layout
-from inkline.canonical.text_units import build_text_units
+from inkline.canonical.observed.text_unit_layout import classify_text_units_by_layout
+from inkline.canonical.observed.text_units import build_text_units
 
 
 def _metadata() -> dict:

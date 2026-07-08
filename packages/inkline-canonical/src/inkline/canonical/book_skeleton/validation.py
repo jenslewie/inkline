@@ -5,7 +5,7 @@ from collections import Counter
 from copy import deepcopy
 from typing import Any
 
-from inkline.canonical.book_skeleton_contract import (
+from inkline.canonical.book_skeleton.contract import (
     BOOK_SKELETON_ENTRY_ROLE_ORDER,
     BOOK_SKELETON_ENTRY_ROLES,
     BOOK_SKELETON_SCHEMA_NAME,

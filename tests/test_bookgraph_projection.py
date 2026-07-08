@@ -7,7 +7,7 @@ from inkline.canonical import (
     make_evidence,
     make_node,
 )
-from inkline.canonical.bookgraph_projection import bookgraph_to_blocks
+from inkline.canonical.bookgraph.projection import bookgraph_to_blocks
 
 
 def _metadata() -> dict:

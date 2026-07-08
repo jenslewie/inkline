@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from inkline.canonical.book_skeleton_contract import (
+from inkline.canonical.book_skeleton.contract import (
     BOOK_SKELETON_SCHEMA_NAME,
     BOOK_SKELETON_SCHEMA_VERSION,
 )
-from inkline.canonical.book_skeleton_toc import (
+from inkline.canonical.book_skeleton.toc import (
     normalize_title,
     parse_toc_line_entries,
 )

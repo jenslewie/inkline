@@ -6,8 +6,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from inkline.canonical.bookgraph import make_bookgraph, make_edge, validate_bookgraph
-from inkline.canonical.footnote_text import strip_footnote_marker
+from inkline.canonical.bookgraph.footnote_text import strip_footnote_marker
+from inkline.canonical.bookgraph.schema import make_bookgraph, make_edge, validate_bookgraph
 
 _NOTE_SECTION_HEADING_PATTERN = re.compile(
     r"^\s*(?:注释|注|notes?|endnotes?)\s*$", re.IGNORECASE

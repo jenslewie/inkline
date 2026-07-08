@@ -725,7 +725,7 @@ def test_book_skeleton_rules_do_not_hardcode_sample_specific_titles() -> None:
     )
     production_source = "\n".join(
         (canonical_dir / filename).read_text()
-        for filename in ("book_skeleton_toc.py", "book_skeleton_pages.py")
+        for filename in ("book_skeleton/toc.py", "book_skeleton/pages.py")
     )
 
     assert "古代地中海各文明年代图表" not in production_source

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from inkline.canonical import validate_bookgraph
-from inkline.canonical.observed_bookgraph import build_observed_bookgraph_artifacts
+from inkline.canonical.bookgraph.from_observed import build_observed_bookgraph_artifacts
 from inkline.parsers.mineru.normalize.bookgraph_shadow import build_bookgraph_shadow
 
 

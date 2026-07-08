@@ -4,8 +4,8 @@ from collections import Counter
 from copy import deepcopy
 from typing import Any
 
-from inkline.canonical.bookgraph import BOOKGRAPH_NODE_TYPES, validate_bookgraph
-from inkline.canonical.bookgraph_projection import bookgraph_to_blocks
+from inkline.canonical.bookgraph.projection import bookgraph_to_blocks
+from inkline.canonical.bookgraph.schema import BOOKGRAPH_NODE_TYPES, validate_bookgraph
 
 
 def audit_bookgraph(

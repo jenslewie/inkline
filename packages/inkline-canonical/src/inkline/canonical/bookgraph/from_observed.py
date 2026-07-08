@@ -3,7 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from inkline.canonical.bookgraph import (
+from inkline.canonical.bookgraph.internal import make_internal_canonical
+from inkline.canonical.bookgraph.notes import resolve_bookgraph_note_refs
+from inkline.canonical.bookgraph.schema import (
     BOOKGRAPH_SCHEMA_NAME,
     BOOKGRAPH_SCHEMA_VERSION,
     make_bookgraph,
@@ -11,15 +13,13 @@ from inkline.canonical.bookgraph import (
     make_evidence,
     make_node,
 )
-from inkline.canonical.bookgraph_notes import resolve_bookgraph_note_refs
-from inkline.canonical.internal_canonical import make_internal_canonical
-from inkline.canonical.observed import validate_observed_document
-from inkline.canonical.page_roles import classify_observed_page_roles, page_roles_by_page
-from inkline.canonical.text_unit_layout import (
+from inkline.canonical.observed.page_roles import classify_observed_page_roles, page_roles_by_page
+from inkline.canonical.observed.schema import validate_observed_document
+from inkline.canonical.observed.text_unit_layout import (
     audit_text_unit_layout,
     classify_text_units_by_layout,
 )
-from inkline.canonical.text_units import build_text_units
+from inkline.canonical.observed.text_units import build_text_units
 
 INTERNAL_METADATA_PREFIXES = ("shadow_",)
 INTERNAL_NODE_ATTRS = {

@@ -4,7 +4,7 @@ from collections import Counter
 from copy import deepcopy
 from typing import Any
 
-from inkline.canonical.observed import validate_observed_document
+from inkline.canonical.observed.schema import validate_observed_document
 
 TEXT_UNIT_TYPES = {"heading", "paragraph", "display_block", "list_item", "footnote"}
 _MIN_FIRST_LINE_INDENT = 8.0

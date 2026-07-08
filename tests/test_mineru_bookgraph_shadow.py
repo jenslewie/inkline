@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from inkline.canonical.bookgraph_projection import bookgraph_to_blocks
+from inkline.canonical.bookgraph.projection import bookgraph_to_blocks
 from inkline.parsers.mineru.normalize.bookgraph_shadow import build_bookgraph_shadow
 
 

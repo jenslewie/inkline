@@ -11,7 +11,7 @@ from inkline.canonical import (
     make_observed_document,
     make_observed_page,
 )
-from inkline.canonical.observed_bookgraph import build_internal_canonical_from_observed
+from inkline.canonical.bookgraph.from_observed import build_internal_canonical_from_observed
 
 
 def _load_tool() -> Any:

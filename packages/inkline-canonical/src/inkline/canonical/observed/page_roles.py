@@ -4,9 +4,9 @@ from collections import Counter
 from itertools import pairwise
 from typing import Any
 
-from inkline.canonical.observed import validate_observed_document
-from inkline.canonical.text_unit_layout import audit_text_unit_layout
-from inkline.canonical.text_units import build_text_units
+from inkline.canonical.observed.schema import validate_observed_document
+from inkline.canonical.observed.text_unit_layout import audit_text_unit_layout
+from inkline.canonical.observed.text_units import build_text_units
 
 VISUAL_KINDS = {"image_region", "table_region"}
 TEXT_KINDS = {"text_region", "footnote_region"}

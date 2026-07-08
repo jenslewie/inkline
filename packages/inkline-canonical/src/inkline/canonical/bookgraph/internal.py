@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from inkline.canonical.bookgraph import validate_bookgraph
+from inkline.canonical.bookgraph.schema import validate_bookgraph
 from inkline.canonical.schema import ValidationError
 
 INTERNAL_CANONICAL_SCHEMA_NAME = "inkline_internal_canonical"

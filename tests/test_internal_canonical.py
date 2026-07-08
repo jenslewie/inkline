@@ -8,7 +8,7 @@ from inkline.canonical import (
     make_observed_page,
     validate_internal_canonical,
 )
-from inkline.canonical.observed_bookgraph import (
+from inkline.canonical.bookgraph.from_observed import (
     build_bookgraph_from_observed,
     build_internal_canonical_from_observed,
 )
