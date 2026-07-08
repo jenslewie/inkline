@@ -17,23 +17,23 @@ TOC_APPENDIX_LABEL_RE = re.compile(r"^(?P<label>附录)\s+(?P<title>.+)$")
 TOC_NUMBER_LABEL_RE = re.compile(r"^(?P<label>[0-9]+|[IVXLCDM]+|[ivxlcdm]+)\s+(?P<title>.+)$")
 BODY_TITLE_RE = re.compile(r"^(?:第[一二三四五六七八九十百千万\d]+(?:章节|部分|[章节部卷篇])|序章)")
 NUMERIC_BODY_TITLE_RE = re.compile(r"^\d{1,3}\s+\S")
-GENERIC_TITLES_REQUIRING_TITLE_HINT = {"注释", "索引", "参考文献", "参考书目"}
-TOP_LEVEL_UNLABELED_TITLES = {
+BOOK_MATTER_TITLE_PREFIXES = (
     "前言",
     "序言",
     "引言",
     "致谢",
     "说明",
     "结论",
+    "附录",
     "注释",
     "参考书目",
     "参考文献",
     "索引",
+    "译后记",
     "出版后记",
     "扩展阅读",
     "大事年表",
-    "古代地中海各文明年代图表",
-}
+)
 
 
 def parse_toc_entries(text: str) -> list[dict[str, Any]]:
@@ -160,23 +160,7 @@ def normalize_title(text: str) -> str:
 
 def is_top_level_unlabeled_title(title: str) -> bool:
     stripped = title.strip()
-    if stripped in TOP_LEVEL_UNLABELED_TITLES:
-        return True
-    return any(
-        stripped.startswith(prefix)
-        for prefix in (
-            "结论",
-            "附录",
-            "注释",
-            "参考书目",
-            "参考文献",
-            "索引",
-            "译后记",
-            "出版后记",
-            "扩展阅读",
-            "大事年表",
-        )
-    )
+    return any(stripped.startswith(prefix) for prefix in BOOK_MATTER_TITLE_PREFIXES)
 
 
 def _logical_toc_lines(text: str) -> list[str]:

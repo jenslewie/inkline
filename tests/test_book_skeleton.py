@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from inkline.canonical import (
@@ -710,6 +712,66 @@ def test_build_book_skeleton_from_observed_supports_topic_and_appendix_labels() 
     assert entries["第31章 早期基督教社群"]["selected_start_page"] == 798
     assert entries["古代地中海各文明年代图表"]["candidate_start_pages"] == [939]
     assert entries["古代地中海各文明年代图表"]["selected_start_page"] == 939
+
+
+def test_book_skeleton_rules_do_not_hardcode_sample_specific_titles() -> None:
+    canonical_dir = (
+        Path(__file__).resolve().parents[1]
+        / "packages"
+        / "inkline-canonical"
+        / "src"
+        / "inkline"
+        / "canonical"
+    )
+    production_source = "\n".join(
+        (canonical_dir / filename).read_text()
+        for filename in ("book_skeleton_toc.py", "book_skeleton_pages.py")
+    )
+
+    assert "古代地中海各文明年代图表" not in production_source
+
+
+def test_build_book_skeleton_from_observed_requires_title_evidence_for_short_titles() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "short-title",
+            "title": "Short Title",
+            "language": "zh-CN",
+            "source_file": "short.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        [make_observed_page(page, width=1000, height=1400) for page in range(1, 4)],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\n致谢 1\n第一章 正文 3",
+                page=1,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="作者在正文中表达了致谢，但这里不是章节标题。",
+                page=2,
+                role_hint="body_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="致谢",
+                page=3,
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+    entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
+
+    assert entries["致谢"]["candidate_start_pages"] == [3]
+    assert entries["致谢"]["selected_start_page"] == 3
 
 
 def test_build_book_skeleton_from_observed_regresses_silk_split_title_pages() -> None:

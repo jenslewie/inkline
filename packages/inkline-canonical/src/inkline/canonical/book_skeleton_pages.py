@@ -8,7 +8,6 @@ from inkline.canonical.book_skeleton_contract import (
     BOOK_SKELETON_SCHEMA_VERSION,
 )
 from inkline.canonical.book_skeleton_toc import (
-    GENERIC_TITLES_REQUIRING_TITLE_HINT,
     normalize_title,
     parse_toc_line_entries,
 )
@@ -24,6 +23,7 @@ TITLE_LOCATION_EXCLUDED_ROLE_HINTS = {
     "footer",
     "caption_text",
 }
+SHORT_AMBIGUOUS_TITLE_KEY_MAX_LENGTH = 4
 
 
 def metadata(document: dict[str, Any]) -> dict[str, Any]:
@@ -336,13 +336,17 @@ def _title_matches_record(record: dict[str, Any], title_key: str, page_key: str)
     if not title_key:
         return False
     title_text_key = normalize_title(str(record.get("title_text") or ""))
-    if title_key in GENERIC_TITLES_REQUIRING_TITLE_HINT:
+    if _requires_title_evidence(title_key):
         return title_key in title_text_key or _near_title_match(title_key, title_text_key)
     return (
         title_key in page_key
         or _near_title_match(title_key, page_key)
         or _near_title_match(title_key, title_text_key)
     )
+
+
+def _requires_title_evidence(title_key: str) -> bool:
+    return len(title_key) <= SHORT_AMBIGUOUS_TITLE_KEY_MAX_LENGTH
 
 
 def _near_title_match(title_key: str, text_key: str) -> bool:
