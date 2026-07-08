@@ -1,10 +1,14 @@
 from inkline.canonical.book_skeleton import (
-    BOOK_SKELETON_SCHEMA_NAME,
-    BOOK_SKELETON_SCHEMA_VERSION,
-    audit_book_skeleton,
     book_skeleton_toc_llm_prompt,
     build_book_skeleton_from_observed,
     build_book_skeleton_toc_llm_input,
+)
+from inkline.canonical.book_skeleton_contract import (
+    BOOK_SKELETON_SCHEMA_NAME,
+    BOOK_SKELETON_SCHEMA_VERSION,
+)
+from inkline.canonical.book_skeleton_validation import (
+    audit_book_skeleton,
     validate_book_skeleton,
 )
 from inkline.canonical.bookgraph import (
