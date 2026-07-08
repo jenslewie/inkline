@@ -23,6 +23,63 @@ docs/                             Architecture and canonical contract notes.
 tests/                            Cross-package smoke and regression tests.
 ```
 
+### Canonical Package Structure
+
+`packages/inkline-canonical` is the system hub: parser adapters write into it,
+EPUB/RAG/export code read from it, and shadow BookGraph work evolves there
+before becoming the release canonical contract. Its public facade is
+`inkline.canonical`; implementation modules are grouped by contract layer:
+
+```text
+inkline/canonical/
+  __init__.py              Public exports for stable callers.
+  schema.py                Current canonical document schema and validation.
+  io.py                    JSON read/write helpers for canonical artifacts.
+  types.py                 Shared TypedDict-style legacy canonical types.
+  source_map.py            Source/page/bbox mapping helpers.
+
+  observed/                Parser-neutral ObservedDocument layer.
+    schema.py              Observation, page, and document contracts.
+    page_roles.py          Geometry-first page-role candidates.
+    text_units.py          Natural text-unit construction.
+    text_unit_layout.py    Layout-profile and text-unit audit helpers.
+
+  book_skeleton/           TOC-driven book skeleton layer.
+    contract.py            Skeleton schema and role contracts.
+    toc.py                 TOC entry extraction and normalization.
+    pages.py               Physical-page localization from observed titles.
+    builder.py             Skeleton assembly from ObservedDocument evidence.
+    validation.py          Skeleton contract validation.
+
+  bookgraph/               BookGraph v2 shadow layer.
+    schema.py              Public BookGraph node/edge/evidence contract.
+    from_observed.py       ObservedDocument -> BookGraph builder.
+    notes.py               Note/reference relation helpers.
+    projection.py          BookGraph -> legacy block projection bridge.
+    audit.py               Projection and structure audit helpers.
+    internal.py            Internal audit artifact with debug provenance.
+    footnote_text.py       Footnote text normalization utilities.
+```
+
+The intended data flow is:
+
+```text
+parser output -> ObservedDocument -> BookSkeleton -> BookGraph -> projections
+```
+
+`ObservedDocument`, `BookSkeleton`, `BookGraph`, and `internal_canonical` are
+still pre-release development artifacts. They should make parser-neutral
+structure explicit without leaking MinerU-specific fields into public contracts.
+Parser-specific payloads belong in provenance/debug payload fields, not in the
+top-level canonical schema.
+
+As a maintainability guardrail, avoid growing `inkline.canonical` back into a
+large flat namespace. If a package grows beyond 10 top-level modules, evaluate
+whether related modules should become a subpackage with a small public facade.
+`tests/test_canonical_package_structure.py` enforces this for
+`inkline.canonical`; if Ruff or Pylint gains a native package-module-count rule,
+enable it there as well.
+
 ## Quick Start
 
 Install the workspace and run tests from the repository root:
