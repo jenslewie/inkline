@@ -117,8 +117,9 @@ def test_build_book_skeleton_from_observed_uses_toc_titles_and_observed_title_pa
     assert "printed_start_page" not in skeleton["toc_entries"][0]
     assert "candidate_pages" not in skeleton["toc_entries"][0]
     assert "selected_page" not in skeleton["toc_entries"][0]
+    for removed_field in ("raw_title", "title", "raw_label", "label"):
+        assert removed_field not in skeleton["toc_entries"][0]
     entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
-    assert entries["第一章 米兰达"]["title"] == "米兰达"
     assert entries["第一章 米兰达"]["selected_start_page"] == 42
     assert entries["丝绸之路主要地名中英古今对照表"]["selected_start_page"] == 317
     assert entries["注释"]["candidate_start_pages"] == [319]
@@ -172,7 +173,7 @@ def test_build_book_skeleton_from_observed_includes_toc_continuation_pages() -> 
     skeleton = build_book_skeleton_from_observed(document)
 
     assert skeleton["toc_pages"] == [26, 27]
-    assert [entry["title"] for entry in skeleton["toc_entries"]][-3:] == [
+    assert [entry["display_title"] for entry in skeleton["toc_entries"]][-3:] == [
         "参考书目",
         "注释",
         "出版后记",
@@ -244,22 +245,14 @@ def test_build_book_skeleton_from_observed_splits_glued_toc_entries() -> None:
         "3 有子名 “舍”",
         "4 朝鲜：通向战利品的大道",
     ]
-    entries = {entry["title"]: entry for entry in skeleton["toc_entries"]}
-    assert entries["日本：从战国时代到世界强权"]["raw_label"] == "I"
-    assert entries["日本：从战国时代到世界强权"]["label"] == "1"
-    assert entries["中国：衰落中的明王朝"]["raw_label"] == "2"
-    assert entries["中国：衰落中的明王朝"]["label"] == "2"
-    assert entries["有子名 “舍”"]["raw_label"] == "3"
-    assert entries["有子名 “舍”"]["label"] == "3"
-    assert entries["朝鲜：通向战利品的大道"]["raw_label"] == "4"
-    assert entries["朝鲜：通向战利品的大道"]["label"] == "4"
-    assert entries["日本：从战国时代到世界强权"]["attrs"]["label_correction"] == {
-        "from": "I",
-        "to": "1",
-        "reason": "ocr_roman_i_in_numeric_toc",
-    }
-    assert entries["日本：从战国时代到世界强权"]["selected_start_page"] == 32
-    assert entries["中国：衰落中的明王朝"]["selected_start_page"] == 21
+    for entry in skeleton["toc_entries"]:
+        assert "raw_label" not in entry
+        assert "label" not in entry
+        assert "title" not in entry
+        assert "label_correction" not in entry["attrs"]
+    entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
+    assert entries["1 日本：从战国时代到世界强权"]["selected_start_page"] == 32
+    assert entries["2 中国：衰落中的明王朝"]["selected_start_page"] == 21
 
 
 def test_build_book_skeleton_from_observed_recovers_glued_multi_digit_numeric_labels() -> None:
@@ -703,10 +696,11 @@ def test_build_book_skeleton_from_observed_supports_topic_and_appendix_labels() 
     skeleton = build_book_skeleton_from_observed(document)
     entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
 
-    assert entries["专题1 阿玛尔那信札"]["raw_label"] == "专题 1"
-    assert entries["专题1 阿玛尔那信札"]["label"] == "专题1"
-    assert entries["专题2 萨福与抒情诗"]["label"] == "专题2"
-    assert entries["附录1 关于人数的一个问题"]["label"] == "附录1"
+    assert "raw_label" not in entries["专题1 阿玛尔那信札"]
+    assert "label" not in entries["专题1 阿玛尔那信札"]
+    assert "title" not in entries["专题1 阿玛尔那信札"]
+    assert "专题2 萨福与抒情诗" in entries
+    assert "附录1 关于人数的一个问题" in entries
     assert "第13章 希波战争" in entries
     assert "viii 埃及、希腊与罗马 第13章 希波战争" not in entries
     assert entries["第31章 早期基督教社群"]["candidate_start_pages"][0] == 798
@@ -1031,21 +1025,15 @@ def test_build_book_skeleton_from_observed_preserves_toc_labels_pages_and_hierar
     skeleton = build_book_skeleton_from_observed(document)
     entries = skeleton["toc_entries"]
 
-    assert entries[0]["title"] == "东亚三国"
     assert entries[0]["display_title"] == "第一部分 东亚三国"
-    assert entries[0]["label"] == "第一部分"
     assert "printed_start_page" not in entries[0]
     assert entries[0]["level"] == 1
     assert entries[0]["parent_entry_index"] is None
-    assert entries[1]["title"] == "日本：从战国时代到世界强权"
     assert entries[1]["display_title"] == "1 日本：从战国时代到世界强权"
-    assert entries[1]["raw_label"] == "I"
-    assert entries[1]["label"] == "1"
     assert "printed_start_page" not in entries[1]
     assert entries[1]["level"] == 2
     assert entries[1]["parent_entry_index"] == 0
     assert entries[2]["display_title"] == "2 中国：衰落中的明王朝"
-    assert entries[2]["label"] == "2"
     assert entries[2]["level"] == 2
     assert entries[2]["parent_entry_index"] == 0
     assert entries[5]["display_title"] == "第二部分 战争前夜"
@@ -1109,7 +1097,6 @@ def test_build_book_skeleton_from_observed_ignores_note_headers_when_locating_ti
         entry for entry in skeleton["toc_entries"] if entry["display_title"] == "第八章 大行集结"
     )
 
-    assert entry["title"] == "大行集结"
     assert entry["selected_start_page"] == 172
     assert 522 not in entry["candidate_start_pages"]
 
@@ -1155,9 +1142,12 @@ def test_book_skeleton_toc_llm_prompt_defines_output_field_contract() -> None:
     )
 
     assert '"entry_index"' in prompt
-    assert '"raw_title"' in prompt
     assert '"display_title"' in prompt
     assert '"parent_entry_index"' in prompt
+    assert '"raw_title"' not in prompt
+    assert '"title"' not in prompt
+    assert '"raw_label"' not in prompt
+    assert '"label"' not in prompt
     assert "level starts at 1" in prompt
     assert "front_matter" in prompt
     assert "body" in prompt
@@ -1379,8 +1369,6 @@ def test_build_book_skeleton_from_observed_downranks_footnote_heavy_title_matche
         if entry["display_title"] == "附录1 关于人数的一个问题"
     )
 
-    assert entry["label"] == "附录1"
-    assert entry["title"] == "关于人数的一个问题"
     assert entry["selected_start_page"] == 483
 
 
@@ -1439,7 +1427,7 @@ def test_build_book_skeleton_from_observed_ignores_body_text_for_start_pages() -
     )
 
     skeleton = build_book_skeleton_from_observed(document)
-    entries = {entry["title"]: entry for entry in skeleton["toc_entries"]}
+    entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
 
     assert entries["中世纪欧洲的启示文学传统"]["candidate_start_pages"] == [493]
     assert entries["中世纪欧洲的启示文学传统"]["selected_start_page"] == 493
@@ -1497,7 +1485,7 @@ def test_build_book_skeleton_from_observed_preserves_local_best_when_order_allow
     )
 
     skeleton = build_book_skeleton_from_observed(document)
-    entries = {entry["title"]: entry for entry in skeleton["toc_entries"]}
+    entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
 
     assert entries["序言"]["candidate_start_pages"] == [21, 9]
     assert entries["序言"]["selected_start_page"] == 21
@@ -1529,7 +1517,7 @@ def test_validate_book_skeleton_rejects_printed_start_page() -> None:
 
 def test_validate_book_skeleton_rejects_unlocated_glued_toc_title() -> None:
     skeleton = build_book_skeleton_from_observed(_document())
-    skeleton["toc_entries"][0]["title"] = (
+    skeleton["toc_entries"][0]["display_title"] = (
         "I 日本：从战国时代到世界强权 32 中国：衰落中的明王朝 "
         "213 有子名 “舍” 384 朝鲜：通向战利品的大道"
     )
@@ -1591,7 +1579,7 @@ def test_audit_book_skeleton_reports_clean_summary_for_valid_skeleton() -> None:
     assert audit["issues"] == []
 
 
-def test_audit_book_skeleton_reports_label_ocr_corrections_for_llm_review() -> None:
+def test_audit_book_skeleton_does_not_report_internal_label_corrections() -> None:
     pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 40)]
     document = make_observed_document(
         {
@@ -1630,16 +1618,5 @@ def test_audit_book_skeleton_reports_label_ocr_corrections_for_llm_review() -> N
 
     audit = audit_book_skeleton(build_book_skeleton_from_observed(document))
 
-    assert audit["summary"]["label_ocr_correction_count"] == 1
-    assert audit["issues"] == [
-        {
-            "severity": "info",
-            "issue_type": "label_ocr_corrected",
-            "entry_index": 1,
-            "title": "日本：从战国时代到世界强权",
-            "message": "TOC label was corrected from OCR-suspect raw_label.",
-            "raw_label": "I",
-            "label": "1",
-            "llm_review_recommended": True,
-        }
-    ]
+    assert "label_ocr_correction_count" not in audit["summary"]
+    assert audit["issues"] == []

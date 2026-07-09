@@ -41,17 +41,11 @@ def audit_book_skeleton(skeleton: dict[str, Any]) -> dict[str, Any]:
     located_count = sum(
         1 for entry in entries if isinstance(entry.get("selected_start_page"), int)
     )
-    label_ocr_correction_count = sum(
-        1
-        for entry in entries
-        if isinstance(entry.get("attrs"), dict) and "label_correction" in entry["attrs"]
-    )
     return {
         "summary": {
             "toc_entry_count": len(entries),
             "located_entry_count": located_count,
             "unlocated_entry_count": len(entries) - located_count,
-            "label_ocr_correction_count": label_ocr_correction_count,
             "issue_count": len(issues),
             "role_counts": dict(role_counts),
             "boundaries": deepcopy(skeleton.get("boundaries") or {}),
@@ -126,8 +120,10 @@ def _validate_toc_entry_pages(entry: dict[str, Any], index: int) -> None:
         raise ValidationError(
             f"toc_entries[{index}].selected_start_page must be one of candidate_start_pages"
         )
-    if not candidate_start_pages and _looks_like_glued_toc_title(entry["title"]):
-        raise ValidationError(f"toc_entries[{index}].title looks like glued TOC entries")
+    if not candidate_start_pages and _looks_like_glued_toc_title(entry["display_title"]):
+        raise ValidationError(
+            f"toc_entries[{index}].display_title looks like glued TOC entries"
+        )
 
 
 def _validate_toc_entry_role_order(
@@ -151,28 +147,11 @@ def _audit_toc_entry_issues(entries: list[dict[str, Any]]) -> list[dict[str, Any
     previous_known_role_rank = -1
     for index, entry in enumerate(entries):
         entry_index = entry.get("entry_index", index)
-        title = str(entry.get("title") or "")
+        title = str(entry.get("display_title") or "")
         candidate_start_pages = entry.get("candidate_start_pages")
         if not isinstance(candidate_start_pages, list):
             candidate_start_pages = []
         selected_start_page = entry.get("selected_start_page")
-        attrs = entry.get("attrs") if isinstance(entry.get("attrs"), dict) else {}
-        label_correction = attrs.get("label_correction")
-        if isinstance(label_correction, dict):
-            issues.append(
-                {
-                    **_toc_entry_issue(
-                        "label_ocr_corrected",
-                        entry_index=entry_index,
-                        title=title,
-                        message="TOC label was corrected from OCR-suspect raw_label.",
-                        severity="info",
-                    ),
-                    "raw_label": label_correction.get("from"),
-                    "label": label_correction.get("to"),
-                    "llm_review_recommended": True,
-                }
-            )
         if not candidate_start_pages:
             issues.append(
                 _toc_entry_issue(

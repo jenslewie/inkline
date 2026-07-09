@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 from typing import Any
 
@@ -24,6 +25,12 @@ TITLE_LOCATION_EXCLUDED_ROLE_HINTS = {
     "caption_text",
 }
 SHORT_AMBIGUOUS_TITLE_KEY_MAX_LENGTH = 4
+DISPLAY_TITLE_PREFIX_RE = re.compile(
+    r"^(?P<label>(?:第[一二三四五六七八九十百零〇\d]+[章节部篇卷]|"
+    r"[一二三四五六七八九十百零〇\d]+[、.]?|"
+    r"附录\s*[A-Za-z一二三四五六七八九十百零〇\d]*|"
+    r"专题\s*\d+))\s*(?P<title>.+)$"
+)
 
 
 def metadata(document: dict[str, Any]) -> dict[str, Any]:
@@ -133,18 +140,36 @@ def locate_toc_entry_pages(
 ) -> list[int]:
     candidates = []
     seen = set()
-    titles = (
-        (entry["display_title"], entry["title"])
-        if entry.get("label") is not None
-        else (entry["title"], entry["display_title"])
-    )
-    for title in titles:
+    for title in _location_titles_for_entry(entry):
         for page in locate_title_pages(page_records_, title, exclude_pages=exclude_pages):
             if page in seen:
                 continue
             seen.add(page)
             candidates.append(page)
     return candidates
+
+
+def _location_titles_for_entry(entry: dict[str, Any]) -> list[str]:
+    titles = []
+    for title in (
+        entry.get("display_title"),
+        entry.get("title"),
+        _display_title_without_structural_prefix(str(entry.get("display_title") or "")),
+    ):
+        if not isinstance(title, str):
+            continue
+        title = title.strip()
+        if title and title not in titles:
+            titles.append(title)
+    return titles
+
+
+def _display_title_without_structural_prefix(display_title: str) -> str | None:
+    match = DISPLAY_TITLE_PREFIX_RE.match(display_title.strip())
+    if not match:
+        return None
+    title = match.group("title").strip()
+    return title or None
 
 
 def locate_title_pages(

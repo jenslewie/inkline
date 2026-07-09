@@ -69,11 +69,12 @@ def build_book_skeleton_from_observed(
         assign_toc_hierarchy(entries)
     select_monotonic_start_pages(entries)
     prune_candidate_start_pages_to_toc_intervals(entries)
+    public_entries = [_public_toc_entry(entry) for entry in entries]
     skeleton = {
         "metadata": metadata(document),
         "toc_pages": toc_pages,
-        "toc_entries": entries,
-        "boundaries": boundaries(entries),
+        "toc_entries": public_entries,
+        "boundaries": boundaries(public_entries),
         "llm": llm_summary,
     }
     validate_book_skeleton(skeleton)
@@ -93,10 +94,7 @@ def build_book_skeleton_toc_llm_input(document: dict[str, Any]) -> dict[str, Any
         toc_entries.append(
             {
                 "entry_index": entry["entry_index"],
-                "title": entry["title"],
                 "display_title": entry["display_title"],
-                "raw_label": entry["raw_label"],
-                "label": entry["label"],
                 "level": entry["level"],
                 "parent_entry_index": entry["parent_entry_index"],
                 "candidate_start_pages": locate_toc_entry_pages(
@@ -114,18 +112,29 @@ def build_book_skeleton_toc_llm_input(document: dict[str, Any]) -> dict[str, Any
             "toc_entries": [
                 {
                     "entry_index": 0,
-                    "raw_title": "",
-                    "title": "",
                     "display_title": "",
-                    "raw_label": None,
-                    "label": None,
                     "level": 1,
                     "parent_entry_index": None,
                     "role": "front_matter|body|back_matter|unknown",
                 }
             ],
-            "uncertain_entries": [{"entry_index": 0, "title": "", "reason": ""}],
+            "uncertain_entries": [{"entry_index": 0, "display_title": "", "reason": ""}],
         },
+    }
+
+
+def _public_toc_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    attrs = deepcopy(entry.get("attrs") or {})
+    attrs.pop("label_correction", None)
+    return {
+        "entry_index": entry["entry_index"],
+        "display_title": entry["display_title"],
+        "level": entry["level"],
+        "parent_entry_index": entry["parent_entry_index"],
+        "role": entry["role"],
+        "candidate_start_pages": entry["candidate_start_pages"],
+        "selected_start_page": entry["selected_start_page"],
+        "attrs": attrs,
     }
 
 

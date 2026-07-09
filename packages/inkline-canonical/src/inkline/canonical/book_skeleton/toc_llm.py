@@ -8,11 +8,7 @@ from inkline.canonical.schema import ValidationError
 
 LLM_TOC_ENTRY_REQUIRED_FIELDS = {
     "entry_index",
-    "raw_title",
-    "title",
     "display_title",
-    "raw_label",
-    "label",
     "level",
     "parent_entry_index",
     "role",
@@ -27,11 +23,7 @@ def normalize_llm_toc_entries(items: list[dict[str, Any]]) -> list[dict[str, Any
         _validate_required_fields(item, index)
         entry = {
             "entry_index": _entry_index(item, index),
-            "raw_title": _required_string(item, "raw_title", index),
-            "title": _required_string(item, "title", index),
             "display_title": _required_string(item, "display_title", index),
-            "raw_label": _optional_string(item, "raw_label", index),
-            "label": _optional_string(item, "label", index),
             "level": _level(item, index),
             "parent_entry_index": _parent_entry_index(item, index),
             "role": _role(item, index),
@@ -54,11 +46,7 @@ def book_skeleton_toc_llm_prompt(input_data: dict[str, Any]) -> str:
         '  "toc_entries": [\n'
         "    {\n"
         '      "entry_index": 0,\n'
-        '      "raw_title": "",\n'
-        '      "title": "",\n'
         '      "display_title": "",\n'
-        '      "raw_label": null,\n'
-        '      "label": null,\n'
         '      "level": 1,\n'
         '      "parent_entry_index": null,\n'
         '      "role": "front_matter"\n'
@@ -68,12 +56,9 @@ def book_skeleton_toc_llm_prompt(input_data: dict[str, Any]) -> str:
         "}\n\n"
         "Field contract:\n"
         "- entry_index: integer starting at 0, continuous in TOC reading order.\n"
-        "- raw_title: original visible TOC title text, preserving visual/OCR spacing when useful.\n"
-        "- title: normalized title without structural label. For '第一章 启示预言的传统', "
-        "title is '启示预言的传统'.\n"
-        "- display_title: complete display title, usually label plus title.\n"
-        "- raw_label: original visible structural label such as '第 一 章', '附 录', or null.\n"
-        "- label: normalized structural label such as '第一章', '附录', '专题1', or null.\n"
+        "- display_title: complete TOC entry title as it should be displayed. Keep structural "
+        "numbering or prefixes inside this field, for example '第一章 启示预言的传统', "
+        "'专题1 阿玛尔那信札', or '附录1 关于人数的一个问题'.\n"
         "- level: TOC hierarchy level starts at 1. 1 means top-level; 2 means child of a "
         "level-1 entry; 3 means child of a level-2 entry. Never start at 0.\n"
         "- parent_entry_index: null for level-1 entries; otherwise the entry_index of the "
@@ -88,13 +73,14 @@ def book_skeleton_toc_llm_prompt(input_data: dict[str, Any]) -> str:
         "- unknown: use only when the TOC visual evidence is insufficient. Do not guess.\n\n"
         "Hard rules:\n"
         "- Do not output physical PDF page numbers.\n"
+        "- Do not split display_title into raw_title, title, raw_label, or label.\n"
         "- Do not output selected_start_page, selected_page, candidate_start_pages, candidate_pages, "
         "printed_start_page, or printed page numbers.\n"
         "- Do not invent entries that are not visible in the TOC.\n"
         "- Do not split one wrapped TOC title into multiple entries.\n"
         "- Do not merge two visually separate TOC entries unless they are clearly one title wrapped "
         "across lines.\n"
-        "- Use null, not an empty string, when label or parent_entry_index is absent.\n"
+        "- Use null, not an empty string, when parent_entry_index is absent.\n"
         "- All required fields must be present on every entry.\n\n"
         f"Input JSON:\n{_json_dumps(input_data)}"
     )
@@ -118,16 +104,6 @@ def _required_string(item: dict[str, Any], field: str, index: int) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValidationError(f"llm toc entry {index}.{field} must be non-empty string")
     return value.strip()
-
-
-def _optional_string(item: dict[str, Any], field: str, index: int) -> str | None:
-    value = item.get(field)
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValidationError(f"llm toc entry {index}.{field} must be string or null")
-    value = value.strip()
-    return value or None
 
 
 def _level(item: dict[str, Any], index: int) -> int:

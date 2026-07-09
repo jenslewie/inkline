@@ -31,11 +31,7 @@ REQUIRED_METADATA_FIELDS = (
 
 REQUIRED_ENTRY_FIELDS: dict[str, type[Any] | tuple[type[Any], ...]] = {
     "entry_index": int,
-    "raw_title": str,
-    "title": str,
     "display_title": str,
-    "raw_label": (str, type(None)),
-    "label": (str, type(None)),
     "level": int,
     "parent_entry_index": (int, type(None)),
     "role": str,

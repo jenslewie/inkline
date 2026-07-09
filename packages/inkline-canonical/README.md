@@ -61,16 +61,20 @@ current canonical contract until the BookGraph projection switch is complete.
 ## TOC LLM Boundary
 
 The preferred TOC path is to let the LLM read the TOC visual structure and emit
-structured TOC entries: `raw_title`, `title`, `display_title`, `raw_label`,
-`label`, `level`, `parent_entry_index`, and `role`. The prompt must define each
-field explicitly, including that `level` starts at 1 and `role` is limited to
-`front_matter`, `body`, `back_matter`, or `unknown`.
+public TOC entries: `display_title`, `level`, `parent_entry_index`, and `role`.
+The prompt must define each field explicitly, including that `level` starts at 1
+and `role` is limited to `front_matter`, `body`, `back_matter`, or `unknown`.
 
 Code should not patch LLM-capable structure after the fact. If the model can
 infer a field from the TOC image, improve the prompt/schema/examples first.
 Deterministic code is responsible for validation and for facts outside the
 LLM's evidence, especially `candidate_start_pages` and `selected_start_page`,
 which are derived from ObservedDocument physical page evidence.
+
+Public BookSkeleton TOC entries intentionally do not expose split
+`raw_title`/`title`/`raw_label`/`label` fields. Internal builders may derive
+temporary locator candidates from `display_title`, but those helpers are not
+part of the public skeleton contract.
 
 ## Maintenance Guardrail
 
