@@ -117,7 +117,7 @@ def _observation_from_raw_block(
     return make_observation(
         f"obs{index:06d}",
         _kind(block.raw_type),
-        text=block.text or "",
+        text=_observation_text(block),
         page=block.page,
         bbox=deepcopy(block.bbox),
         spans=_spans(block),
@@ -137,6 +137,29 @@ def _kind(raw_type: str) -> str:
     if raw_type == "page_footnote":
         return "footnote_region"
     return "text_region"
+
+
+def _observation_text(block: RawBlock) -> str:
+    if block.text:
+        return block.text
+    if block.raw_type == "table":
+        return _content_text_list(block.raw, "table_caption")
+    return ""
+
+
+def _content_text_list(raw: dict[str, Any], key: str) -> str:
+    content = raw.get("content") if isinstance(raw, dict) else None
+    if not isinstance(content, dict):
+        return ""
+    items = content.get(key)
+    if not isinstance(items, list):
+        return ""
+    parts = [
+        str(item.get("content") or "").strip()
+        for item in items
+        if isinstance(item, dict) and str(item.get("content") or "").strip()
+    ]
+    return "\n".join(parts)
 
 
 def _role_hint(raw_type: str, *, page: int, total_pages: int) -> str:
@@ -213,7 +236,7 @@ def _middle_title_observations(
             continue
         raw_page_idx = page_info.get("page_idx")
         page = int(raw_page_idx) + 1 if isinstance(raw_page_idx, int) else fallback_page
-        for block_index, block in enumerate(_middle_title_blocks(page_info)):
+        for block_index, block in enumerate(_middle_title_location_blocks(page_info)):
             text = _middle_block_text(block)
             if not text:
                 continue
@@ -240,7 +263,7 @@ def _middle_title_observations(
                 role_hint="title_text",
                 attrs={"reading_order": block_index},
                 parser_payload={
-                    "raw_type": "title",
+                    "raw_type": str(block.get("type") or "title"),
                     "source": "mineru_middle",
                     "page_idx": raw_page_idx,
                     "raw": deepcopy(block),
@@ -252,12 +275,15 @@ def _middle_title_observations(
     return observations
 
 
-def _middle_title_blocks(page_info: dict[str, Any]) -> list[dict[str, Any]]:
+def _middle_title_location_blocks(page_info: dict[str, Any]) -> list[dict[str, Any]]:
     blocks = []
     seen = set()
     for collection_name in ("para_blocks", "preproc_blocks"):
         for block in page_info.get(collection_name) or []:
-            if not isinstance(block, dict) or block.get("type") != "title":
+            if not isinstance(block, dict) or block.get("type") not in {
+                "title",
+                "table_caption",
+            }:
                 continue
             key = (_middle_block_text(block), tuple(_middle_block_bbox(block) or []))
             if key in seen:

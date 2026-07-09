@@ -91,3 +91,68 @@ def test_toc_llm_prompt_discourages_spaces_inside_compact_chinese_words() -> Non
     )
 
     assert "Use '缩写', '年表', and '致谢'" in prompt
+
+
+def test_toc_llm_prompt_keeps_aligned_back_matter_top_level() -> None:
+    prompt = book_skeleton_toc_llm_prompt(
+        {
+            "mode": "toc_image_extraction",
+            "toc_pages": [13],
+            "expected_output": {"toc_entries": []},
+        }
+    )
+
+    assert "If a back_matter entry is visually aligned with top-level chapters" in prompt
+    assert "Do not make it a child of the final body entry" in prompt
+    assert "Entries with the same left alignment must have the same level" in prompt
+
+
+def test_locates_toc_entry_from_table_region_caption_text() -> None:
+    pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 350)]
+    document = make_observed_document(
+        {
+            "doc_id": "attila",
+            "title": "匈人王阿提拉",
+            "language": "zh-CN",
+            "source_file": "attila.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        pages,
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\n资料来源 329\n参考文献 333\n帝王姓名表 346",
+                page=5,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002",
+                "table_region",
+                text="资料来源",
+                page=329,
+                role_hint="unknown",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="参考文献",
+                page=338,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000004",
+                "table_region",
+                text="帝王姓名表",
+                page=346,
+                role_hint="unknown",
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+    entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
+
+    assert entries["资料来源"]["selected_start_page"] == 329
+    assert entries["帝王姓名表"]["selected_start_page"] == 346

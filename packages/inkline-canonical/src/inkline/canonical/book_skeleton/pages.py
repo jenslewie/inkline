@@ -92,6 +92,7 @@ def page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
                         if observation.get("role_hint") == "title_text"
                     ]
                 ),
+                "visual_title_text": _page_text(visual_title_observations),
                 "candidate_title_text": _page_text(
                     _candidate_title_context_observations(text_observations)
                 ),
@@ -385,12 +386,19 @@ def _title_matches_record(record: dict[str, Any], title_key: str, page_key: str)
     if not title_key:
         return False
     title_text_key = normalize_title(str(record.get("title_text") or ""))
+    visual_title_key = normalize_title(str(record.get("visual_title_text") or ""))
     if _requires_title_evidence(title_key):
-        return title_key in title_text_key or _near_title_match(title_key, title_text_key)
+        return (
+            title_key in title_text_key
+            or title_key in visual_title_key
+            or _near_title_match(title_key, title_text_key)
+            or _near_title_match(title_key, visual_title_key)
+        )
     return (
         title_key in page_key
         or _near_title_match(title_key, page_key)
         or _near_title_match(title_key, title_text_key)
+        or _near_title_match(title_key, visual_title_key)
     )
 
 
@@ -444,31 +452,36 @@ def _title_location_score(
     if _is_footnote_heavy_location(role_hint_counts):
         score -= 8.0
     title_text_key = normalize_title(str(record.get("title_text") or ""))
-    if title_text_key:
-        score += 0.5
+    score += _presence_score(title_text_key, 0.5)
+    visual_title_key = normalize_title(str(record.get("visual_title_text") or ""))
+    score += _presence_score(visual_title_key, 0.5)
+    score += _exact_or_prefix_score(visual_title_key, title_key, exact=4.0, prefix=0.0)
     first_title_line = normalize_title(_first_nonempty_line(str(record.get("title_text") or "")))
-    if first_title_line == title_key:
-        score += 4.0
-    elif first_title_line.startswith(title_key):
-        score += 0.25
-    if page_key.startswith(title_key):
-        score += 1.5
+    score += _exact_or_prefix_score(first_title_line, title_key, exact=4.0, prefix=0.25)
+    score += _prefix_score(page_key, title_key, 1.5)
     first_line = normalize_title(_first_nonempty_line(text))
-    if first_line == title_key:
-        score += 2.0
-    elif first_line.startswith(title_key):
-        score += 0.75
+    score += _exact_or_prefix_score(first_line, title_key, exact=2.0, prefix=0.75)
     leading_two_lines = normalize_title(_leading_nonempty_lines(text, limit=2))
-    if leading_two_lines == title_key:
-        score += 3.0
-    elif leading_two_lines.startswith(title_key):
-        score += 2.0
+    score += _exact_or_prefix_score(leading_two_lines, title_key, exact=3.0, prefix=2.0)
     candidate_title_key = normalize_title(str(record.get("candidate_title_text") or ""))
-    if candidate_title_key == title_key:
-        score += 4.0
-    elif candidate_title_key.startswith(title_key):
-        score += 2.0
+    score += _exact_or_prefix_score(candidate_title_key, title_key, exact=4.0, prefix=2.0)
     return score
+
+
+def _presence_score(value: str, score: float) -> float:
+    return score if value else 0.0
+
+
+def _prefix_score(value: str, target: str, score: float) -> float:
+    return score if value.startswith(target) else 0.0
+
+
+def _exact_or_prefix_score(value: str, target: str, *, exact: float, prefix: float) -> float:
+    if value == target:
+        return exact
+    if value.startswith(target):
+        return prefix
+    return 0.0
 
 
 def _is_footnote_heavy_location(role_hint_counts: dict[str, Any]) -> bool:

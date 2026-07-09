@@ -167,6 +167,74 @@ def test_build_observed_document_shadow_adds_middle_title_observation_with_physi
     assert observation["parser_payload"]["page_idx"] == 466
 
 
+def test_build_observed_document_shadow_uses_middle_table_caption_as_title_location() -> None:
+    middle = {
+        "pdf_info": [
+            {
+                "page_idx": 346,
+                "para_blocks": [
+                    {
+                        "type": "table_caption",
+                        "bbox": [182, 121, 248, 139],
+                        "lines": [
+                            {
+                                "spans": [
+                                    {
+                                        "type": "text",
+                                        "content": "帝王姓名表",
+                                        "bbox": [182, 121, 248, 139],
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]
+    }
+
+    document = build_observed_document_shadow(
+        pages={347: []},
+        page_sizes={347: (1000, 1000)},
+        metadata=_metadata(),
+        middle=middle,
+    )
+
+    validate_observed_document(document)
+    observation = document["observations"][0]
+    assert observation["kind"] == "text_region"
+    assert observation["text"] == "帝王姓名表"
+    assert observation["page"] == 347
+    assert observation["role_hint"] == "title_text"
+    assert observation["parser_payload"]["raw_type"] == "table_caption"
+    assert "raw_type" not in observation
+
+
+def test_build_observed_document_shadow_uses_table_caption_as_table_region_text() -> None:
+    table = _raw("table", "", [10, 20, 900, 500], page=1, index=1)
+    table.raw = {
+        "type": "table",
+        "content": {
+            "table_caption": [{"type": "text", "content": "资料来源"}],
+            "html": "<table></table>",
+        },
+    }
+
+    document = build_observed_document_shadow(
+        pages={1: [table]},
+        page_sizes={1: (1000, 1000)},
+        metadata=_metadata(),
+    )
+
+    validate_observed_document(document)
+    observation = document["observations"][0]
+    assert observation["kind"] == "table_region"
+    assert observation["text"] == "资料来源"
+    assert observation["role_hint"] == "unknown"
+    assert observation["parser_payload"]["raw_type"] == "table"
+    assert "raw_type" not in observation
+
+
 def test_build_observed_document_shadow_deduplicates_middle_title_observation() -> None:
     middle = {
         "pdf_info": [
