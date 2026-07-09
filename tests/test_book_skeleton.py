@@ -15,6 +15,7 @@ from inkline.canonical import (
     make_observed_page,
     validate_book_skeleton,
 )
+from inkline.canonical.book_skeleton.toc_llm import normalize_llm_toc_entries
 from inkline.canonical.schema import ValidationError
 
 
@@ -1154,6 +1155,8 @@ def test_book_skeleton_toc_llm_prompt_defines_output_field_contract() -> None:
     assert "back_matter" in prompt
     assert "unknown" in prompt
     assert "Do not output physical PDF page numbers" in prompt
+    assert "Do not insert spaces between Chinese characters inside names or words" in prompt
+    assert "第一章 楼兰：中亚的十字路口" in prompt
 
 
 def test_build_book_skeleton_from_observed_accepts_llm_toc_entries_as_structure_source() -> None:
@@ -1225,6 +1228,30 @@ def test_build_book_skeleton_from_observed_accepts_llm_toc_entries_as_structure_
     assert skeleton["boundaries"]["first_back_matter_entry_index"] == 3
     assert skeleton["llm"]["used"] is True
     assert skeleton["llm"]["source"] == "toc_image_llm"
+
+
+def test_normalize_llm_toc_entries_does_not_rewrite_display_title_content() -> None:
+    entries = normalize_llm_toc_entries(
+        [
+            {
+                "entry_index": 0,
+                "display_title": "第一章 楼 兰：中亚的十字路口",
+                "level": 1,
+                "parent_entry_index": None,
+                "role": "body",
+            },
+            {
+                "entry_index": 1,
+                "display_title": "第二章 The Silk Road",
+                "level": 1,
+                "parent_entry_index": None,
+                "role": "body",
+            },
+        ]
+    )
+
+    assert entries[0]["display_title"] == "第一章 楼 兰：中亚的十字路口"
+    assert entries[1]["display_title"] == "第二章 The Silk Road"
 
 
 def test_build_book_skeleton_from_observed_preserves_llm_level_and_parent_for_unknown_matter_titles() -> None:
