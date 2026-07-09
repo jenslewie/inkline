@@ -8,6 +8,7 @@ from inkline.canonical import (
     BOOK_SKELETON_SCHEMA_NAME,
     BOOK_SKELETON_SCHEMA_VERSION,
     audit_book_skeleton,
+    book_skeleton_toc_llm_prompt,
     build_book_skeleton_from_observed,
     make_observation,
     make_observed_document,
@@ -1142,6 +1143,146 @@ def test_build_book_skeleton_from_observed_accepts_llm_roles_but_not_llm_pages()
     assert skeleton["boundaries"]["first_back_matter_page"] == 317
     assert skeleton["llm"]["used"] is True
     assert skeleton["llm"]["model"] == "qwen-test"
+
+
+def test_book_skeleton_toc_llm_prompt_defines_output_field_contract() -> None:
+    prompt = book_skeleton_toc_llm_prompt(
+        {
+            "mode": "toc_image_extraction",
+            "toc_pages": [9],
+            "expected_output": {"toc_entries": []},
+        }
+    )
+
+    assert '"entry_index"' in prompt
+    assert '"raw_title"' in prompt
+    assert '"display_title"' in prompt
+    assert '"parent_entry_index"' in prompt
+    assert "level starts at 1" in prompt
+    assert "front_matter" in prompt
+    assert "body" in prompt
+    assert "back_matter" in prompt
+    assert "unknown" in prompt
+    assert "Do not output physical PDF page numbers" in prompt
+
+
+def test_build_book_skeleton_from_observed_accepts_llm_toc_entries_as_structure_source() -> None:
+    skeleton = build_book_skeleton_from_observed(
+        _document(),
+        llm_toc_entries=[
+            {
+                "entry_index": 0,
+                "raw_title": "中文版序言",
+                "title": "中文版序言",
+                "display_title": "中文版序言",
+                "raw_label": None,
+                "label": None,
+                "level": 1,
+                "parent_entry_index": None,
+                "role": "front_matter",
+            },
+            {
+                "entry_index": 1,
+                "raw_title": "序章",
+                "title": "序章",
+                "display_title": "序章",
+                "raw_label": None,
+                "label": None,
+                "level": 1,
+                "parent_entry_index": None,
+                "role": "body",
+            },
+            {
+                "entry_index": 2,
+                "raw_title": "第一章 米兰达",
+                "title": "米兰达",
+                "display_title": "第一章 米兰达",
+                "raw_label": "第一章",
+                "label": "第一章",
+                "level": 1,
+                "parent_entry_index": None,
+                "role": "body",
+            },
+            {
+                "entry_index": 3,
+                "raw_title": "陌生后置材料",
+                "title": "陌生后置材料",
+                "display_title": "陌生后置材料",
+                "raw_label": None,
+                "label": None,
+                "level": 1,
+                "parent_entry_index": None,
+                "role": "back_matter",
+            },
+        ],
+        llm_model="qwen-test",
+        llm_source="toc_image_llm",
+    )
+
+    assert [entry["display_title"] for entry in skeleton["toc_entries"]] == [
+        "中文版序言",
+        "序章",
+        "第一章 米兰达",
+        "陌生后置材料",
+    ]
+    entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
+    assert entries["第一章 米兰达"]["selected_start_page"] == 42
+    assert entries["陌生后置材料"]["role"] == "back_matter"
+    assert entries["陌生后置材料"]["level"] == 1
+    assert entries["陌生后置材料"]["candidate_start_pages"] == []
+    assert skeleton["boundaries"]["first_body_entry_index"] == 1
+    assert skeleton["boundaries"]["first_body_page"] == 14
+    assert skeleton["boundaries"]["first_back_matter_entry_index"] == 3
+    assert skeleton["llm"]["used"] is True
+    assert skeleton["llm"]["source"] == "toc_image_llm"
+
+
+def test_build_book_skeleton_from_observed_preserves_llm_level_and_parent_for_unknown_matter_titles() -> None:
+    skeleton = build_book_skeleton_from_observed(
+        _document(),
+        llm_toc_entries=[
+            {
+                "entry_index": 0,
+                "raw_title": "第一章 米兰达",
+                "title": "米兰达",
+                "display_title": "第一章 米兰达",
+                "raw_label": "第一章",
+                "label": "第一章",
+                "level": 1,
+                "parent_entry_index": None,
+                "role": "body",
+            },
+            {
+                "entry_index": 1,
+                "raw_title": "材料来源说明",
+                "title": "材料来源说明",
+                "display_title": "材料来源说明",
+                "raw_label": None,
+                "label": None,
+                "level": 1,
+                "parent_entry_index": None,
+                "role": "back_matter",
+            },
+            {
+                "entry_index": 2,
+                "raw_title": "档案馆藏目录",
+                "title": "档案馆藏目录",
+                "display_title": "档案馆藏目录",
+                "raw_label": None,
+                "label": None,
+                "level": 2,
+                "parent_entry_index": 1,
+                "role": "back_matter",
+            },
+        ],
+        llm_source="toc_image_llm",
+    )
+
+    entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
+    assert entries["材料来源说明"]["level"] == 1
+    assert entries["材料来源说明"]["parent_entry_index"] is None
+    assert entries["档案馆藏目录"]["level"] == 2
+    assert entries["档案馆藏目录"]["parent_entry_index"] == 1
 
 
 def test_build_book_skeleton_from_observed_keeps_numbered_chapter_body_after_llm() -> None:

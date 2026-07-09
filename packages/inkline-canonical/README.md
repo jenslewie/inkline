@@ -33,6 +33,7 @@ inkline/canonical/
   book_skeleton/           TOC-driven book skeleton layer.
     contract.py            Skeleton schema and role contracts.
     toc.py                 TOC entry extraction and normalization.
+    toc_llm.py             LLM TOC JSON contract, prompt, and validation.
     pages.py               Physical-page localization from observed titles.
     builder.py             Skeleton assembly from ObservedDocument evidence.
     validation.py          Skeleton contract validation.
@@ -56,6 +57,20 @@ parser output -> ObservedDocument -> BookSkeleton -> BookGraph -> projections
 `ObservedDocument`, `BookSkeleton`, `BookGraph`, and `internal_canonical` are
 pre-release development artifacts. Existing EPUB/RAG flows still consume the
 current canonical contract until the BookGraph projection switch is complete.
+
+## TOC LLM Boundary
+
+The preferred TOC path is to let the LLM read the TOC visual structure and emit
+structured TOC entries: `raw_title`, `title`, `display_title`, `raw_label`,
+`label`, `level`, `parent_entry_index`, and `role`. The prompt must define each
+field explicitly, including that `level` starts at 1 and `role` is limited to
+`front_matter`, `body`, `back_matter`, or `unknown`.
+
+Code should not patch LLM-capable structure after the fact. If the model can
+infer a field from the TOC image, improve the prompt/schema/examples first.
+Deterministic code is responsible for validation and for facts outside the
+LLM's evidence, especially `candidate_start_pages` and `selected_start_page`,
+which are derived from ObservedDocument physical page evidence.
 
 ## Maintenance Guardrail
 

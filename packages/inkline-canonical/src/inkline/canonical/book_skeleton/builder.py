@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from copy import deepcopy
 from typing import Any
 
@@ -23,6 +22,7 @@ from inkline.canonical.book_skeleton.toc import (
     looks_like_body_toc_entry,
     parse_toc_entries,
 )
+from inkline.canonical.book_skeleton.toc_llm import normalize_llm_toc_entries
 from inkline.canonical.book_skeleton.validation import validate_book_skeleton
 from inkline.canonical.observed.schema import validate_observed_document
 
@@ -30,30 +30,43 @@ from inkline.canonical.observed.schema import validate_observed_document
 def build_book_skeleton_from_observed(
     document: dict[str, Any],
     *,
+    llm_toc_entries: list[dict[str, Any]] | None = None,
     llm_classification: dict[str, Any] | None = None,
+    llm_uncertain_entries: list[dict[str, Any]] | None = None,
     llm_model: str | None = None,
     llm_source: str | None = None,
 ) -> dict[str, Any]:
     validate_observed_document(document)
     records = page_records(document)
     toc_pages = detect_toc_pages(records)
-    toc_text = "\n".join(observed_page_text(document, page) for page in toc_pages)
-    entries = parse_toc_entries(toc_text)
-    infer_toc_levels(entries)
-    assign_toc_hierarchy(entries)
+    entries_from_llm_toc = llm_toc_entries is not None
+    if entries_from_llm_toc:
+        entries = normalize_llm_toc_entries(llm_toc_entries)
+    else:
+        toc_text = "\n".join(observed_page_text(document, page) for page in toc_pages)
+        entries = parse_toc_entries(toc_text)
+        infer_toc_levels(entries)
+        assign_toc_hierarchy(entries)
     for entry in entries:
         candidates = locate_toc_entry_pages(records, entry, exclude_pages=toc_pages)
         entry["candidate_start_pages"] = candidates
         entry["selected_start_page"] = None
-    _apply_structural_roles(entries)
-    llm_summary = _apply_llm_classification(
-        entries,
-        llm_classification=llm_classification,
-        llm_model=llm_model,
-        llm_source=llm_source,
-    )
-    apply_role_level_guardrails(entries)
-    assign_toc_hierarchy(entries)
+    if entries_from_llm_toc:
+        llm_summary = _llm_toc_summary(
+            llm_model=llm_model,
+            llm_source=llm_source,
+            uncertain_entries=llm_uncertain_entries,
+        )
+    else:
+        _apply_structural_roles(entries)
+        llm_summary = _apply_llm_classification(
+            entries,
+            llm_classification=llm_classification,
+            llm_model=llm_model,
+            llm_source=llm_source,
+        )
+        apply_role_level_guardrails(entries)
+        assign_toc_hierarchy(entries)
     select_monotonic_start_pages(entries)
     prune_candidate_start_pages_to_toc_intervals(entries)
     skeleton = {
@@ -98,33 +111,22 @@ def build_book_skeleton_toc_llm_input(document: dict[str, Any]) -> dict[str, Any
         "toc_pages": toc_pages,
         "toc_entries": toc_entries,
         "expected_output": {
-            "entry_roles": [
-                {"entry_index": 0, "role": "front_matter|body|back_matter|unknown"}
+            "toc_entries": [
+                {
+                    "entry_index": 0,
+                    "raw_title": "",
+                    "title": "",
+                    "display_title": "",
+                    "raw_label": None,
+                    "label": None,
+                    "level": 1,
+                    "parent_entry_index": None,
+                    "role": "front_matter|body|back_matter|unknown",
+                }
             ],
-            "first_body_entry_index": 0,
-            "last_body_entry_index": 0,
-            "first_back_matter_entry_index": None,
             "uncertain_entries": [{"entry_index": 0, "title": "", "reason": ""}],
         },
     }
-
-
-def book_skeleton_toc_llm_prompt(input_data: dict[str, Any]) -> str:
-    return (
-        "You classify a book skeleton from table-of-contents entries.\n"
-        "Use entry_index, display_title, label, level, and title to decide entry roles. "
-        "Do not infer or output physical "
-        "PDF page numbers; candidate_start_pages are rule-layer evidence only.\n\n"
-        "Definitions:\n"
-        "- front_matter: content before the main body, such as foreword, preface, acknowledgements, "
-        "dedication, editorial notes, or introductory front matter.\n"
-        "- body: the main chapters and conclusion of the book.\n"
-        "- back_matter: content after the main body, including appendix, notes, bibliography, "
-        "references, further reading, chronology, index, publisher afterword, and copyright pages.\n\n"
-        "Return strict JSON matching expected_output. Every toc_entries item should have one "
-        "entry_roles item. Use null when there is no back matter.\n\n"
-        f"Input JSON:\n{_json_dumps(input_data)}"
-    )
 
 
 def _apply_structural_roles(entries: list[dict[str, Any]]) -> None:
@@ -167,12 +169,22 @@ def _apply_llm_classification(
     }
 
 
+def _llm_toc_summary(
+    *,
+    llm_model: str | None,
+    llm_source: str | None,
+    uncertain_entries: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    return {
+        "used": True,
+        "model": llm_model,
+        "source": llm_source,
+        "uncertain_entries": deepcopy(uncertain_entries or []),
+    }
+
+
 def _first_matching_entry_index(entries: list[dict[str, Any]], predicate) -> int | None:
     for entry in entries:
         if predicate(entry):
             return int(entry["entry_index"])
     return None
-
-
-def _json_dumps(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, ensure_ascii=False, indent=2)

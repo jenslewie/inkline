@@ -327,7 +327,7 @@ def test_normalize_mineru_outputs_can_use_llm_book_skeleton_roles(
 
     def fake_chat_json(config, *, messages):
         assert config.model == "qwen-test"
-        assert "Do not infer or output physical PDF page numbers" in messages[0]["content"]
+        assert "Do not output physical PDF page numbers" in messages[0]["content"]
         return {
             "entry_roles": [
                 {"entry_index": 0, "role": "body"},
@@ -364,6 +364,106 @@ def test_normalize_mineru_outputs_can_use_llm_book_skeleton_roles(
     validate_book_skeleton(skeleton)
     assert skeleton["llm"]["used"] is True
     assert skeleton["boundaries"]["first_back_matter_page"] == 4
+
+
+def test_normalize_mineru_outputs_can_use_llm_toc_entries(
+    tmp_path, monkeypatch
+) -> None:
+    content_list_v2 = tmp_path / "sample_content_list_v2.json"
+    middle = tmp_path / "sample_middle.json"
+    output = tmp_path / "canonical.json"
+    book_skeleton_output = tmp_path / "book_skeleton.json"
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    _text_item(
+                        "paragraph",
+                        "目录\n序章 1\n第一章 米兰达 2\n陌生后置材料 3",
+                        [100, 100, 900, 260],
+                    )
+                ],
+                [_text_item("title", "序章", [120, 100, 300, 180])],
+                [_text_item("title", "第一章 米兰达", [120, 100, 420, 180])],
+                [_text_item("title", "陌生后置材料", [120, 100, 420, 180])],
+            ]
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(
+        json.dumps({"pdf_info": [{"page_size": [1000, 1400]} for _ in range(4)]}),
+        encoding="utf-8",
+    )
+
+    def fake_chat_json(config, *, messages):
+        assert config.model == "qwen-test"
+        assert '"toc_entries"' in messages[0]["content"]
+        assert "level starts at 1" in messages[0]["content"]
+        return {
+            "toc_entries": [
+                {
+                    "entry_index": 0,
+                    "raw_title": "序章",
+                    "title": "序章",
+                    "display_title": "序章",
+                    "raw_label": None,
+                    "label": None,
+                    "level": 1,
+                    "parent_entry_index": None,
+                    "role": "body",
+                },
+                {
+                    "entry_index": 1,
+                    "raw_title": "第一章 米兰达",
+                    "title": "米兰达",
+                    "display_title": "第一章 米兰达",
+                    "raw_label": "第一章",
+                    "label": "第一章",
+                    "level": 1,
+                    "parent_entry_index": None,
+                    "role": "body",
+                },
+                {
+                    "entry_index": 2,
+                    "raw_title": "陌生后置材料",
+                    "title": "陌生后置材料",
+                    "display_title": "陌生后置材料",
+                    "raw_label": None,
+                    "label": None,
+                    "level": 1,
+                    "parent_entry_index": None,
+                    "role": "back_matter",
+                },
+            ],
+            "uncertain_entries": [],
+        }
+
+    monkeypatch.setattr(
+        "inkline.parsers.mineru.normalize.book_skeleton_shadow.chat_json",
+        fake_chat_json,
+    )
+
+    normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        model=None,
+        markdown=None,
+        source_pdf=None,
+        output=output,
+        book_skeleton_output=book_skeleton_output,
+        book_skeleton_llm=True,
+        book_skeleton_llm_model="qwen-test",
+        doc_id="sample",
+        title="Sample",
+        language="zh-CN",
+    )
+
+    skeleton = json.loads(book_skeleton_output.read_text(encoding="utf-8"))
+    validate_book_skeleton(skeleton)
+    entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
+    assert entries["第一章 米兰达"]["selected_start_page"] == 3
+    assert entries["陌生后置材料"]["role"] == "back_matter"
+    assert entries["陌生后置材料"]["selected_start_page"] == 4
 
 
 def test_normalize_mineru_outputs_does_not_write_bookgraph_shadow_by_default(tmp_path) -> None:

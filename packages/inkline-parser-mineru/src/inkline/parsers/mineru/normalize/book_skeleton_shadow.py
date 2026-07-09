@@ -27,7 +27,7 @@ def build_book_skeleton_shadow(
     if not use_llm:
         return build_book_skeleton_from_observed(observed)
     llm_input = build_book_skeleton_toc_llm_input(observed)
-    llm_classification = chat_json(
+    llm_result = chat_json(
         OllamaChatConfig(
             model=llm_model,
             api_url=llm_api_url,
@@ -35,9 +35,17 @@ def build_book_skeleton_shadow(
         ),
         messages=[{"role": "user", "content": book_skeleton_toc_llm_prompt(llm_input)}],
     )
+    if isinstance(llm_result.get("toc_entries"), list):
+        return build_book_skeleton_from_observed(
+            observed,
+            llm_toc_entries=llm_result["toc_entries"],
+            llm_uncertain_entries=llm_result.get("uncertain_entries"),
+            llm_model=llm_model,
+            llm_source="toc_llm_entries",
+        )
     return build_book_skeleton_from_observed(
         observed,
-        llm_classification=llm_classification,
+        llm_classification=llm_result,
         llm_model=llm_model,
         llm_source="toc_llm",
     )
