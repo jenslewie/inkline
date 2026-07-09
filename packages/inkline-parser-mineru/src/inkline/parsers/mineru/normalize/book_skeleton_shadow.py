@@ -17,6 +17,8 @@ from inkline.llm import (
     chat_json,
 )
 
+BOOK_SKELETON_LLM_NUM_PREDICT = 8192
+
 
 def build_book_skeleton_shadow(
     observed: dict[str, Any],
@@ -38,11 +40,7 @@ def build_book_skeleton_shadow(
     )
     messages = [_llm_message(book_skeleton_toc_llm_prompt(llm_input), image_paths)]
     llm_result = chat_json(
-        OllamaChatConfig(
-            model=llm_model,
-            api_url=llm_api_url,
-            timeout_seconds=llm_timeout_seconds,
-        ),
+        _llm_config(llm_model, llm_api_url, llm_timeout_seconds),
         messages=messages,
     )
     if isinstance(llm_result.get("toc_entries"), list):
@@ -58,6 +56,24 @@ def build_book_skeleton_shadow(
         llm_classification=llm_result,
         llm_model=llm_model,
         llm_source="toc_llm",
+    )
+
+
+def _llm_config(model: str, api_url: str, timeout_seconds: int) -> OllamaChatConfig:
+    defaults = OllamaChatConfig(
+        model=model,
+        api_url=api_url,
+        timeout_seconds=timeout_seconds,
+    )
+    return OllamaChatConfig(
+        model=model,
+        api_url=api_url,
+        timeout_seconds=timeout_seconds,
+        keep_alive=defaults.keep_alive,
+        response_format=defaults.response_format,
+        think=defaults.think,
+        stream=defaults.stream,
+        options={**defaults.options, "num_predict": BOOK_SKELETON_LLM_NUM_PREDICT},
     )
 
 

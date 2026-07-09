@@ -508,6 +508,7 @@ def test_normalize_mineru_outputs_sends_toc_page_images_to_llm(
 
     def fake_chat_json(config, *, messages):
         assert config.model == "qwen-test"
+        assert config.options["num_predict"] >= 8192
         assert len(messages) == 1
         assert messages[0]["images"] == ["ZmFrZSBpbWFnZSBieXRlcw=="]
         return {
