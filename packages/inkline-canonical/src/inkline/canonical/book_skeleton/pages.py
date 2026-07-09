@@ -92,6 +92,9 @@ def page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
                         if observation.get("role_hint") == "title_text"
                     ]
                 ),
+                "candidate_title_text": _page_text(
+                    _candidate_title_context_observations(text_observations)
+                ),
                 "has_toc_hint": any(
                     observation.get("role_hint") == "toc_text"
                     for observation in text_observations
@@ -255,6 +258,27 @@ def _title_context_observations(
     return context
 
 
+def _candidate_title_context_observations(
+    text_observations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    candidates = [
+        observation
+        for observation in text_observations
+        if _is_candidate_title_context_observation(observation)
+    ]
+    if len(candidates) < 2:
+        return []
+    return candidates
+
+
+def _is_candidate_title_context_observation(observation: dict[str, Any]) -> bool:
+    role_hint = str(observation.get("role_hint") or "")
+    if role_hint in TITLE_LOCATION_EXCLUDED_ROLE_HINTS or role_hint == "toc_text":
+        return False
+    text = str(observation.get("text") or "").strip()
+    return role_hint in {"body_text", "list_text", ""} and _is_short_title_context_line(text)
+
+
 def _is_short_title_context_line(text: str) -> bool:
     return 0 < len(normalize_title(text)) <= 36
 
@@ -348,7 +372,7 @@ def _first_matching_entry_index(entries: list[dict[str, Any]], predicate) -> int
 def _title_location_text(record: dict[str, Any]) -> str:
     lines = []
     seen = set()
-    for key in ("content_text", "title_text"):
+    for key in ("content_text", "title_text", "candidate_title_text"):
         for line in str(record.get(key) or "").splitlines():
             stripped = line.strip()
             if stripped and stripped not in seen:
@@ -438,6 +462,11 @@ def _title_location_score(
     if leading_two_lines == title_key:
         score += 3.0
     elif leading_two_lines.startswith(title_key):
+        score += 2.0
+    candidate_title_key = normalize_title(str(record.get("candidate_title_text") or ""))
+    if candidate_title_key == title_key:
+        score += 4.0
+    elif candidate_title_key.startswith(title_key):
         score += 2.0
     return score
 

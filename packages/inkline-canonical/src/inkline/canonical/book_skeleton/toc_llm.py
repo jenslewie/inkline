@@ -76,6 +76,8 @@ def book_skeleton_toc_llm_prompt(input_data: dict[str, Any]) -> str:
         "- Do not split display_title into raw_title, title, raw_label, or label.\n"
         "- Do not insert spaces between Chinese characters inside names or words in display_title. "
         "Use '第一章 楼兰：中亚的十字路口', not '第一章 楼 兰：中亚的十字路口'.\n"
+        "- Preserve compact Chinese words in display_title. Use '缩写', '年表', and '致谢', "
+        "not '缩 写', '年 表', or '致 谢'.\n"
         "- Keep a single separator space between a structural prefix and the title when the TOC "
         "visually separates them. Use '第一章 楼兰：中亚的十字路口', not "
         "'第一章楼兰：中亚的十字路口'.\n"
