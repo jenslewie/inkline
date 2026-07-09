@@ -63,30 +63,44 @@ class TextStyleAnalyzer:
         page_coord_sizes: Optional[Dict[int, Tuple[float, float]]] = None,
         *,
         render_zoom: float = 2.0,
+        allow_missing_pdf_text: bool = False,
     ) -> None:
-        self._cache = PdfPageCache(pdf_path, page_coord_sizes, render_zoom=render_zoom)
+        self._cache = PdfPageCache(
+            pdf_path,
+            page_coord_sizes,
+            render_zoom=render_zoom,
+            allow_missing=allow_missing_pdf_text,
+        )
         self._block_metrics_cache: Dict[str, Optional[TextStyleMetrics]] = {}
         self._page_body_cache: Dict[int, Optional[TextStyleMetrics]] = {}
 
     @classmethod
     def from_blocks(
-        cls, pdf_path: Optional[str], blocks: Sequence[Dict[str, Any]]
+        cls,
+        pdf_path: Optional[str],
+        blocks: Sequence[Dict[str, Any]],
+        *,
+        allow_missing_pdf_text: bool = False,
     ) -> "TextStyleAnalyzer":
         from .page_geometry import PageGeometry
 
         geo = PageGeometry.from_canonical_blocks(blocks)
         sizes = {p: (geo.coord_widths[p], geo.coord_heights[p]) for p in geo.coord_widths}
-        return cls(pdf_path, sizes)
+        return cls(pdf_path, sizes, allow_missing_pdf_text=allow_missing_pdf_text)
 
     @classmethod
     def from_raw_pages(
-        cls, pdf_path: Optional[str], pages: Dict[int, Sequence[Any]]
+        cls,
+        pdf_path: Optional[str],
+        pages: Dict[int, Sequence[Any]],
+        *,
+        allow_missing_pdf_text: bool = False,
     ) -> "TextStyleAnalyzer":
         from .page_geometry import PageGeometry
 
         geo = PageGeometry.from_raw_pages(pages)
         sizes = {p: (geo.coord_widths[p], geo.coord_heights[p]) for p in geo.coord_widths}
-        return cls(pdf_path, sizes)
+        return cls(pdf_path, sizes, allow_missing_pdf_text=allow_missing_pdf_text)
 
     def close(self) -> None:
         self._cache.close()

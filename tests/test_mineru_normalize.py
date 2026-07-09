@@ -355,6 +355,7 @@ def test_normalize_mineru_outputs_can_use_llm_book_skeleton_roles(
         book_skeleton_output=book_skeleton_output,
         book_skeleton_llm=True,
         book_skeleton_llm_model="qwen-test",
+        allow_missing_pdf_text=True,
         doc_id="sample",
         title="Sample",
         language="zh-CN",
@@ -453,6 +454,7 @@ def test_normalize_mineru_outputs_can_use_llm_toc_entries(
         book_skeleton_output=book_skeleton_output,
         book_skeleton_llm=True,
         book_skeleton_llm_model="qwen-test",
+        allow_missing_pdf_text=True,
         doc_id="sample",
         title="Sample",
         language="zh-CN",
@@ -464,6 +466,106 @@ def test_normalize_mineru_outputs_can_use_llm_toc_entries(
     assert entries["第一章 米兰达"]["selected_start_page"] == 3
     assert entries["陌生后置材料"]["role"] == "back_matter"
     assert entries["陌生后置材料"]["selected_start_page"] == 4
+
+
+def test_normalize_mineru_outputs_sends_toc_page_images_to_llm(
+    tmp_path, monkeypatch
+) -> None:
+    content_list_v2 = tmp_path / "sample_content_list_v2.json"
+    middle = tmp_path / "sample_middle.json"
+    source_pdf = tmp_path / "sample.pdf"
+    rendered_image = tmp_path / "toc_page.png"
+    output = tmp_path / "canonical.json"
+    book_skeleton_output = tmp_path / "book_skeleton.json"
+    content_list_v2.write_text(
+        json.dumps(
+            [
+                [
+                    _text_item(
+                        "paragraph",
+                        "目录\n序章 1\n第一章 米兰达 2",
+                        [100, 100, 900, 260],
+                    )
+                ],
+                [_text_item("title", "序章", [120, 100, 300, 180])],
+                [_text_item("title", "第一章 米兰达", [120, 100, 420, 180])],
+            ]
+        ),
+        encoding="utf-8",
+    )
+    middle.write_text(
+        json.dumps({"pdf_info": [{"page_size": [1000, 1400]} for _ in range(3)]}),
+        encoding="utf-8",
+    )
+    source_pdf.write_bytes(b"%PDF-1.4\n")
+    rendered_image.write_bytes(b"fake image bytes")
+
+    def fake_render_toc_page_images(pdf_path, toc_pages, output_dir):
+        assert Path(pdf_path) == source_pdf
+        assert toc_pages == [1]
+        assert output_dir == book_skeleton_output.parent / "book_skeleton_toc_llm_pages"
+        return [rendered_image]
+
+    def fake_chat_json(config, *, messages):
+        assert config.model == "qwen-test"
+        assert len(messages) == 1
+        assert messages[0]["images"] == ["ZmFrZSBpbWFnZSBieXRlcw=="]
+        return {
+            "toc_entries": [
+                {
+                    "entry_index": 0,
+                    "raw_title": "序章",
+                    "title": "序章",
+                    "display_title": "序章",
+                    "raw_label": None,
+                    "label": None,
+                    "level": 1,
+                    "parent_entry_index": None,
+                    "role": "body",
+                },
+                {
+                    "entry_index": 1,
+                    "raw_title": "第一章 米兰达",
+                    "title": "米兰达",
+                    "display_title": "第一章 米兰达",
+                    "raw_label": "第一章",
+                    "label": "第一章",
+                    "level": 1,
+                    "parent_entry_index": None,
+                    "role": "body",
+                },
+            ],
+            "uncertain_entries": [],
+        }
+
+    monkeypatch.setattr(
+        "inkline.parsers.mineru.normalize.book_skeleton_shadow._render_toc_page_images",
+        fake_render_toc_page_images,
+    )
+    monkeypatch.setattr(
+        "inkline.parsers.mineru.normalize.book_skeleton_shadow.chat_json",
+        fake_chat_json,
+    )
+
+    normalize_mineru_outputs(
+        content_list_v2=content_list_v2,
+        middle=middle,
+        model=None,
+        markdown=None,
+        source_pdf=source_pdf,
+        output=output,
+        book_skeleton_output=book_skeleton_output,
+        book_skeleton_llm=True,
+        book_skeleton_llm_model="qwen-test",
+        allow_missing_pdf_text=True,
+        doc_id="sample",
+        title="Sample",
+        language="zh-CN",
+    )
+
+    skeleton = json.loads(book_skeleton_output.read_text(encoding="utf-8"))
+    validate_book_skeleton(skeleton)
+    assert skeleton["llm"]["source"] == "toc_image_llm"
 
 
 def test_normalize_mineru_outputs_does_not_write_bookgraph_shadow_by_default(tmp_path) -> None:

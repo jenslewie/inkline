@@ -130,7 +130,9 @@ def _build_page_blocks(
     prev_major_type: Optional[str] = None
     in_toc = False
     text_style = TextStyleAnalyzer.from_raw_pages(
-        getattr(args, "source_pdf", None), cast(Dict[int, Sequence[Any]], pages)
+        getattr(args, "source_pdf", None),
+        cast(Dict[int, Sequence[Any]], pages),
+        allow_missing_pdf_text=getattr(args, "allow_missing_pdf_text", False),
     )
 
     try:

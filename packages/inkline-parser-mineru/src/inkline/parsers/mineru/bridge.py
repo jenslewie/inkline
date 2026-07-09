@@ -119,6 +119,7 @@ def normalize_mineru_outputs(
     book_skeleton_llm_model: str = DEFAULT_QWEN_MODEL,
     book_skeleton_llm_api_url: str = DEFAULT_OLLAMA_CHAT_URL,
     book_skeleton_llm_timeout_seconds: int = 300,
+    allow_missing_pdf_text: bool = False,
 ) -> dict[str, Any]:
     """Run the MinerU normalization pipeline programmatically.
 
@@ -142,7 +143,7 @@ def normalize_mineru_outputs(
         model=str(model) if model else None,
         md=str(markdown) if markdown else None,
         source_pdf=str(source_pdf) if source_pdf else None,
-        allow_missing_pdf_text=False,
+        allow_missing_pdf_text=allow_missing_pdf_text,
         output=str(output),
         doc_id=doc_id,
         title=title,
@@ -489,6 +490,11 @@ def _write_observed_shadow_if_requested(
         skeleton = build_book_skeleton_shadow(
             observed,
             use_llm=book_skeleton_llm,
+            source_pdf=source_pdf,
+            image_output_dir=(
+                Path(book_skeleton_output).parent
+                / f"{Path(book_skeleton_output).stem}_toc_llm_pages"
+            ),
             llm_model=book_skeleton_llm_model,
             llm_api_url=book_skeleton_llm_api_url,
             llm_timeout_seconds=book_skeleton_llm_timeout_seconds,
