@@ -72,9 +72,19 @@ def _validate_toc_pages(toc_pages: list[Any]) -> None:
 def _validate_toc_entries(entries: list[dict[str, Any]]) -> None:
     seen: set[int] = set()
     previous_known_role_rank = -1
+    previous_selected_start_page: int | None = None
     for index, entry in enumerate(entries):
         _validate_toc_entry_shape(entry, index, seen)
         _validate_toc_entry_pages(entry, index)
+        selected_start_page = entry["selected_start_page"]
+        if (
+            isinstance(selected_start_page, int)
+            and previous_selected_start_page is not None
+            and selected_start_page < previous_selected_start_page
+        ):
+            raise ValidationError("toc_entries selected_start_page values must be monotonic")
+        if isinstance(selected_start_page, int):
+            previous_selected_start_page = selected_start_page
         previous_known_role_rank = _validate_toc_entry_role_order(
             entry, previous_known_role_rank
         )

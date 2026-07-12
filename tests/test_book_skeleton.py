@@ -253,7 +253,7 @@ def test_build_book_skeleton_from_observed_splits_glued_toc_entries() -> None:
         assert "label_correction" not in entry["attrs"]
     entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
     assert entries["1 日本：从战国时代到世界强权"]["selected_start_page"] == 32
-    assert entries["2 中国：衰落中的明王朝"]["selected_start_page"] == 21
+    assert entries["2 中国：衰落中的明王朝"]["selected_start_page"] is None
 
 
 def test_build_book_skeleton_from_observed_recovers_glued_multi_digit_numeric_labels() -> None:
@@ -1399,7 +1399,7 @@ def test_build_book_skeleton_from_observed_downranks_footnote_heavy_title_matche
     assert entry["selected_start_page"] == 483
 
 
-def test_build_book_skeleton_from_observed_ignores_body_text_for_start_pages() -> None:
+def test_build_book_skeleton_from_observed_recovers_ocr_missed_page_from_toc_offset() -> None:
     pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 540)]
     document = make_observed_document(
         {
@@ -1456,8 +1456,8 @@ def test_build_book_skeleton_from_observed_ignores_body_text_for_start_pages() -
     skeleton = build_book_skeleton_from_observed(document)
     entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
 
-    assert entries["中世纪欧洲的启示文学传统"]["candidate_start_pages"] == [493]
-    assert entries["中世纪欧洲的启示文学传统"]["selected_start_page"] == 493
+    assert entries["中世纪欧洲的启示文学传统"]["candidate_start_pages"] == [41]
+    assert entries["中世纪欧洲的启示文学传统"]["selected_start_page"] == 41
 
 
 def test_build_book_skeleton_from_observed_preserves_local_best_when_order_allows() -> None:
@@ -1561,6 +1561,17 @@ def test_validate_book_skeleton_rejects_selected_start_page_outside_candidates()
     skeleton["toc_entries"][0]["selected_start_page"] = 99
 
     with pytest.raises(ValidationError, match="selected_start_page"):
+        validate_book_skeleton(skeleton)
+
+
+def test_validate_book_skeleton_rejects_nonmonotonic_selected_start_pages() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+    skeleton["toc_entries"][1]["candidate_start_pages"] = [42, 300]
+    skeleton["toc_entries"][1]["selected_start_page"] = 300
+    skeleton["toc_entries"][2]["candidate_start_pages"] = [42]
+    skeleton["toc_entries"][2]["selected_start_page"] = 42
+
+    with pytest.raises(ValidationError, match="monotonic"):
         validate_book_skeleton(skeleton)
 
 

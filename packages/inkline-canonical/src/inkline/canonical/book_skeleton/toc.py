@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from itertools import pairwise
 from typing import Any
 
 TOC_ENTRY_RE = re.compile(
@@ -8,6 +9,9 @@ TOC_ENTRY_RE = re.compile(
 )
 TOC_ENTRY_PART_RE = re.compile(
     r"\s*(?P<title>.+?)\s+(?P<page>[ivxlcdmIVXLCDM\d]+)(?=\s+\S|$)"
+)
+PACKED_PARENTHESIZED_TOC_ENTRY_RE = re.compile(
+    r"(?P<title>[^/／()（）]+?)\s*[（(]\s*(?P<page>\d+)\s*[）)]"
 )
 TOC_PART_LABEL_RE = re.compile(r"^(?P<label>第[一二三四五六七八九十百千万\d]+部分)\s+(?P<title>.+)$")
 TOC_CHAPTER_LABEL_RE = re.compile(r"^(?P<label>第[一二三四五六七八九十百千万\d]+[章节])\s+(?P<title>.+)$")
@@ -46,8 +50,11 @@ def parse_toc_entries(text: str) -> list[dict[str, Any]]:
     return entries
 
 
-def parse_toc_line_entries(line: str) -> list[dict[str, str | None]]:
+def parse_toc_line_entries(line: str) -> list[dict[str, Any]]:
     normalized_line = normalize_toc_line(line)
+    packed_entries = _packed_parenthesized_toc_entries(normalized_line)
+    if packed_entries:
+        return packed_entries
     matches = list(TOC_ENTRY_PART_RE.finditer(normalized_line))
     if not matches and _looks_like_standalone_toc_heading(normalized_line):
         return [_toc_entry_parts(normalized_line)]
@@ -58,7 +65,7 @@ def parse_toc_line_entries(line: str) -> list[dict[str, str | None]]:
         title = clean_toc_title(match.group("title"))
         if not title or _is_noise_toc_title(title):
             return []
-        return [_toc_entry_parts(title)]
+        return [_toc_entry_parts(title, printed_start_page=match.group("page"))]
     items = []
     raw_items = [
         {
@@ -71,8 +78,34 @@ def parse_toc_line_entries(line: str) -> list[dict[str, str | None]]:
     for raw_item in raw_items:
         title = raw_item["title"]
         if title and not _is_noise_toc_title(title):
-            items.append(_toc_entry_parts(title))
+            items.append(
+                _toc_entry_parts(
+                    title,
+                    printed_start_page=(
+                        None if raw_item.get("printed_page_recovered") else raw_item["page"]
+                    ),
+                )
+            )
     return items
+
+
+def _packed_parenthesized_toc_entries(line: str) -> list[dict[str, Any]]:
+    matches = list(PACKED_PARENTHESIZED_TOC_ENTRY_RE.finditer(line))
+    if len(matches) < 2:
+        return []
+    if line[: matches[0].start()].strip() or line[matches[-1].end() :].strip():
+        return []
+    if any(
+        not re.fullmatch(r"\s*[/／]\s*", line[left.end() : right.start()])
+        for left, right in pairwise(matches)
+    ):
+        return []
+    entries = []
+    for match in matches:
+        title = clean_toc_title(match.group("title"))
+        if title and not _is_noise_toc_title(title):
+            entries.append(_toc_entry_parts(title, printed_start_page=match.group("page")))
+    return entries
 
 
 def infer_toc_levels(entries: list[dict[str, Any]]) -> None:
@@ -229,7 +262,7 @@ def _looks_like_standalone_toc_heading(line: str) -> bool:
     return TOC_PART_LABEL_RE.match(line) is not None
 
 
-def _recover_glued_numeric_labels(items: list[dict[str, str]]) -> None:
+def _recover_glued_numeric_labels(items: list[dict[str, Any]]) -> None:
     for index in range(len(items) - 1):
         current = _toc_entry_parts(items[index]["title"])
         next_item = items[index + 1]
@@ -245,6 +278,9 @@ def _recover_glued_numeric_labels(items: list[dict[str, str]]) -> None:
             continue
         next_item["title"] = f"{expected_label} {next_item['title']}"
         items[index]["page"] = page_token[: -len(suffix)]
+        # The original page token also held the next entry label, so it cannot
+        # serve as a reliable physical-page calibration point.
+        items[index]["printed_page_recovered"] = True
 
 
 def _expected_label_suffix(page_token: str, expected_label: str) -> str | None:
@@ -291,7 +327,9 @@ def _has_non_numeric_toc_label(title: str) -> bool:
     )
 
 
-def _toc_entry_parts(raw_title: str) -> dict[str, Any]:
+def _toc_entry_parts(
+    raw_title: str, *, printed_start_page: str | None = None
+) -> dict[str, Any]:
     raw_label, label, title, level, attrs = _split_toc_label(raw_title)
     display_title = f"{label} {title}" if label else title
     return {
@@ -301,8 +339,15 @@ def _toc_entry_parts(raw_title: str) -> dict[str, Any]:
         "raw_label": raw_label,
         "label": label,
         "level": level,
+        "printed_start_page": _printed_start_page(printed_start_page),
         "attrs": attrs,
     }
+
+
+def _printed_start_page(value: str | None) -> int | None:
+    if not value or not value.isdecimal():
+        return None
+    return int(value)
 
 
 def _split_toc_label(raw_title: str) -> tuple[str | None, str | None, str, int, dict[str, Any]]:
@@ -378,6 +423,7 @@ def _toc_entry(index: int, parts: dict[str, Any]) -> dict[str, Any]:
         "level": parts["level"],
         "parent_entry_index": None,
         "role": "unknown",
+        "printed_start_page": parts["printed_start_page"],
         "candidate_start_pages": [],
         "selected_start_page": None,
         "attrs": parts["attrs"],

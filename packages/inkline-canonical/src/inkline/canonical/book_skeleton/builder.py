@@ -5,6 +5,7 @@ from typing import Any
 
 from inkline.canonical.book_skeleton.contract import BOOK_SKELETON_ENTRY_ROLES
 from inkline.canonical.book_skeleton.pages import (
+    add_printed_page_offset_candidates,
     boundaries,
     detect_toc_pages,
     locate_toc_entry_pages,
@@ -20,6 +21,7 @@ from inkline.canonical.book_skeleton.toc import (
     assign_toc_hierarchy,
     infer_toc_levels,
     looks_like_body_toc_entry,
+    normalize_title,
     parse_toc_entries,
 )
 from inkline.canonical.book_skeleton.toc_llm import normalize_llm_toc_entries
@@ -39,12 +41,14 @@ def build_book_skeleton_from_observed(
     validate_observed_document(document)
     records = page_records(document)
     toc_pages = detect_toc_pages(records)
+    toc_text = "\n".join(observed_page_text(document, page) for page in toc_pages)
+    parsed_entries = parse_toc_entries(toc_text)
     entries_from_llm_toc = llm_toc_entries is not None
     if entries_from_llm_toc:
         entries = normalize_llm_toc_entries(llm_toc_entries)
+        _attach_printed_start_pages(entries, parsed_entries)
     else:
-        toc_text = "\n".join(observed_page_text(document, page) for page in toc_pages)
-        entries = parse_toc_entries(toc_text)
+        entries = parsed_entries
         infer_toc_levels(entries)
         assign_toc_hierarchy(entries)
     for entry in entries:
@@ -67,6 +71,8 @@ def build_book_skeleton_from_observed(
         )
         apply_role_level_guardrails(entries)
         assign_toc_hierarchy(entries)
+    select_monotonic_start_pages(entries)
+    add_printed_page_offset_candidates(entries, page_count=len(records))
     select_monotonic_start_pages(entries)
     prune_candidate_start_pages_to_toc_intervals(entries)
     public_entries = [_public_toc_entry(entry) for entry in entries]
@@ -136,6 +142,51 @@ def _public_toc_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "selected_start_page": entry["selected_start_page"],
         "attrs": attrs,
     }
+
+
+def _attach_printed_start_pages(
+    llm_entries: list[dict[str, Any]], parsed_entries: list[dict[str, Any]]
+) -> None:
+    remaining_by_title: dict[str, list[dict[str, Any]]] = {}
+    for entry in parsed_entries:
+        key = normalize_title(str(entry.get("display_title") or ""))
+        if key:
+            remaining_by_title.setdefault(key, []).append(entry)
+
+    positional_alignment = len(llm_entries) == len(parsed_entries)
+    for index, entry in enumerate(llm_entries):
+        source = _matching_parsed_entry(
+            entry,
+            index,
+            parsed_entries,
+            remaining_by_title,
+            allow_positional_fallback=positional_alignment,
+        )
+        printed_start_page = source.get("printed_start_page") if source else None
+        if isinstance(printed_start_page, int):
+            entry["printed_start_page"] = printed_start_page
+
+
+def _matching_parsed_entry(
+    entry: dict[str, Any],
+    index: int,
+    parsed_entries: list[dict[str, Any]],
+    remaining_by_title: dict[str, list[dict[str, Any]]],
+    *,
+    allow_positional_fallback: bool,
+) -> dict[str, Any] | None:
+    title_key = normalize_title(str(entry.get("display_title") or ""))
+    if index < len(parsed_entries):
+        indexed = parsed_entries[index]
+        if title_key == normalize_title(str(indexed.get("display_title") or "")):
+            candidates = remaining_by_title.get(title_key) or []
+            if indexed in candidates:
+                candidates.remove(indexed)
+            return indexed
+        if allow_positional_fallback:
+            return indexed
+    candidates = remaining_by_title.get(title_key) or []
+    return candidates.pop(0) if candidates else None
 
 
 def _apply_structural_roles(entries: list[dict[str, Any]]) -> None:

@@ -93,6 +93,18 @@ def test_toc_llm_prompt_discourages_spaces_inside_compact_chinese_words() -> Non
     assert "Use '缩写', '年表', and '致谢'" in prompt
 
 
+def test_toc_llm_prompt_preserves_decimal_chapter_numbers() -> None:
+    prompt = book_skeleton_toc_llm_prompt(
+        {
+            "mode": "toc_image_extraction",
+            "toc_pages": [39],
+            "expected_output": {"toc_entries": []},
+        }
+    )
+
+    assert "Use '第1章', not '第Ⅰ章'" in prompt
+
+
 def test_toc_llm_prompt_keeps_aligned_back_matter_top_level() -> None:
     prompt = book_skeleton_toc_llm_prompt(
         {
@@ -105,6 +117,57 @@ def test_toc_llm_prompt_keeps_aligned_back_matter_top_level() -> None:
     assert "If a back_matter entry is visually aligned with top-level chapters" in prompt
     assert "Do not make it a child of the final body entry" in prompt
     assert "Entries with the same left alignment must have the same level" in prompt
+
+
+def test_toc_llm_prompt_makes_visual_indent_decisive() -> None:
+    prompt = book_skeleton_toc_llm_prompt(
+        {
+            "mode": "toc_image_extraction",
+            "toc_pages": [13],
+            "expected_output": {"toc_entries": []},
+        }
+    )
+
+    assert "Treat visual indentation as decisive" in prompt
+    assert "semantic relationship is unclear" in prompt
+
+
+def test_toc_llm_prompt_requires_attachment_order_and_role_sequence() -> None:
+    prompt = book_skeleton_toc_llm_prompt(
+        {
+            "mode": "toc_image_extraction",
+            "toc_pages": [4, 5],
+            "expected_output": {"toc_entries": []},
+        }
+    )
+
+    assert "TOC images, supplied in preceding messages, are in ascending physical PDF" in prompt
+    assert "Do not reorder or group TOC entries by role" in prompt
+    assert "must not be classified as front_matter" in prompt
+
+
+def test_toc_llm_prompt_excludes_the_toc_page_heading() -> None:
+    prompt = book_skeleton_toc_llm_prompt(
+        {
+            "mode": "toc_image_extraction",
+            "toc_pages": [4],
+            "expected_output": {"toc_entries": []},
+        }
+    )
+
+    assert "Do not emit a TOC page heading as a toc_entry" in prompt
+
+
+def test_toc_llm_prompt_splits_packed_parenthesized_toc_entries() -> None:
+    prompt = book_skeleton_toc_llm_prompt(
+        {
+            "mode": "toc_image_extraction",
+            "toc_pages": [8],
+            "expected_output": {"toc_entries": []},
+        }
+    )
+
+    assert "A(191)/B(193) represents two TOC entries" in prompt
 
 
 def test_locates_toc_entry_from_table_region_caption_text() -> None:

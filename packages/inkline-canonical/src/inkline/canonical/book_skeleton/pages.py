@@ -25,6 +25,9 @@ TITLE_LOCATION_EXCLUDED_ROLE_HINTS = {
     "caption_text",
 }
 SHORT_AMBIGUOUS_TITLE_KEY_MAX_LENGTH = 4
+PRINTED_OFFSET_TOLERANCE = 2
+MAX_PRINTED_PAGE_OFFSET = 128
+MISSING_START_PAGE_COST = 24
 DISPLAY_TITLE_PREFIX_RE = re.compile(
     r"^(?P<label>(?:第[一二三四五六七八九十百零〇\d]+[章节部篇卷]|"
     r"[一二三四五六七八九十百零〇\d]+[、.]?|"
@@ -198,10 +201,31 @@ def locate_title_pages(
 
 def select_monotonic_start_pages(entries: list[dict[str, Any]]) -> None:
     selections = _choose_monotonic_start_pages(
-        [entry["candidate_start_pages"] for entry in entries]
+        [entry["candidate_start_pages"] for entry in entries],
+        [entry.get("printed_start_page") for entry in entries],
+        [entry.get("role") for entry in entries],
     )
     for entry, selected_start_page in zip(entries, selections, strict=True):
         entry["selected_start_page"] = selected_start_page
+
+
+def add_printed_page_offset_candidates(entries: list[dict[str, Any]], *, page_count: int) -> None:
+    """Add a physical-page candidate when adjacent same-role anchors agree on offset."""
+
+    for index, entry in enumerate(entries):
+        if entry.get("selected_start_page") is not None:
+            continue
+        printed_start_page = entry.get("printed_start_page")
+        if not isinstance(printed_start_page, int):
+            continue
+        offset = _agreed_neighbor_offset(entries, index)
+        if offset is None:
+            continue
+        predicted_page = printed_start_page + offset
+        if not 1 <= predicted_page <= page_count:
+            continue
+        if predicted_page not in entry["candidate_start_pages"]:
+            entry["candidate_start_pages"].append(predicted_page)
 
 
 def prune_candidate_start_pages_to_toc_intervals(entries: list[dict[str, Any]]) -> None:
@@ -316,33 +340,116 @@ def _nearest_selected_page(pages: list[int | None], *, reverse: bool) -> int | N
     return None
 
 
-def _choose_monotonic_start_pages(candidate_lists: list[list[int]]) -> list[int | None]:
-    states: dict[int | None, tuple[int, list[int | None]]] = {None: (0, [])}
-    for candidates in candidate_lists:
-        if not candidates:
-            states = {
-                last_page: (cost, [*path, None])
-                for last_page, (cost, path) in states.items()
-            }
+def _agreed_neighbor_offset(entries: list[dict[str, Any]], index: int) -> int | None:
+    entry = entries[index]
+    role = entry.get("role")
+    previous_offset = _neighbor_printed_offset(entries, index, role=role, reverse=True)
+    next_offset = _neighbor_printed_offset(entries, index, role=role, reverse=False)
+    if previous_offset is None or next_offset is None:
+        return None
+    if abs(previous_offset - next_offset) > PRINTED_OFFSET_TOLERANCE:
+        return None
+    return round((previous_offset + next_offset) / 2)
+
+
+def _neighbor_printed_offset(
+    entries: list[dict[str, Any]],
+    index: int,
+    *,
+    role: Any,
+    reverse: bool,
+) -> int | None:
+    positions = range(index - 1, -1, -1) if reverse else range(index + 1, len(entries))
+    for position in positions:
+        candidate = entries[position]
+        if candidate.get("role") != role:
             continue
-        next_states: dict[int, tuple[int, list[int | None]]] = {}
-        for last_page, (cost, path) in states.items():
+        selected_page = candidate.get("selected_start_page")
+        printed_page = candidate.get("printed_start_page")
+        if isinstance(selected_page, int) and isinstance(printed_page, int):
+            return selected_page - printed_page
+    return None
+
+
+def _choose_monotonic_start_pages(
+    candidate_lists: list[list[int]], printed_start_pages: list[Any], roles: list[Any]
+) -> list[int | None]:
+    states: dict[tuple[int | None, int | None, Any], tuple[int, list[int | None]]] = {
+        (None, None, None): (0, [])
+    }
+    for candidates, printed_start_page, role in zip(
+        candidate_lists, printed_start_pages, roles, strict=True
+    ):
+        next_states: dict[tuple[int | None, int | None, Any], tuple[int, list[int | None]]] = {}
+        for (last_page, last_offset, last_role), (cost, path) in states.items():
+            _keep_better_state(
+                next_states,
+                (last_page, last_offset, last_role),
+                cost + MISSING_START_PAGE_COST,
+                [*path, None],
+            )
             for rank, candidate in enumerate(candidates):
                 if last_page is not None and candidate < last_page:
                     continue
-                new_cost = cost + rank
-                existing = next_states.get(candidate)
-                if existing is None or new_cost < existing[0]:
-                    next_states[candidate] = (new_cost, [*path, candidate])
-        if not next_states:
-            return _choose_local_best_start_pages(candidate_lists)
+                candidate_offset = _printed_offset(candidate, printed_start_page)
+                if _is_implausible_printed_offset(candidate_offset):
+                    continue
+                active_offset = last_offset if last_role == role else None
+                new_cost = cost + rank + _offset_transition_penalty(
+                    candidate_offset, active_offset
+                )
+                _keep_better_state(
+                    next_states,
+                    (
+                        candidate,
+                        candidate_offset if candidate_offset is not None else active_offset,
+                        role,
+                    ),
+                    new_cost,
+                    [*path, candidate],
+                )
         states = next_states
-    _last_page, (_cost, path) = min(states.items(), key=lambda item: (item[1][0], item[0] or 0))
+    _last_state, (_cost, path) = min(
+        states.items(),
+        key=lambda item: (
+            item[1][0],
+            _missing_pattern(item[1][1]),
+            item[0][0] or 0,
+        ),
+    )
     return path
 
 
-def _choose_local_best_start_pages(candidate_lists: list[list[int]]) -> list[int | None]:
-    return [candidates[0] if candidates else None for candidates in candidate_lists]
+def _printed_offset(candidate: int, printed_start_page: Any) -> int | None:
+    return candidate - printed_start_page if isinstance(printed_start_page, int) else None
+
+
+def _is_implausible_printed_offset(offset: int | None) -> bool:
+    return offset is not None and abs(offset) > MAX_PRINTED_PAGE_OFFSET
+
+
+def _offset_transition_penalty(candidate_offset: int | None, last_offset: int | None) -> int:
+    if candidate_offset is None or last_offset is None:
+        return 0
+    return abs(candidate_offset - last_offset)
+
+
+def _keep_better_state(
+    states: dict[tuple[int | None, int | None, Any], tuple[int, list[int | None]]],
+    state_key: tuple[int | None, int | None, Any],
+    cost: int,
+    path: list[int | None],
+) -> None:
+    existing = states.get(state_key)
+    if existing is None or (cost, _missing_pattern(path)) < (
+        existing[0],
+        _missing_pattern(existing[1]),
+    ):
+        states[state_key] = (cost, path)
+
+
+def _missing_pattern(path: list[int | None]) -> tuple[bool, ...]:
+    return tuple(page is None for page in path)
 
 
 def _selected_start_page(entries: list[dict[str, Any]], index: int | None) -> int | None:
