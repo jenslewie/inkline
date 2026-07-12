@@ -254,15 +254,20 @@ def _write_observed_shadow_outputs(args, pages, page_sizes, canonical) -> None:
         validate_internal_canonical(internal_canonical)
         _write_json(Path(args.internal_canonical_output), internal_canonical)
     if args.book_skeleton_output:
+        book_skeleton_path = Path(args.book_skeleton_output)
         skeleton = build_book_skeleton_shadow(
             observed,
             use_llm=args.book_skeleton_llm,
+            source_pdf=args.source_pdf,
+            image_output_dir=(
+                book_skeleton_path.parent / f"{book_skeleton_path.stem}_toc_llm_pages"
+            ),
             llm_model=args.book_skeleton_llm_model,
             llm_api_url=args.book_skeleton_llm_api_url,
             llm_timeout_seconds=args.book_skeleton_llm_timeout_seconds,
         )
         validate_book_skeleton(skeleton)
-        _write_json(Path(args.book_skeleton_output), skeleton)
+        _write_json(book_skeleton_path, skeleton)
 
 
 def _write_json(path: Path, payload: dict) -> None:

@@ -509,8 +509,15 @@ def test_normalize_mineru_outputs_sends_toc_page_images_to_llm(
     def fake_chat_json(config, *, messages):
         assert config.model == "qwen-test"
         assert config.options["num_predict"] >= 8192
-        assert len(messages) == 1
+        assert len(messages) == 2
+        assert messages[0]["content"] == (
+            "This is TOC page image 1 of 1. It comes before every later TOC page image. "
+            "Read and retain its entries; do not return the final JSON yet."
+        )
         assert messages[0]["images"] == ["ZmFrZSBpbWFnZSBieXRlcw=="]
+        assert "images" not in messages[1]
+        assert messages[1]["role"] == "user"
+        assert "strict JSON contract" in messages[1]["content"]
         return {
             "toc_entries": [
                 {

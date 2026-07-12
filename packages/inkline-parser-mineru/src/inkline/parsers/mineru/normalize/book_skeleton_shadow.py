@@ -38,7 +38,7 @@ def build_book_skeleton_shadow(
         toc_pages=llm_input["toc_pages"],
         image_output_dir=image_output_dir,
     )
-    messages = [_llm_message(book_skeleton_toc_llm_prompt(llm_input), image_paths)]
+    messages = _llm_messages(book_skeleton_toc_llm_prompt(llm_input), image_paths)
     llm_result = chat_json(
         _llm_config(llm_model, llm_api_url, llm_timeout_seconds),
         messages=messages,
@@ -73,7 +73,7 @@ def _llm_config(model: str, api_url: str, timeout_seconds: int) -> OllamaChatCon
         response_format=defaults.response_format,
         think=defaults.think,
         stream=defaults.stream,
-        options={**defaults.options, "num_predict": BOOK_SKELETON_LLM_NUM_PREDICT},
+        options={**defaults.options, "num_predict": BOOK_SKELETON_LLM_NUM_PREDICT, "seed": 0},
     )
 
 
@@ -89,14 +89,26 @@ def _toc_image_paths(
     return _render_toc_page_images(Path(source_pdf), toc_pages, output_dir)
 
 
-def _llm_message(prompt: str, image_paths: list[Path]) -> dict[str, Any]:
-    message: dict[str, Any] = {"role": "user", "content": prompt}
-    if image_paths:
-        message["images"] = [
-            base64.b64encode(Path(image_path).read_bytes()).decode("ascii")
-            for image_path in image_paths
-        ]
-    return message
+def _llm_messages(prompt: str, image_paths: list[Path]) -> list[dict[str, Any]]:
+    if not image_paths:
+        return [{"role": "user", "content": prompt}]
+
+    image_count = len(image_paths)
+    messages = []
+    for index, image_path in enumerate(image_paths, start=1):
+        relative_order = "before every later" if index == 1 else "after every earlier"
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"This is TOC page image {index} of {image_count}. It comes {relative_order} "
+                    "TOC page image. Read and retain its entries; do not return the final JSON yet."
+                ),
+                "images": [base64.b64encode(image_path.read_bytes()).decode("ascii")],
+            }
+        )
+    messages.append({"role": "user", "content": prompt})
+    return messages
 
 
 def _render_toc_page_images(
