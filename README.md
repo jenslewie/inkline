@@ -143,9 +143,44 @@ troubleshooting.
 
 `book_skeleton.json` is a pre-release shadow artifact for TOC-driven book
 skeleton detection before BookGraph node construction. Add `--book-skeleton-llm`
-to use the local Ollama model to classify TOC entries into front matter, body,
-and back matter. The LLM is not allowed to decide PDF physical page numbers;
-those still come from ObservedDocument title evidence.
+to use the local Ollama model to read the TOC, generate the entry hierarchy, and
+classify entries into front matter, body, and back matter. The LLM is not allowed
+to decide PDF physical page numbers; those still come from ObservedDocument title
+evidence.
+
+For the intended multimodal TOC mode, always pass both `--source-pdf` and the
+LLM flag. Inkline renders only the detected TOC pages and sends those images
+together with the observed TOC text to the local model. Each TOC page is sent
+as a separate, page-ordered message so a multi-page TOC retains its reading
+order. The rendered images are saved next to the skeleton as
+`<skeleton-name>_toc_llm_pages/` for audit.
+
+When the only requested artifact is a BookSkeleton, use the dedicated command.
+It loads raw MinerU layout evidence into an ObservedDocument and writes the
+skeleton directly; it does not build or write `canonical.json`.
+
+```bash
+UV_CACHE_DIR=/tmp/inkline-uv-cache uv run --extra mineru mineru-to-book-skeleton \
+  --content-list-v2 data/outputs/mineru/埃及/vlm/埃及_content_list_v2.json \
+  --middle data/outputs/mineru/埃及/vlm/埃及_middle.json \
+  --source-pdf data/samples/埃及.pdf \
+  --doc-id 埃及 \
+  --title 埃及 \
+  --output data/outputs/skeleton/埃及_skeleton.json \
+  --llm
+```
+
+`--llm` requires a readable `--source-pdf`; the dedicated command fails rather
+than silently falling back to a text-only TOC request. For the full canonical
+pipeline, retain `mineru-to-canonical --book-skeleton-output ...
+--book-skeleton-llm`.
+
+The generated skeleton records the LLM input path in `llm.source`:
+
+- `toc_image_llm`: the model received rendered TOC page images and observed TOC text.
+- `toc_llm_entries`: the model received observed TOC text only, because no source PDF
+  or TOC images were available. This is a legacy-pipeline fallback, not the
+  recommended audit mode.
 
 To compare the v1-shadow and ObservedDocument-shadow BookGraph paths:
 

@@ -7,7 +7,9 @@ rules.
 ## Public Role
 
 - Provides the `mineru` parser entry point for `inkline-parse`.
-- Provides the `mineru-to-canonical` development command for raw artifact reuse.
+- Provides `mineru-to-canonical` for raw artifact reuse and full canonical output.
+- Provides `mineru-to-book-skeleton` for raw artifact reuse when only a
+  TOC-driven BookSkeleton is needed.
 - Loads MinerU raw artifacts and normalizes them into current canonical output.
 - Builds optional shadow artifacts: `ObservedDocument`, BookGraph, internal
   canonical, and book skeleton outputs.
@@ -20,7 +22,7 @@ rules.
 
 ```text
 inkline/parsers/mineru/
-  app/             `mineru-to-canonical` CLI.
+  app/             `mineru-to-canonical` and `mineru-to-book-skeleton` CLIs.
   bridge.py        Programmatic parser bridge.
   extraction/      Raw MinerU artifact loading and text extraction helpers.
   schema/          MinerU raw schema and pattern helpers.
