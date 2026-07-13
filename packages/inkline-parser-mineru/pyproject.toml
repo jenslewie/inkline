@@ -23,6 +23,7 @@ mineru = [
 [project.scripts]
 mineru-to-canonical = "inkline.parsers.mineru.app.cli:main"
 mineru-to-book-skeleton = "inkline.parsers.mineru.app.book_skeleton_cli:main"
+mineru-page-review = "inkline.parsers.mineru.app.page_review_cli:main"
 
 [project.entry-points."inkline.parsers"]
 mineru = "inkline.parsers.mineru:MinerUParser"

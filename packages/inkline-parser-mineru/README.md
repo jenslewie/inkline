@@ -10,6 +10,7 @@ rules.
 - Provides `mineru-to-canonical` for raw artifact reuse and full canonical output.
 - Provides `mineru-to-book-skeleton` for raw artifact reuse when only a
   TOC-driven BookSkeleton is needed.
+- Provides `mineru-page-review` when only a Phase 4A PageReview is needed.
 - Loads MinerU raw artifacts and normalizes them into current canonical output.
 - Builds optional shadow artifacts: `ObservedDocument`, BookGraph, internal
   canonical, and book skeleton outputs.
@@ -33,3 +34,24 @@ inkline/parsers/mineru/
 
 Parser-specific data should stay in this package or in explicit provenance/debug
 payloads on shadow artifacts.
+
+## PageReview Only
+
+`mineru-page-review` builds `ObservedDocument -> BookSkeleton -> PageReview` but
+does not write a canonical graph. Its required `--output` is the PageReview JSON;
+the resumable LLM checkpoint and rendered contact sheets are written beside it.
+
+```bash
+uv run --extra mineru mineru-page-review \
+  --content-list-v2 data/outputs/mineru/丝绸之路新史/vlm/丝绸之路新史_content_list_v2.json \
+  --middle data/outputs/mineru/丝绸之路新史/vlm/丝绸之路新史_middle.json \
+  --source-pdf data/samples/丝绸之路新史.pdf \
+  --doc-id 丝绸之路新史 \
+  --title 丝绸之路新史 \
+  --skeleton-llm \
+  --llm \
+  --output /tmp/inkline-page-review/丝绸之路新史_page_review.json
+```
+
+Re-run the same command after an LLM failure. Completed page groups are reused
+from `/tmp/inkline-page-review/page_review.checkpoint.json`.
