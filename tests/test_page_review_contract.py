@@ -90,6 +90,23 @@ def test_page_review_resolves_only_selected_candidates() -> None:
     assert resolved["llm"]["reviewed_pages"] == [4, 6]
 
 
+def test_page_review_accepts_text_flow_page_for_a_visual_candidate_with_body_text() -> None:
+    plan = {
+        "metadata": {"schema_name": "inkline_page_review", "schema_version": "0.1-shadow"},
+        "candidate_pages": [267],
+        "pages": [_record(267, "text_flow_page", "needs_review", "needs_review", "pending")],
+    }
+
+    resolved = resolve_page_review(
+        plan,
+        [_decision(267, "text_flow_page", "include", "retain", "high")],
+        llm_model="qwen-test",
+    )
+
+    assert resolved["pages"][0]["page_role"] == "text_flow_page"
+    assert resolved["pages"][0]["text_flow_action"] == "include"
+
+
 def test_resolved_page_review_rejects_pending_candidates() -> None:
     review = {
         "metadata": {"schema_name": "inkline_page_review", "schema_version": "0.1-shadow"},

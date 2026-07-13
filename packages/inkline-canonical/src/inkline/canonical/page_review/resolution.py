@@ -23,6 +23,7 @@ PAGE_REVIEW_ROLES = {
     "copyright_page",
     "toc_page",
     "front_text_page",
+    "text_flow_page",
     "visual_page",
     "table_or_chart_page",
     "blank_page",

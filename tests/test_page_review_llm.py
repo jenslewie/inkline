@@ -34,3 +34,4 @@ def test_page_review_prompt_defines_the_strict_decision_contract() -> None:
     assert "Only classify the supplied candidate pages" in prompt
     assert '"text_flow_action"' in prompt
     assert '"visual_asset_action"' in prompt
+    assert "page_role=text_flow_page" in prompt
