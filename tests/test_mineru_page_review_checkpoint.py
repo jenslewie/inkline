@@ -98,6 +98,42 @@ def test_page_review_checkpoint_resumes_after_a_failed_group(tmp_path, monkeypat
     assert review["llm"]["reviewed_pages"] == [1, 3]
 
 
+def test_page_review_checkpoint_preserves_invalid_model_response(tmp_path) -> None:
+    checkpoint_path = tmp_path / "page_review.checkpoint.json"
+    checkpoint = {
+        "checkpoint": {
+            "status": "in_progress",
+            "completed_group_ids": [],
+            "failed_group_id": None,
+            "error": None,
+        },
+        "group_decisions": {},
+    }
+    response = {
+        "page_reviews": [
+            {
+                "page": 267,
+                "page_role": "body_page",
+                "text_flow_action": "include",
+                "visual_asset_action": "retain",
+                "confidence": "high",
+            }
+        ]
+    }
+
+    page_review_shadow._record_checkpoint_failure(
+        checkpoint_path,
+        checkpoint,
+        "g0018",
+        ValueError("page_role is invalid"),
+        raw_response=response,
+    )
+
+    written = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    assert written["checkpoint"]["failed_group_id"] == "g0018"
+    assert written["failed_group_response"] == response
+
+
 def _page_from_message(messages: list[dict[str, object]]) -> int:
     content = str(messages[0]["content"])
     if "physical pages are [1]" in content:

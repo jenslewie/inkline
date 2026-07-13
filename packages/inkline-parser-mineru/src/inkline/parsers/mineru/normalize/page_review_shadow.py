@@ -191,6 +191,7 @@ def _resolve_request_group(
         "first_body_page": plan["first_body_page"],
         "pages": [page_records[page] for page in group],
     }
+    result: dict[str, Any] | None = None
     try:
         result = chat_json(
             _llm_config(runtime.llm_model, runtime.llm_api_url, runtime.llm_timeout_seconds),
@@ -213,7 +214,12 @@ def _resolve_request_group(
         )
     except Exception as exc:
         _record_checkpoint_failure(
-            runtime.checkpoint_path, checkpoint, group_id, exc, group_decisions
+            runtime.checkpoint_path,
+            checkpoint,
+            group_id,
+            exc,
+            group_decisions,
+            raw_response=result,
         )
         raise
 
@@ -260,6 +266,7 @@ def _record_checkpoint_failure(
     group_id: str,
     error: Exception,
     group_decisions: dict[str, list[dict[str, Any]]] | None = None,
+    raw_response: dict[str, Any] | None = None,
 ) -> None:
     if checkpoint_path is None or checkpoint is None:
         return
@@ -272,6 +279,7 @@ def _record_checkpoint_failure(
         "failed_group_id": group_id,
         "error": str(error),
     }
+    payload["failed_group_response"] = raw_response
     _write_page_review_checkpoint(checkpoint_path, payload)
 
 
