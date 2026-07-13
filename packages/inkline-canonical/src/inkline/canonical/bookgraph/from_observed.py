@@ -20,6 +20,7 @@ from inkline.canonical.observed.text_unit_layout import (
     classify_text_units_by_layout,
 )
 from inkline.canonical.observed.text_units import build_text_units
+from inkline.canonical.page_review import validate_resolved_page_review
 
 INTERNAL_METADATA_PREFIXES = ("shadow_",)
 INTERNAL_NODE_ATTRS = {
@@ -40,15 +41,21 @@ TEXT_FLOW_BRIDGE_PAGE_ROLES = {"text_flow_page"}
 _MIN_FIRST_LINE_INDENT = 8.0
 
 
-def build_bookgraph_from_observed(document: dict[str, Any]) -> dict[str, Any]:
-    return build_observed_bookgraph_artifacts(document)["public_graph"]
+def build_bookgraph_from_observed(
+    document: dict[str, Any], *, page_review: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    return build_observed_bookgraph_artifacts(document, page_review=page_review)["public_graph"]
 
 
-def build_internal_canonical_from_observed(document: dict[str, Any]) -> dict[str, Any]:
-    artifacts = build_observed_bookgraph_artifacts(document)
+def build_internal_canonical_from_observed(
+    document: dict[str, Any], *, page_review: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    artifacts = build_observed_bookgraph_artifacts(document, page_review=page_review)
     return make_internal_canonical(
         artifacts["public_graph"],
-        pages=_internal_pages(artifacts["public_graph"], artifacts["page_role_records"]),
+        pages=_internal_pages(
+            artifacts["public_graph"], artifacts["page_role_records"], artifacts["page_review"]
+        ),
         nodes=_internal_nodes(artifacts["public_graph"], artifacts["debug_graph"]),
         edges=_internal_edges(artifacts["public_graph"], artifacts["debug_graph"]),
         evidence=_internal_evidence(artifacts["public_graph"], artifacts["debug_graph"]),
@@ -58,23 +65,71 @@ def build_internal_canonical_from_observed(document: dict[str, Any]) -> dict[str
             "logical_units": deepcopy(artifacts["logical_units"]),
             "layout_audit": deepcopy(artifacts["layout_audit"]),
             "page_roles": deepcopy(artifacts["page_role_records"]),
+            "page_review": deepcopy(artifacts["page_review"]),
             "ignored_observation_counts": deepcopy(artifacts["ignored_counts"]),
             "bookgraph_debug_metadata": deepcopy(artifacts["debug_graph"]["metadata"]),
         },
     )
 
 
-def build_observed_bookgraph_artifacts(document: dict[str, Any]) -> dict[str, Any]:
+def build_observed_bookgraph_artifacts(
+    document: dict[str, Any], *, page_review: dict[str, Any] | None = None
+) -> dict[str, Any]:
     validate_observed_document(document)
     pipeline = _observed_pipeline(document)
+    parser = str(pipeline["metadata"].get("parser_name") or "")
+    roles_by_page = page_roles_by_page(pipeline["page_role_records"])
+    resolved_page_review = _resolved_page_review(page_review)
+    logical_units = _filter_logical_units_by_page_review(
+        pipeline["logical_units"], resolved_page_review
+    )
+    nodes, evidence_records, edges, reading_order = _graph_records_for_units(
+        logical_units,
+        parser,
+        roles_by_page,
+    )
+
+    metadata = pipeline["metadata"]
+    metadata["shadow_ignored_observation_counts"] = pipeline["ignored_counts"]
+    metadata["shadow_text_unit_layout_audit_summary"] = pipeline["layout_audit"]["summary"]
+    metadata["shadow_text_unit_layout_page_coverage"] = pipeline["layout_audit"]["page_coverage"]
+    metadata["shadow_text_unit_layout_profile_quality"] = pipeline["layout_audit"][
+        "profile_quality"
+    ]
+    metadata["shadow_page_roles"] = _canonical_page_role_records(pipeline["page_role_records"])
+    metadata["shadow_page_sizes"] = _canonical_page_sizes(document["pages"])
+    debug_graph = make_bookgraph(
+        metadata,
+        nodes,
+        edges,
+        evidence_records,
+        assets=deepcopy(document.get("assets") or {}),
+        projections={"reading_order": reading_order},
+    )
+    resolved_debug_graph = resolve_bookgraph_note_refs(debug_graph)
+    public_graph = _public_bookgraph(resolved_debug_graph)
+    return {
+        "public_graph": public_graph,
+        "debug_graph": resolved_debug_graph,
+        "text_units": pipeline["text_units"],
+        "logical_units": pipeline["logical_units"],
+        "page_review": resolved_page_review,
+        "layout_audit": pipeline["layout_audit"],
+        "page_role_records": pipeline["page_role_records"],
+        "ignored_counts": pipeline["ignored_counts"],
+    }
+
+
+def _graph_records_for_units(
+    logical_units: list[dict[str, Any]],
+    parser: str,
+    roles_by_page: dict[int, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     nodes: list[dict[str, Any]] = []
     evidence_records: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     reading_order: list[str] = []
-    parser = str(pipeline["metadata"].get("parser_name") or "")
-    roles_by_page = page_roles_by_page(pipeline["page_role_records"])
-
-    for unit in pipeline["logical_units"]:
+    for unit in logical_units:
         node_id = f"n{len(nodes) + 1:06d}"
         evidence_id = f"ev{len(evidence_records) + 1:06d}"
         nodes.append(_node_from_unit(unit, node_id, evidence_id, roles_by_page))
@@ -88,36 +143,32 @@ def build_observed_bookgraph_artifacts(document: dict[str, Any]) -> dict[str, An
                 evidence_ids=[evidence_id],
             )
         )
+    return nodes, evidence_records, edges, reading_order
 
-    metadata = pipeline["metadata"]
-    metadata["shadow_ignored_observation_counts"] = pipeline["ignored_counts"]
-    metadata["shadow_text_unit_layout_audit_summary"] = pipeline["layout_audit"]["summary"]
-    metadata["shadow_text_unit_layout_page_coverage"] = pipeline["layout_audit"]["page_coverage"]
-    metadata["shadow_text_unit_layout_profile_quality"] = pipeline["layout_audit"][
-        "profile_quality"
-    ]
-    metadata["shadow_page_roles"] = _canonical_page_role_records(pipeline["page_role_records"])
-    metadata["shadow_page_sizes"] = _canonical_page_sizes(document["pages"])
-    projections = {"reading_order": reading_order}
-    debug_graph = make_bookgraph(
-        metadata,
-        nodes,
-        edges,
-        evidence_records,
-        assets=deepcopy(document.get("assets") or {}),
-        projections=projections,
-    )
-    resolved_debug_graph = resolve_bookgraph_note_refs(debug_graph)
-    public_graph = _public_bookgraph(resolved_debug_graph)
-    return {
-        "public_graph": public_graph,
-        "debug_graph": resolved_debug_graph,
-        "text_units": pipeline["text_units"],
-        "logical_units": pipeline["logical_units"],
-        "layout_audit": pipeline["layout_audit"],
-        "page_role_records": pipeline["page_role_records"],
-        "ignored_counts": pipeline["ignored_counts"],
+
+def _resolved_page_review(page_review: dict[str, Any] | None) -> dict[str, Any] | None:
+    if page_review is None:
+        return None
+    validate_resolved_page_review(page_review)
+    return deepcopy(page_review)
+
+
+def _filter_logical_units_by_page_review(
+    logical_units: list[dict[str, Any]], page_review: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    if page_review is None:
+        return logical_units
+    text_flow_actions_by_page = {
+        int(record["page"]): str(record.get("text_flow_action") or "")
+        for record in page_review.get("pages") or []
+        if isinstance(record, dict) and isinstance(record.get("page"), int)
     }
+    filtered = []
+    for unit in logical_units:
+        pages = [int(page) for page in unit.get("pages") or [unit["page"]]]
+        if all(text_flow_actions_by_page.get(page) == "include" for page in pages):
+            filtered.append(unit)
+    return filtered
 
 
 def _observed_pipeline(document: dict[str, Any]) -> dict[str, Any]:
@@ -622,21 +673,36 @@ def _public_evidence(record: dict[str, Any]) -> dict[str, Any]:
 def _internal_pages(
     public_graph: dict[str, Any],
     page_role_records: list[dict[str, Any]],
+    page_review: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     page_roles_by_page_number = {int(record["page"]): record for record in page_role_records}
+    review_by_page_number = {
+        int(record["page"]): record
+        for record in (page_review or {}).get("pages") or []
+        if isinstance(record, dict) and isinstance(record.get("page"), int)
+    }
     pages = []
     for page in public_graph.get("metadata", {}).get("pages", []):
         page_number = int(page["page"])
         pages.append(
             {
                 "public": deepcopy(page),
-                "debug": deepcopy(page_roles_by_page_number.get(page_number) or {}),
+                "debug": {
+                    "page_role": deepcopy(page_roles_by_page_number.get(page_number) or {}),
+                    "page_review": deepcopy(review_by_page_number.get(page_number) or {}),
+                },
             }
         )
     if pages:
         return pages
     return [
-        {"public": {"page": int(page)}, "debug": deepcopy(record)}
+        {
+            "public": {"page": int(page)},
+            "debug": {
+                "page_role": deepcopy(record),
+                "page_review": deepcopy(review_by_page_number.get(page) or {}),
+            },
+        }
         for page, record in sorted(page_roles_by_page_number.items())
     ]
 
