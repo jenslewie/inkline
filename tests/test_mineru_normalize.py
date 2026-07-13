@@ -653,6 +653,33 @@ def test_mineru_cli_accepts_bookgraph_output_argument(monkeypatch, tmp_path) -> 
     assert args.book_skeleton_output == str(book_skeleton_output)
 
 
+def test_mineru_cli_accepts_canonical_v2_page_review_arguments(monkeypatch, tmp_path) -> None:
+    page_review_output = tmp_path / "page_review.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "mineru-to-canonical",
+            "--canonical-version",
+            "v2",
+            "--content-list-v2",
+            "content_list_v2.json",
+            "--middle",
+            "middle.json",
+            "--source-pdf",
+            "sample.pdf",
+            "--page-review-output",
+            str(page_review_output),
+            "--page-review-llm",
+        ],
+    )
+
+    args = mineru_cli.parse_args()
+
+    assert args.canonical_version == "v2"
+    assert args.page_review_output == str(page_review_output)
+    assert args.page_review_llm is True
+
+
 def test_small_pdf_page_size_uses_content_coordinate_layout(tmp_path) -> None:
     content_list_v2 = tmp_path / "imjin_style_content_list_v2.json"
     middle = tmp_path / "imjin_style_middle.json"

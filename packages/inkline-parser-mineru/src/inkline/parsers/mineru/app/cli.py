@@ -125,6 +125,12 @@ def parse_args() -> argparse.Namespace:
         "--note-trace-log",
         help="Write a summary JSON of reconcile.notes function/method call counts for this normalization run",
     )
+    p.add_argument(
+        "--canonical-version",
+        choices=["v1", "v2"],
+        default="v1",
+        help="Canonical pipeline version; v2 starts directly from ObservedDocument.",
+    )
     p.add_argument("--output", default="canonical.json", help="Output canonical JSON path")
     p.add_argument(
         "--bookgraph-output",
@@ -145,6 +151,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--book-skeleton-output",
         help="Optional BookSkeleton shadow output built from observed_document data",
+    )
+    p.add_argument(
+        "--page-review-output",
+        help="Optional Phase 4A PageReview audit output for canonical-version v2",
     )
     p.add_argument(
         "--book-skeleton-llm",
@@ -168,6 +178,12 @@ def parse_args() -> argparse.Namespace:
         default=300,
         help="Timeout for BookSkeleton TOC classification model calls",
     )
+    p.add_argument(
+        "--page-review-llm",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use local multimodal LLM for Phase 4A selected-page review in canonical-version v2",
+    )
     p.add_argument("--doc-id", default=None)
     p.add_argument("--title", default=None)
     p.add_argument("--language", default="zh-CN")
@@ -176,6 +192,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.canonical_version == "v2":
+        from .canonical_v2 import run_v2_cli
+
+        run_v2_cli(args)
+        return
     args.source_pdf = resolve_source_pdf_path(
         args.source_pdf, allow_missing=args.allow_missing_pdf_text
     )
