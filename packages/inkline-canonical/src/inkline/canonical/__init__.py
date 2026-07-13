@@ -42,6 +42,11 @@ from inkline.canonical.observed import (
     make_observed_page,
     validate_observed_document,
 )
+from inkline.canonical.page_review import (
+    build_page_review_plan,
+    resolve_page_review,
+    validate_resolved_page_review,
+)
 from inkline.canonical.schema import (
     BLOCK_TYPES,
     SCHEMA_VERSION,
@@ -82,6 +87,7 @@ __all__ = [
     "build_book_skeleton_toc_llm_input",
     "build_bookgraph_from_observed",
     "build_internal_canonical_from_observed",
+    "build_page_review_plan",
     "build_text_units",
     "classify_observed_page_roles",
     "classify_text_units_by_layout",
@@ -101,6 +107,7 @@ __all__ = [
     "normalize_bookgraph_notes",
     "resolve_bookgraph_note_refs",
     "resolve_page_footnote_refs",
+    "resolve_page_review",
     "sample_document",
     "strip_footnote_marker",
     "validate_book_skeleton",
@@ -108,4 +115,5 @@ __all__ = [
     "validate_document",
     "validate_internal_canonical",
     "validate_observed_document",
+    "validate_resolved_page_review",
 ]
