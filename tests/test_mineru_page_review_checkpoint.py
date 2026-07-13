@@ -1,0 +1,117 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from inkline.canonical import make_observed_document, make_observed_page
+from inkline.parsers.mineru.normalize import page_review_shadow
+
+
+def test_page_review_checkpoint_resumes_after_a_failed_group(tmp_path, monkeypatch) -> None:
+    observed = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "zh-CN",
+            "source_file": "sample.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        [make_observed_page(page, width=1000, height=1400) for page in range(1, 4)],
+        [],
+    )
+    image_one = tmp_path / "page_0001.png"
+    image_three = tmp_path / "page_0003.png"
+    group_one = tmp_path / "group_g0001.jpg"
+    group_two = tmp_path / "group_g0002.jpg"
+    for image in (image_one, image_three, group_one, group_two):
+        image.write_bytes(b"image")
+    checkpoint_path = tmp_path / "page_review.checkpoint.json"
+    monkeypatch.setattr(
+        page_review_shadow,
+        "classify_observed_page_roles",
+        lambda *_args, **_kwargs: [
+            {"page": 1, "page_role": "visual_page", "signals": ["visual_dominant"]},
+            {"page": 2, "page_role": "text_flow_page", "signals": ["body_profile"]},
+            {"page": 3, "page_role": "visual_page", "signals": ["visual_dominant"]},
+        ],
+    )
+    monkeypatch.setattr(
+        page_review_shadow,
+        "_render_page_images",
+        lambda *_args, **_kwargs: {1: image_one, 3: image_three},
+    )
+    monkeypatch.setattr(
+        page_review_shadow,
+        "_render_contact_sheets",
+        lambda *_args, **_kwargs: {"g0001": group_one, "g0002": group_two},
+    )
+    monkeypatch.setattr(page_review_shadow, "PAGE_REVIEW_MAX_GROUP_PAGES", 1)
+
+    first_run_pages: list[int] = []
+
+    def fail_second_group(_config, *, messages):
+        page = _page_from_message(messages)
+        first_run_pages.append(page)
+        if page == 3:
+            raise RuntimeError("temporary model failure")
+        return {"page_reviews": [_decision(page)]}
+
+    monkeypatch.setattr(page_review_shadow, "chat_json", fail_second_group)
+    with pytest.raises(RuntimeError, match="temporary model failure"):
+        page_review_shadow.build_page_review_shadow(
+            observed,
+            {"boundaries": {"first_body_page": 3}},
+            use_llm=True,
+            source_pdf="sample.pdf",
+            checkpoint_path=checkpoint_path,
+        )
+
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    assert first_run_pages == [1, 3]
+    assert checkpoint["checkpoint"]["status"] == "failed"
+    assert checkpoint["checkpoint"]["completed_group_ids"] == ["g0001"]
+    assert checkpoint["checkpoint"]["failed_group_id"] == "g0002"
+    assert checkpoint["group_decisions"]["g0001"] == [_decision(1)]
+
+    resumed_pages: list[int] = []
+
+    def resolve_remaining_group(_config, *, messages):
+        page = _page_from_message(messages)
+        resumed_pages.append(page)
+        return {"page_reviews": [_decision(page)]}
+
+    monkeypatch.setattr(page_review_shadow, "chat_json", resolve_remaining_group)
+    review = page_review_shadow.build_page_review_shadow(
+        observed,
+        {"boundaries": {"first_body_page": 3}},
+        use_llm=True,
+        source_pdf="sample.pdf",
+        checkpoint_path=checkpoint_path,
+    )
+
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    assert resumed_pages == [3]
+    assert checkpoint["checkpoint"]["status"] == "complete"
+    assert checkpoint["checkpoint"]["completed_group_ids"] == ["g0001", "g0002"]
+    assert review["llm"]["reviewed_pages"] == [1, 3]
+
+
+def _page_from_message(messages: list[dict[str, object]]) -> int:
+    content = str(messages[0]["content"])
+    if "physical pages are [1]" in content:
+        return 1
+    if "physical pages are [3]" in content:
+        return 3
+    raise AssertionError(f"Unexpected LLM message: {content}")
+
+
+def _decision(page: int) -> dict[str, str | int]:
+    return {
+        "page": page,
+        "page_role": "visual_page",
+        "text_flow_action": "exclude",
+        "visual_asset_action": "retain",
+        "confidence": "high",
+    }

@@ -40,7 +40,7 @@ def resolve_page_review(
     """Resolve every selected candidate exactly once, without altering other pages."""
 
     candidate_pages = _candidate_pages(plan)
-    decisions_by_page = _validated_decisions(decisions, candidate_pages)
+    decisions_by_page = validate_page_review_decisions(decisions, candidate_pages)
     resolved = deepcopy(plan)
     for record in resolved.get("pages") or []:
         page = record.get("page")
@@ -95,7 +95,7 @@ def _candidate_pages(plan: dict[str, Any]) -> list[int]:
     return list(pages)
 
 
-def _validated_decisions(
+def validate_page_review_decisions(
     decisions: list[dict[str, Any]], candidate_pages: list[int]
 ) -> dict[int, dict[str, Any]]:
     if not isinstance(decisions, list):

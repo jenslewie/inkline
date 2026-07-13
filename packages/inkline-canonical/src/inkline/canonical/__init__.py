@@ -45,6 +45,7 @@ from inkline.canonical.observed import (
 from inkline.canonical.page_review import (
     build_page_review_plan,
     resolve_page_review,
+    validate_page_review_decisions,
     validate_resolved_page_review,
 )
 from inkline.canonical.schema import (
@@ -115,5 +116,6 @@ __all__ = [
     "validate_document",
     "validate_internal_canonical",
     "validate_observed_document",
+    "validate_page_review_decisions",
     "validate_resolved_page_review",
 ]
