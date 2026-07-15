@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-PAGE_REVIEW_PROMPT_VERSION = "2.2-acknowledgments-heading"
+PAGE_REVIEW_PROMPT_VERSION = "2.3-hardcover-external-wrap"
 
 _PROMPT_PROFILES = {
     "front_special",
@@ -142,10 +142,10 @@ def page_review_llm_prompt(input_data: dict[str, Any], *, profile: str = "genera
         "book_block_position must be one of: external_wrap, front_matter, body, back_matter, unknown. "
         "Use external_wrap only for a cover, back cover, or cover flap that belongs to the outer "
         "binding rather than the book block. Use front_matter for a book-internal preliminary page. "
-        "Required pairs: cover_page/back_cover/cover_flap -> external_wrap; "
+        "Required pairs: cover_page/back_cover/cover_flap/dust_jacket_spread/front_board/back_board -> external_wrap; "
         "half_title_page/title_page/dedication_page/acknowledgments_page/copyright_page/toc_page/blank_page -> front_matter.\n"
         "For copyright_page, use visual_page, front_matter, metadata_only, and retain.\n"
-        "special_page_kind must be one of: cover_page, back_cover, cover_flap, half_title_page, "
+        "special_page_kind must be one of: cover_page, back_cover, cover_flap, dust_jacket_spread, front_board, back_board, half_title_page, "
         "title_page, dedication_page, acknowledgments_page, copyright_page, toc_page, blank_page, or null. It describes a special "
         "page identity and must not be used for ordinary body pages. When it is absent, emit the JSON "
         "literal null without quotes, never the string \\\"null\\\".\n"
@@ -185,7 +185,9 @@ def _profile_instruction(profile: str) -> str:
             "or a full back-cover blurb. A narrow folded cover panel with author biography, publisher/contact "
             "details, or a QR code is cover_flap rather than back_cover. When a sequence is cover, panel, "
             "barcode back cover, panel, both panels are cover_flap. External-wrap pages use "
-            "visual_page/exclude/retain."
+            "visual_page/exclude/retain. A flattened image showing a whole dust jacket with front cover, "
+            "back cover, spine, and one or more flaps is dust_jacket_spread, not cover_flap. The exposed "
+            "hardcover front board after a dust jacket is removed is front_board; its reverse is back_board."
         ),
         "front_residual_unknown": (
             "This pre-body page was not localized by a TOC section boundary and remains unresolved after "

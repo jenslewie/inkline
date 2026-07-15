@@ -63,5 +63,6 @@ The PageReview LLM only sees pages before the Skeleton body boundary. It first
 reviews selected visual candidates, then reviews every remaining pre-body page
 whose book-block position is still `unknown`. That range is provisional
 `pre_body`, not an assertion that all of its pages are front matter: the model
-may identify `cover_page`, `back_cover`, or `cover_flap` as `external_wrap`.
-Books without external wrap simply have no such results.
+may identify `cover_page`, `back_cover`, `cover_flap`, `dust_jacket_spread`,
+`front_board`, or `back_board` as `external_wrap`. Books without external wrap
+simply have no such results.

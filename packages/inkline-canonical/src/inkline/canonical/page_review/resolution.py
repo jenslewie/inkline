@@ -7,7 +7,7 @@ from typing import Any
 
 from inkline.canonical.schema import ValidationError
 
-PAGE_REVIEW_SCHEMA_VERSION = "0.7-shadow"
+PAGE_REVIEW_SCHEMA_VERSION = "0.8-shadow"
 PAGE_REVIEW_TEXT_FLOW_ACTIONS = {
     "include",
     "exclude",
@@ -27,6 +27,9 @@ PAGE_REVIEW_SPECIAL_PAGE_KINDS = {
     "cover_page",
     "back_cover",
     "cover_flap",
+    "dust_jacket_spread",
+    "front_board",
+    "back_board",
     "half_title_page",
     "title_page",
     "dedication_page",
@@ -36,7 +39,14 @@ PAGE_REVIEW_SPECIAL_PAGE_KINDS = {
     "blank_page",
 }
 PAGE_REVIEW_CONFIDENCES = {"high", "medium", "low"}
-_EXTERNAL_WRAP_SPECIAL_PAGE_KINDS = {"cover_page", "back_cover", "cover_flap"}
+_EXTERNAL_WRAP_SPECIAL_PAGE_KINDS = {
+    "cover_page",
+    "back_cover",
+    "cover_flap",
+    "dust_jacket_spread",
+    "front_board",
+    "back_board",
+}
 _FRONT_MATTER_SPECIAL_PAGE_KINDS = {
     "half_title_page",
     "title_page",
@@ -57,6 +67,11 @@ _ACKNOWLEDGMENTS_PAGE_POLICY = {
     "book_block_position": "front_matter",
     "text_flow_action": "include",
     "visual_asset_action": "not_needed",
+}
+_EXTERNAL_WRAP_PAGE_POLICY = {
+    "page_role": "visual_page",
+    "text_flow_action": "exclude",
+    "visual_asset_action": "retain",
 }
 
 
@@ -208,6 +223,8 @@ def _normalized_page_fields(record: dict[str, Any], path: str) -> dict[str, str 
         fields.update(_COPYRIGHT_PAGE_POLICY)
     if special_page_kind == "acknowledgments_page":
         fields.update(_ACKNOWLEDGMENTS_PAGE_POLICY)
+    if special_page_kind in _EXTERNAL_WRAP_SPECIAL_PAGE_KINDS:
+        fields.update(_EXTERNAL_WRAP_PAGE_POLICY)
     return fields
 
 

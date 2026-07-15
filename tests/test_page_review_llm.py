@@ -128,6 +128,8 @@ def test_page_review_prompt_defines_the_strict_decision_contract() -> None:
 
     assert "dedication_page" in prompt
     assert "acknowledgments_page" in prompt
+    assert "dust_jacket_spread" in prompt
+    assert "front_board" in prompt
     assert "cover_flap" in prompt
     assert 'literal null without quotes' in prompt
 
@@ -151,3 +153,4 @@ def test_front_special_prompt_distinguishes_pre_body_from_front_matter() -> None
     assert "For copyright_page, use visual_page, front_matter, metadata_only, and retain." in prompt
     assert "not dedication_page" in prompt
     assert "A page headed Acknowledgments, Acknowledgements, 致谢, or 鸣谢" in prompt
+    assert "is dust_jacket_spread, not cover_flap" in prompt

@@ -563,13 +563,20 @@ classification.
 | `visual_page` | The page contains visual material, or isolated designed text such as a title or dedication leaf. It is not eligible for reading-flow OCR nodes. |
 
 Visual object categories are not page roles. The review may separately record
-`special_page_kind` for `cover_page`, `back_cover`, `cover_flap`, `half_title_page`,
+`special_page_kind` for `cover_page`, `back_cover`, `cover_flap`,
+`dust_jacket_spread`, `front_board`, `back_board`, `half_title_page`,
 `title_page`, `dedication_page`, `acknowledgments_page`, `copyright_page`, `toc_page`, or `blank_page`; this identity does
 not change the page's reading-flow role. `text_flow_action` and
 `visual_asset_action` remain separate: a visual page uses `exclude + retain`,
 while a text-flow page may use `include + retain` when the source visual layout
 must also be preserved. `PageReview` is internal and is not copied into the
 public BookGraph contract.
+
+`dust_jacket_spread` is a flattened full dust-jacket image containing multiple
+panels and a spine. `front_board` and `back_board` are the hardcover boards
+visible when a jacket is removed. These identities, like `cover_page` and
+`cover_flap`, are `external_wrap` visual assets: their OCR is excluded from
+reading flow while the rendered page is retained.
 
 `copyright_page` is an explicit policy exception: PageReview materializes it
 as `visual_page + front_matter + metadata_only + retain`. Its bibliographic and

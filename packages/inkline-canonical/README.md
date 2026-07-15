@@ -90,7 +90,9 @@ independent body paragraphs is `text_flow_page`; a page containing only visual
 material, captions, or labels is `visual_page`.
 
 Optional `special_page_kind` records a separate semantic identity such as
-`cover_page`, `back_cover`, `cover_flap`, `title_page`, `dedication_page`, `acknowledgments_page`, `copyright_page`, `toc_page`, or `blank_page`. It
+`cover_page`, `back_cover`, `cover_flap`, `dust_jacket_spread`, `front_board`,
+`back_board`, `title_page`, `dedication_page`, `acknowledgments_page`,
+`copyright_page`, `toc_page`, or `blank_page`. It
 does not replace `page_role`. Resolved `visual_page` decisions cannot use
 `text_flow_action = include`, which prevents image/caption OCR from silently
 becoming reading-flow nodes. `visual_asset_action` independently controls
@@ -100,6 +102,12 @@ For `copyright_page`, PageReview deterministically uses `visual_page`,
 later document-level metadata extraction, not reading-flow OCR or RAG chunks.
 An `acknowledgments_page` is distinct from a dedication leaf: it remains
 front-matter reading flow (`text_flow_page + include + not_needed`).
+
+External-wrap identities are deliberately more precise than generic cover
+pages: `dust_jacket_spread` is a flattened full jacket with its panels and
+spine; `front_board` and `back_board` are hardcover boards visible after the
+jacket is removed. All external-wrap identities normalize to
+`visual_page + exclude + retain`.
 
 `book_block_position` records the physical book position separately from the
 reading-flow role: `external_wrap`, `front_matter`, `body`, `back_matter`, or
