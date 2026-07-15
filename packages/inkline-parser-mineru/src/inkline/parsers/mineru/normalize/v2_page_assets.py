@@ -33,7 +33,7 @@ def materialize_v2_page_assets(
                 "image_id": f"page-{page:04d}-review",
                 "path": image_path.relative_to(output_dir).as_posix(),
                 "media_type": "image/png",
-                "role": str(record.get("page_role") or "visual_page"),
+                "role": str(record.get("special_page_kind") or record.get("page_role") or "visual_page"),
                 "source": {"page": page},
             }
         )

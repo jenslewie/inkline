@@ -54,4 +54,14 @@ uv run --extra mineru mineru-page-review \
 ```
 
 Re-run the same command after an LLM failure. Completed page groups are reused
-from `/tmp/inkline-page-review/page_review.checkpoint.json`.
+from `/tmp/inkline-page-review/page_review.checkpoint.json`. A checkpoint is
+bound to the review-plan schema and prompt version. When either changes, the
+CLI archives the old checkpoint beside the output as
+`page_review.checkpoint.json.stale` and starts a fresh review plan.
+
+The PageReview LLM only sees pages before the Skeleton body boundary. It first
+reviews selected visual candidates, then reviews every remaining pre-body page
+whose book-block position is still `unknown`. That range is provisional
+`pre_body`, not an assertion that all of its pages are front matter: the model
+may identify `cover_page`, `back_cover`, or `cover_flap` as `external_wrap`.
+Books without external wrap simply have no such results.

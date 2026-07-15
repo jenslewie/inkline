@@ -47,7 +47,9 @@ def test_resolved_page_review_excludes_visual_only_page_text_from_bookgraph() ->
         "pages": [
             {
                 "page": 1,
-                "page_role": "title_page",
+                "page_role": "visual_page",
+                "book_block_position": "front_matter",
+                "special_page_kind": "title_page",
                 "text_flow_action": "exclude",
                 "visual_asset_action": "retain",
                 "decision_source": "llm_page_review",
@@ -58,6 +60,8 @@ def test_resolved_page_review_excludes_visual_only_page_text_from_bookgraph() ->
             {
                 "page": 2,
                 "page_role": "text_flow_page",
+                "book_block_position": "body",
+                "special_page_kind": None,
                 "text_flow_action": "include",
                 "visual_asset_action": "not_needed",
                 "decision_source": "layout_and_skeleton",

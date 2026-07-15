@@ -62,10 +62,14 @@ def test_page_review_checkpoint_resumes_after_a_failed_group(tmp_path, monkeypat
     with pytest.raises(RuntimeError, match="temporary model failure"):
         page_review_shadow.build_page_review_shadow(
             observed,
-            {"boundaries": {"first_body_page": 3}},
+            {
+                "boundaries": {"first_body_page": 4},
+                "toc_entries": [{"role": "front_matter", "selected_start_page": 1}],
+            },
             use_llm=True,
             source_pdf="sample.pdf",
             checkpoint_path=checkpoint_path,
+            llm_model="qwen-test",
         )
 
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
@@ -85,17 +89,22 @@ def test_page_review_checkpoint_resumes_after_a_failed_group(tmp_path, monkeypat
     monkeypatch.setattr(page_review_shadow, "chat_json", resolve_remaining_group)
     review = page_review_shadow.build_page_review_shadow(
         observed,
-        {"boundaries": {"first_body_page": 3}},
+        {
+            "boundaries": {"first_body_page": 4},
+            "toc_entries": [{"role": "front_matter", "selected_start_page": 1}],
+        },
         use_llm=True,
         source_pdf="sample.pdf",
         checkpoint_path=checkpoint_path,
+        llm_model="qwen-test",
     )
 
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     assert resumed_pages == [3]
     assert checkpoint["checkpoint"]["status"] == "complete"
     assert checkpoint["checkpoint"]["completed_group_ids"] == ["g0001", "g0002"]
-    assert review["llm"]["reviewed_pages"] == [1, 3]
+    assert review["llm"]["model"] == "qwen-test"
+    assert review["llm"]["prompt_version"] == page_review_shadow.PAGE_REVIEW_PROMPT_VERSION
 
 
 def test_page_review_checkpoint_preserves_invalid_model_response(tmp_path) -> None:
@@ -114,6 +123,8 @@ def test_page_review_checkpoint_preserves_invalid_model_response(tmp_path) -> No
             {
                 "page": 267,
                 "page_role": "body_page",
+                "book_block_position": "body",
+                "special_page_kind": None,
                 "text_flow_action": "include",
                 "visual_asset_action": "retain",
                 "confidence": "high",
@@ -134,6 +145,46 @@ def test_page_review_checkpoint_preserves_invalid_model_response(tmp_path) -> No
     assert written["failed_group_response"] == response
 
 
+def test_page_review_checkpoint_archives_an_older_review_contract_and_restarts(tmp_path) -> None:
+    checkpoint_path = tmp_path / "page_review.checkpoint.json"
+    checkpoint_path.write_text(
+        json.dumps(
+            {
+                "fingerprint": {
+                    "doc_id": "sample",
+                    "candidate_pages": [1],
+                    "request_groups": [{"group_id": "g0001", "pages": [1]}],
+                    "llm_model": "qwen-test",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    plan = {
+        "metadata": {
+            "schema_name": "inkline_page_review",
+            "schema_version": "0.4-shadow",
+            "doc_id": "sample",
+            "title": "Sample",
+        },
+        "candidate_pages": [1],
+    }
+
+    checkpoint = page_review_shadow._load_page_review_checkpoint(
+        checkpoint_path,
+        plan=plan,
+        request_groups=[{"group_id": "g0001", "pages": [1]}],
+        llm_model="qwen-test",
+    )
+
+    stale_path = checkpoint_path.with_name(f"{checkpoint_path.name}.stale")
+    assert stale_path.exists()
+    assert json.loads(stale_path.read_text(encoding="utf-8"))["fingerprint"]["candidate_pages"] == [1]
+    assert checkpoint["checkpoint"]["status"] == "in_progress"
+    assert checkpoint["group_decisions"] == {}
+    assert json.loads(checkpoint_path.read_text(encoding="utf-8")) == checkpoint
+
+
 def _page_from_message(messages: list[dict[str, object]]) -> int:
     content = str(messages[0]["content"])
     if "physical pages are [1]" in content:
@@ -147,6 +198,8 @@ def _decision(page: int) -> dict[str, str | int]:
     return {
         "page": page,
         "page_role": "visual_page",
+        "book_block_position": "front_matter",
+        "special_page_kind": None,
         "text_flow_action": "exclude",
         "visual_asset_action": "retain",
         "confidence": "high",
