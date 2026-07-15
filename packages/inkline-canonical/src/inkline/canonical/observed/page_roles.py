@@ -135,6 +135,7 @@ def _page_metrics(page: dict[str, Any], observations: list[dict[str, Any]]) -> d
         "visual_area_ratio": _area_ratio(visual_regions, page_area),
         "text_area_ratio": _area_ratio(text_regions, page_area),
         "centered_text_ratio": _centered_text_ratio(text_regions, width),
+        "tall_text_count": sum(_is_tall_text_region(observation) for observation in text_regions),
     }
 
 
@@ -323,12 +324,20 @@ def _unnumbered_prelude_record(
             "front_matter",
             ["unnumbered_prelude", "visual_content", profile_signal],
         )
-    if not has_body_profile and _is_sparse_centered_text(metrics):
+    if _is_sparse_centered_front_text(metrics):
         return _record(
             page,
             "front_visual_page",
             "front_matter",
-            ["unnumbered_prelude", "decorative_title_like", profile_signal],
+            ["unnumbered_prelude", "sparse_centered_front_text", profile_signal],
+        )
+    layout_signal = _front_layout_outlier_signal(metrics)
+    if layout_signal is not None:
+        return _record(
+            page,
+            "front_visual_page",
+            "front_matter",
+            ["unnumbered_prelude", layout_signal, profile_signal],
         )
     return _record(
         page,
@@ -613,6 +622,30 @@ def _is_sparse_centered_text(metrics: dict[str, Any]) -> bool:
     )
 
 
+def _is_sparse_centered_front_text(metrics: dict[str, Any]) -> bool:
+    """Identify sparse, centered front leaves without relying on OCR role hints."""
+
+    return (
+        1 <= metrics["text_count"] <= 4
+        and metrics["visual_count"] == 0
+        and metrics["text_area_ratio"] <= 0.02
+        and metrics["centered_text_ratio"] >= 0.5
+    )
+
+
+def _front_layout_outlier_signal(metrics: dict[str, Any]) -> str | None:
+    if metrics["tall_text_count"] >= 2:
+        return "vertical_text_layout"
+    if (
+        metrics["text_count"] >= 8
+        and metrics["visual_count"] == 0
+        and metrics["text_area_ratio"] <= 0.3
+        and metrics["centered_text_ratio"] >= 0.8
+    ):
+        return "dense_centered_nonflow_layout"
+    return None
+
+
 def _is_text_without_body_profile(metrics: dict[str, Any]) -> bool:
     return (
         metrics["text_count"] > 0
@@ -715,6 +748,13 @@ def _bbox_area(bbox: list[float]) -> float:
     width = max(float(bbox[2]) - float(bbox[0]), 0.0)
     height = max(float(bbox[3]) - float(bbox[1]), 0.0)
     return width * height
+
+
+def _is_tall_text_region(observation: dict[str, Any]) -> bool:
+    bbox = observation["bbox"]
+    width = float(bbox[2]) - float(bbox[0])
+    height = float(bbox[3]) - float(bbox[1])
+    return width > 0 and height >= width * 2
 
 
 def _bbox_top(bbox: list[float]) -> float:
