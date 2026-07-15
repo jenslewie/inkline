@@ -38,6 +38,11 @@ inkline/canonical/
     builder.py             Skeleton assembly from ObservedDocument evidence.
     validation.py          Skeleton contract validation.
 
+  page_review/             Bounded multimodal page-review layer.
+    selection.py            Geometry and skeleton evidence -> review candidates.
+    llm.py                  Strict LLM decision prompt and request grouping.
+    resolution.py           Decision validation and resolved-review contract.
+
   bookgraph/               BookGraph v2 shadow layer.
     schema.py              Public BookGraph node/edge/evidence contract.
     from_observed.py       ObservedDocument -> BookGraph builder.
@@ -51,7 +56,7 @@ inkline/canonical/
 The intended development data flow is:
 
 ```text
-parser output -> ObservedDocument -> BookSkeleton -> BookGraph -> projections
+parser output -> ObservedDocument -> BookSkeleton -> PageReview -> BookGraph -> projections
 ```
 
 `ObservedDocument`, `BookSkeleton`, `BookGraph`, and `internal_canonical` are
@@ -75,6 +80,58 @@ Public BookSkeleton TOC entries intentionally do not expose split
 `raw_title`/`title`/`raw_label`/`label` fields. Internal builders may derive
 temporary locator candidates from `display_title`, but those helpers are not
 part of the public skeleton contract.
+
+## PageReview Boundary
+
+`PageReview` is an internal Phase 4A artifact. Its `page_role` has exactly two
+reading-flow values: `text_flow_page` and `visual_page`. A map, image, diagram,
+or table is evidence about a page, not a third reading-flow role. A page with
+independent body paragraphs is `text_flow_page`; a page containing only visual
+material, captions, or labels is `visual_page`.
+
+Optional `special_page_kind` records a separate semantic identity such as
+`cover_page`, `back_cover`, `cover_flap`, `title_page`, `dedication_page`, `acknowledgments_page`, `copyright_page`, `toc_page`, or `blank_page`. It
+does not replace `page_role`. Resolved `visual_page` decisions cannot use
+`text_flow_action = include`, which prevents image/caption OCR from silently
+becoming reading-flow nodes. `visual_asset_action` independently controls
+whether the rendered page image is retained for provenance and EPUB fidelity.
+For `copyright_page`, PageReview deterministically uses `visual_page`,
+`front_matter`, `metadata_only`, and `retain`: its text remains evidence for
+later document-level metadata extraction, not reading-flow OCR or RAG chunks.
+An `acknowledgments_page` is distinct from a dedication leaf: it remains
+front-matter reading flow (`text_flow_page + include + not_needed`).
+
+`book_block_position` records the physical book position separately from the
+reading-flow role: `external_wrap`, `front_matter`, `body`, `back_matter`, or
+`unknown`. Before the first Skeleton body page, PageReview uses the provisional
+internal context `pre_body`; it does not assume those pages are front matter. It
+does deterministically materialize
+`front_matter` for pages covered by a localized Skeleton front-matter section
+and for `toc_page`. PageReview then closes the remaining pre-body `unknown`
+pages with a bounded second LLM pass, so ordinary internal front prose does not
+silently remain unresolved.
+The LLM can identify an outer cover, back cover, or cover flap as
+`external_wrap`. A book without those pages simply produces no such decision.
+
+The current LLM scope is deliberately limited to `pre_body`. It runs in two
+stages: selected visual candidates first, then every remaining pre-body page
+whose `book_block_position` is still `unknown`. Body and back-matter pages
+retain geometry and Skeleton decisions with `llm_review_status = not_selected`;
+they are not rendered or sent to the model, and never retain a `needs_review`
+consumption action.
+
+The multimodal review prompt has a small common contract plus exactly one
+evidence-selected profile per request group: `front_special`,
+`front_residual_unknown`,
+`body_section_start`, `visual_sparse_text`, `mixed_visual_body`,
+`textual_table`, or `general`. Groups never mix profiles; pages are batched by
+profile and `pre_body`/`body`/`back_matter` boundary in physical-page order,
+up to the configured group size. A reviewed page keeps `llm_group_id` and
+`llm_prompt_profile`; its group records the matter boundary and review stage,
+while the top-level `llm` record stores the model and prompt version.
+
+`table_region` always selects `textual_table`: a readable table and a table
+continuation remain in reading flow even when they fill an entire page.
 
 ## Maintenance Guardrail
 
