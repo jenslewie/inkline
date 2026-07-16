@@ -22,11 +22,13 @@ def test_page_review_shadow_sends_only_selected_pages_to_llm(tmp_path, monkeypat
     image_three = tmp_path / "page_0003.png"
     contact_sheet_one = tmp_path / "group_g0001.png"
     contact_sheet_two = tmp_path / "group_g0002.png"
+    contact_sheet_three = tmp_path / "group_g0003.png"
     image_one.write_bytes(b"page one")
     image_two.write_bytes(b"page two")
     image_three.write_bytes(b"page three")
     contact_sheet_one.write_bytes(b"contact sheet one")
     contact_sheet_two.write_bytes(b"contact sheet two")
+    contact_sheet_three.write_bytes(b"contact sheet three")
     monkeypatch.setattr(
         page_review_shadow,
         "classify_observed_page_roles",
@@ -44,14 +46,23 @@ def test_page_review_shadow_sends_only_selected_pages_to_llm(tmp_path, monkeypat
     monkeypatch.setattr(
         page_review_shadow,
         "_render_contact_sheets",
-        lambda *_args, **_kwargs: {"g0001": contact_sheet_one, "g0002": contact_sheet_two},
+        lambda *_args, **_kwargs: {
+            "g0001": contact_sheet_one,
+            "g0002": contact_sheet_two,
+            "g0003": contact_sheet_three,
+        },
     )
     calls = []
 
     def fake_chat_json(_config, *, messages):
         calls.append(messages)
         content = str(messages[0]["content"])
-        pages = [1, 3] if "physical pages are [1, 3]" in content else [2]
+        if "physical pages are [1]" in content:
+            pages = [1]
+        elif "physical pages are [3]" in content:
+            pages = [3]
+        else:
+            pages = [2]
         return {
             "page_reviews": [
                 {
@@ -86,30 +97,36 @@ def test_page_review_shadow_sends_only_selected_pages_to_llm(tmp_path, monkeypat
         record = next(item for item in review["pages"] if item["page"] == page)
         assert "llm_review_matter" not in record
         assert "llm_prompt_version" not in record
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert calls[0][0]["images"] == [
         "Y29udGFjdCBzaGVldCBvbmU=",
         "cGFnZSBvbmU=",
-        "cGFnZSB0aHJlZQ==",
     ]
     assert '"text_flow_action"' in calls[0][0]["content"]
     by_page = {record["page"]: record for record in review["pages"]}
     assert by_page[1]["llm_group_id"] == "g0001"
     assert by_page[1]["llm_prompt_profile"] == "front_special"
-    assert by_page[3]["llm_group_id"] == "g0001"
+    assert by_page[3]["llm_group_id"] == "g0002"
     assert by_page[3]["llm_prompt_profile"] == "front_special"
-    assert by_page[2]["llm_group_id"] == "g0002"
+    assert by_page[2]["llm_group_id"] == "g0003"
     assert by_page[2]["llm_prompt_profile"] == "front_residual_unknown"
     assert review["llm_request_groups"] == [
         {
             "group_id": "g0001",
             "matter": "pre_body",
-            "pages": [1, 3],
+            "pages": [1],
             "prompt_profile": "front_special",
             "review_stage": "initial_visual",
         },
         {
             "group_id": "g0002",
+            "matter": "pre_body",
+            "pages": [3],
+            "prompt_profile": "front_special",
+            "review_stage": "initial_visual",
+        },
+        {
+            "group_id": "g0003",
             "matter": "pre_body",
             "pages": [2],
             "prompt_profile": "front_residual_unknown",

@@ -109,6 +109,13 @@ spine; `front_board` and `back_board` are hardcover boards visible after the
 jacket is removed. All external-wrap identities normalize to
 `visual_page + exclude + retain`.
 
+`dust_jacket_spread` has a strict four-part definition: one physical PDF page
+must visibly contain the front-cover design, back-cover design, book spine, and
+at least one jacket flap, separated by folds or panel boundaries. It is never
+inferred from neighboring pages. A standalone front cover remains `cover_page`,
+and a standalone rear panel remains `back_cover`, even when it contains a
+barcode, QR code, ISBN, price, or publisher blurb.
+
 `book_block_position` records the physical book position separately from the
 reading-flow role: `external_wrap`, `front_matter`, `body`, `back_matter`, or
 `unknown`. Before the first Skeleton body page, PageReview uses the provisional
@@ -118,6 +125,15 @@ does deterministically materialize
 and for `toc_page`. PageReview then closes the remaining pre-body `unknown`
 pages with a bounded second LLM pass, so ordinary internal front prose does not
 silently remain unresolved.
+
+Compare a regenerated PageReview with a verified artifact before accepting a
+behavioral change:
+
+```bash
+uv run python tools/check_page_review_golden.py \
+  data/outputs/golden-page-review/丝绸之路新史/丝绸之路新史_page_review.json \
+  data/outputs/page-review/丝绸之路新史/丝绸之路新史_page_review.json
+```
 The LLM can identify an outer cover, back cover, or cover flap as
 `external_wrap`. A book without those pages simply produces no such decision.
 

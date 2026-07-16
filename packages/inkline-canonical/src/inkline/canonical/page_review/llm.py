@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-PAGE_REVIEW_PROMPT_VERSION = "2.3-hardcover-external-wrap"
+PAGE_REVIEW_PROMPT_VERSION = "2.6-dust-jacket-evidence-gate"
 
 _PROMPT_PROFILES = {
     "front_special",
@@ -95,12 +95,13 @@ def page_review_profile_groups(
     groups: list[dict[str, Any]] = []
     for matter, profile in group_order:
         pages = pages_by_group[(matter, profile)]
-        for start in range(0, len(pages), max_pages):
+        group_size = 1 if profile == "front_special" else max_pages
+        for start in range(0, len(pages), group_size):
             groups.append(
                 {
                     "matter": matter,
                     "prompt_profile": profile,
-                    "pages": pages[start : start + max_pages],
+                    "pages": pages[start : start + group_size],
                 }
             )
     return groups
@@ -166,8 +167,9 @@ def page_review_llm_prompt(input_data: dict[str, Any], *, profile: str = "genera
         "Every page_reviews item must contain exactly these keys and no others: page, page_role, "
         "book_block_position, special_page_kind, text_flow_action, visual_asset_action, confidence. In particular, use page rather than "
         "page_number; do not emit image quality scores, descriptions, explanations, or analyses.\n\n"
-        "Use the page image, position in the supplied sequence, and the structural signals as "
-        "evidence. Do not infer a page role from the meaning of OCR text alone.\n\n"
+        "Use the page image and structural signals as evidence. The sequence position may help identify "
+        "the book's physical order, but never justifies dust_jacket_spread: that identity must be visible "
+        "within the one page image. Do not infer a page role from the meaning of OCR text alone.\n\n"
         f"Input JSON:\n{json.dumps(input_data, ensure_ascii=False, indent=2)}"
     )
 
@@ -187,7 +189,14 @@ def _profile_instruction(profile: str) -> str:
             "barcode back cover, panel, both panels are cover_flap. External-wrap pages use "
             "visual_page/exclude/retain. A flattened image showing a whole dust jacket with front cover, "
             "back cover, spine, and one or more flaps is dust_jacket_spread, not cover_flap. The exposed "
-            "hardcover front board after a dust jacket is removed is front_board; its reverse is back_board."
+            "hardcover front board after a dust jacket is removed is front_board; its reverse is back_board. "
+            "Classify every supplied physical page independently; do not infer a jacket spread from neighboring pages "
+            "in the group. Before choosing dust_jacket_spread, verify all four required elements are visibly present "
+            "in the same image: front-cover design, back-cover design, book spine, and one or more jacket flaps, with "
+            "folds or panel boundaries. If any required element is absent or uncertain, dust_jacket_spread is invalid. "
+            "Do not use it merely because a single page has a cover design, ISBN, barcode, QR code, or publisher blurb. "
+            "A standalone front cover is cover_page; a standalone rear panel with a blurb, barcode, ISBN, or price is "
+            "back_cover."
         ),
         "front_residual_unknown": (
             "This pre-body page was not localized by a TOC section boundary and remains unresolved after "

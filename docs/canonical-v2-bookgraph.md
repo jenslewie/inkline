@@ -578,6 +578,14 @@ visible when a jacket is removed. These identities, like `cover_page` and
 `cover_flap`, are `external_wrap` visual assets: their OCR is excluded from
 reading flow while the rendered page is retained.
 
+The identity applies to one physical PDF page only. A `dust_jacket_spread` has
+a strict four-part definition: the page must visibly contain the front-cover
+design, back-cover design, book spine, and at least one jacket flap, separated
+by folds or panel boundaries. It is never inferred from neighboring pages. A
+standalone cover remains `cover_page`; a standalone rear panel remains
+`back_cover`, including when it contains a barcode, QR code, ISBN, price, or
+publisher blurb.
+
 `copyright_page` is an explicit policy exception: PageReview materializes it
 as `visual_page + front_matter + metadata_only + retain`. Its bibliographic and
 rights text is evidence for later document-level metadata extraction, rather

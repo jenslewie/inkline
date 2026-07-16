@@ -35,7 +35,8 @@ def test_page_review_profile_groups_do_not_mix_review_instructions() -> None:
     }
 
     assert page_review_profile_groups([1, 2, 3, 4, 5], records, max_pages=3) == [
-        {"matter": "pre_body", "prompt_profile": "front_special", "pages": [1, 2]},
+        {"matter": "pre_body", "prompt_profile": "front_special", "pages": [1]},
+        {"matter": "pre_body", "prompt_profile": "front_special", "pages": [2]},
         {"matter": "body", "prompt_profile": "visual_sparse_text", "pages": [3, 4]},
         {"matter": "body", "prompt_profile": "general", "pages": [5]},
     ]
@@ -154,3 +155,9 @@ def test_front_special_prompt_distinguishes_pre_body_from_front_matter() -> None
     assert "not dedication_page" in prompt
     assert "A page headed Acknowledgments, Acknowledgements, 致谢, or 鸣谢" in prompt
     assert "is dust_jacket_spread, not cover_flap" in prompt
+    assert "Classify every supplied physical page independently; do not infer a jacket spread from neighboring pages" in prompt
+    assert "verify all four required elements are visibly present in the same image" in prompt
+    assert "front-cover design, back-cover design, book spine, and one or more jacket flaps" in prompt
+    assert "If any required element is absent or uncertain, dust_jacket_spread is invalid" in prompt
+    assert "A standalone front cover is cover_page" in prompt
+    assert "a standalone rear panel with a blurb, barcode, ISBN, or price is back_cover" in prompt
