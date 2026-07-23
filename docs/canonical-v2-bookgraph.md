@@ -510,7 +510,7 @@ Internal canonical 在 TextUnit 进入 logical node 之后记录 page-level role
 
 Public BookGraph 不写入 `metadata.shadow_page_roles`、node `attrs.page_role` 或 node `attrs.page_role_signals`。这些都是 Phase 3/4 诊断信号，不是 release contract。
 
-Phase 3 不写入 `flow_scope`。`front_matter`、`body`、`back_matter` 是书籍出版结构位置，必须在 Phase 5 结合 LLM/视觉/目录/上下文 verifier 后再确定。Phase 3 单靠几何、页码、body profile 和显式结构提示，不足以可靠判断真实书籍结构边界，尤其无法可靠处理封底提前出现在 PDF 前部、章末注、书末注、版权页和图版页等情况。
+Phase 3 不写入 `flow_scope`。`front_matter`、`body`、`back_matter` 是书籍出版结构位置，不能由几何、页码、body profile 和显式结构提示可靠决定。Phase 4A PageReview 可以确认单页消费与一部分物理书籍位置；后续 SectionMap 才能结合 PageReview、TOC anchors、TextFlow 和边界证据建立逻辑章节归属。Phase 3 单靠几何仍无法可靠处理封底提前出现在 PDF 前部、章末注、书末注、版权页和图版页等情况。
 
 `blank_page`、`visual_page` 等都是 `page_role`。它们只说明页面自身的候选形态，不说明页面属于 front matter、body 或 back matter，也不表达跨页出版结构。
 
@@ -552,8 +552,19 @@ Phase 3 acceptance report 同时保留全量 `node_counts` 和 `page_role_counts
 
 Phase 4A is an internal bounded multimodal review between `BookSkeleton` and
 `BookGraph`. It can use the physical page image plus parser-neutral observation
-signals, but it does not rewrite observations or infer text semantics for node
-classification.
+signals, but it does not rewrite observations, create visual assets, or resolve
+image-to-caption relationships.
+
+`BookSkeleton.selected_start_page` is a **title anchor**, not evidence that all
+following physical pages belong to that title. In particular, an external-wrap
+page, a TOC page, an unlisted plate, or an inserted visual page may occur
+between two TOC anchors. PageReview therefore never assigns a page to the
+nearest preceding TOC entry. A later `SectionMap` stage will establish section
+membership from confirmed page identities, observed headings, and bounded
+semantic boundary review. Its internal result must distinguish `assigned`,
+`standalone`, and `unresolved` pages rather than forcing every physical page
+into a section. Only confirmed section containment will later become BookGraph
+`contains` edges and RAG heading-path context.
 
 `PageReview.pages[*].page_role` has exactly two values:
 
@@ -563,28 +574,60 @@ classification.
 | `visual_page` | The page contains visual material, or isolated designed text such as a title or dedication leaf. It is not eligible for reading-flow OCR nodes. |
 
 Visual object categories are not page roles. The review may separately record
-`special_page_kind` for `cover_page`, `back_cover`, `cover_flap`,
-`dust_jacket_spread`, `front_board`, `back_board`, `half_title_page`,
-`title_page`, `dedication_page`, `acknowledgments_page`, `copyright_page`, `toc_page`, or `blank_page`; this identity does
+`special_page_kind` for `front_exterior_page`, `back_exterior_page`, `cover_flap`,
+`dust_jacket_spread`, `half_title_page`,
+`title_page`, `decorative_preliminary_page`, `decorative_title_page`, `epigraph_page`, `dedication_page`, `acknowledgments_page`,
+`copyright_page`, `toc_page`, `blank_page`, `plate_page`, `chronology_chart_page`, or
+`genealogy_chart_page`; this identity does
 not change the page's reading-flow role. `text_flow_action` and
 `visual_asset_action` remain separate: a visual page uses `exclude + retain`,
 while a text-flow page may use `include + retain` when the source visual layout
 must also be preserved. `PageReview` is internal and is not copied into the
 public BookGraph contract.
 
-`dust_jacket_spread` is a flattened full dust-jacket image containing multiple
-panels and a spine. `front_board` and `back_board` are the hardcover boards
-visible when a jacket is removed. These identities, like `cover_page` and
-`cover_flap`, are `external_wrap` visual assets: their OCR is excluded from
-reading flow while the rendered page is retained.
+`front_exterior_page` and `back_exterior_page` identify the observable front
+and rear outer surfaces of a book. They deliberately do not guess whether a
+surface is a paperback cover or a hardcover board: a PDF without explicit
+binding evidence cannot establish that material. `dust_jacket_spread` is a
+flattened full dust-jacket image containing multiple panels and a spine. These
+identities, like `cover_flap`, are `external_wrap` visual assets: their OCR is
+excluded from reading flow while the rendered page is retained.
 
 The identity applies to one physical PDF page only. A `dust_jacket_spread` has
 a strict four-part definition: the page must visibly contain the front-cover
 design, back-cover design, book spine, and at least one jacket flap, separated
 by folds or panel boundaries. It is never inferred from neighboring pages. A
-standalone cover remains `cover_page`; a standalone rear panel remains
-`back_cover`, including when it contains a barcode, QR code, ISBN, price, or
-publisher blurb.
+standalone front outer surface is `front_exterior_page`; a standalone rear
+panel is `back_exterior_page`, including when it contains a barcode, QR code,
+ISBN, price, or publisher blurb.
+
+`epigraph_page` is a front-matter leaf containing a standalone opening
+quotation, maxim, or attribution. `plate_page` means one physical page is
+principally a printed illustration, photograph, map, artwork, or facsimile,
+with at most a plate number, caption, or labels and no independent continuous
+prose. It is a page identity, not a `plate_section`: it may occur in front
+matter, body, or back matter without creating a cross-page grouping. Both use
+`visual_page + exclude + retain`.
+
+`chronology_chart_page` is a date-organized visual chronology: a timeline,
+historical chart, or dated event matrix. It is not a `plate_page`, even if
+MinerU represents the layout as an image. PageReview retains it as
+`visual_page + exclude + retain`; a later structured-chart stage may extract
+its dates and events without first turning its scattered labels into prose.
+
+`genealogy_chart_page` is a person- or dynasty-centered visual hierarchy: named
+boxes or labels connected by parent-child, lineage, or generational branches.
+Date ranges attached to people do not make it a chronology. It also uses
+`visual_page + exclude + retain`; a later structured-genealogy stage may create
+person and lineage relations without first turning its scattered labels into
+prose.
+
+`decorative_preliminary_page` is a designed, patterned, or texture-only
+book-internal leaf before body reading flow. It deliberately does not claim the
+physical binding term `front_endpaper`: that requires evidence beyond a single
+page image. `decorative_title_page` is a book-internal ornamental title leaf
+distinct from the bibliographic `title_page`. Both use
+`front_matter + visual_page + exclude + retain`.
 
 `copyright_page` is an explicit policy exception: PageReview materializes it
 as `visual_page + front_matter + metadata_only + retain`. Its bibliographic and
@@ -596,12 +639,16 @@ front-matter prose and use `text_flow_page + include + not_needed`, while a
 dedication leaf remains a non-flow visual page.
 
 PageReview does not send a single broad instruction to every selected page.
-Each request has a small common JSON contract plus one profile selected solely
-from BookSkeleton context and observed layout evidence:
+Each request has a small common JSON contract plus one profile selected from
+BookSkeleton context and observed layout evidence:
 
 | Prompt profile | Selection evidence | Focused decision question |
 | --- | --- | --- |
 | `front_special` | The page falls in the provisional physical `pre_body` range. | Is it an outer cover/back cover/flap, a book-block title/copyright/TOC/blank-like page, or front prose? |
+| `front_visual_identity` | A pre-body page has image/table or raster-visual evidence. | Is it an external front/rear surface, an internal plate, or a book-block visual leaf? |
+| `after_front_exterior` | The preceding page is resolved as `front_exterior_page`. | Is the current cover-like design a second front exterior, a rear exterior, or an internal visual leaf? It never infers material. |
+| `after_decorative_preliminary` | The preceding page is resolved as `decorative_preliminary_page`. | Is a title-only page a half title rather than another decorative preliminary leaf? |
+| `after_title_page` | The preceding page is resolved as `title_page`. | Is a repeated ornamental title treatment a decorative title leaf rather than a second bibliographic title page? |
 | `front_residual_unknown` | The page remains `unknown` after TOC localization and the initial visual-candidate selection. | Is this ordinary internal front prose, or an outer-wrap page that the initial visual pass did not select? |
 | `body_section_start` | The page is the localized start of a body TOC entry. | Keep the body heading and its flow in reading text. |
 | `visual_sparse_text` | Sparse text with a visual observation but no table-region evidence. | Distinguish visual labels/captions from a continuous narrative paragraph. |
@@ -609,14 +656,17 @@ from BookSkeleton context and observed layout evidence:
 | `textual_table` | Any page with a `table_region` observation. | Keep a regular textual table/continuation in text flow, including a full-page table; exclude label-only visuals. |
 | `general` | Any remaining selected structural ambiguity. | Decide whether independent body prose is present. |
 
-Only pages with the same profile and BookSkeleton matter boundary share an LLM
-request. Each `(pre_body|body|back_matter, profile)` group preserves
-physical-page order and is batched to the configured request size. The internal
-record retains `llm_group_id` and `llm_prompt_profile`; its request group records
-the matter boundary and review stage, and the top-level `llm` record stores the
-model and prompt version. The checkpoint fingerprint includes request groups and the prompt
+Each selected page is a separate LLM request with one rendered physical-page
+image. The internal record retains `llm_prompt_profile`, and the top-level
+`llm` record stores the model and prompt version. The
+checkpoint fingerprint includes the requested physical pages and the prompt
 version. This makes a changed prompt deliberately invalidate stale decisions,
-while keeping completed groups resumable within the same plan.
+while keeping completed pages resumable within the same plan and preventing a
+model from inferring a page's identity from neighboring-page imagery. Sequence
+profiles receive only the preceding resolved identity, never its image. When a
+page could equally be exterior artwork or an internal plate, PageReview leaves
+`special_page_kind` empty and `book_block_position` as `unknown`, rather than
+inventing a binding identity.
 
 The current Phase 4A LLM scope is `pre_body` only. It runs in two bounded stages:
 selected visual candidates first, then every remaining pre-body page whose
@@ -638,6 +688,132 @@ not treat the entire `pre_body` interval as front matter: pages before the
 first localized front-matter section enter the residual-unknown LLM pass. This
 keeps external wrap detectable while ensuring ordinary front prose is resolved
 instead of being left as `unknown`.
+
+### Phase 4B VisualRelationReview (planned, not implemented)
+
+`plate_page` only establishes a page-level consumption decision. It means that
+the page image is retained and its OCR is excluded from reading flow; it does
+**not** mean MinerU image regions and text regions have been associated. Phase
+4B is a separate visual-object relationship pass after PageReview and before
+BookGraph creates public visual assets or caption edges:
+
+```text
+ObservedDocument + PageReview
+  -> selected visual page
+  -> VisualRelationReview
+  -> internal asset/caption relation evidence
+  -> BookGraph asset + caption node + caption_of edge
+```
+
+The initial scope will process only `pre_body` pages that PageReview resolves as
+`plate_page`. It does not extend Phase 4A's LLM selection into body or back
+matter. That expansion requires real book samples and a separate candidate
+selection audit.
+
+For each selected physical page, the multimodal request must receive the full
+page image and a parser-neutral manifest of same-page observations:
+`observation_id`, `kind`, `bbox`, and `text`. The model must select existing
+observation ids rather than transcribe, rewrite, or invent caption content.
+Its result must express only explicit relations, for example:
+
+```json
+{
+  "page": 4,
+  "relations": [
+    {
+      "asset_observation_id": "ob000041",
+      "caption_observation_ids": ["ob000044", "ob000045"],
+      "relation_type": "caption_of",
+      "confidence": "high"
+    }
+  ],
+  "unpaired_asset_observation_ids": [],
+  "unpaired_caption_observation_ids": []
+}
+```
+
+Validation must require that referenced observations exist on the same physical
+page, the asset endpoint is an `image_region`, and every caption endpoint is a
+text observation. A caption may combine multiple text observations; an
+unpaired asset or caption must remain explicit rather than being guessed.
+Cross-page image/caption relationships, plate-section grouping, OCR repair,
+image descriptions, and body/back-matter visual-page selection are non-goals
+for this first 4B slice.
+
+### Phase 4C SectionMap (planned, not implemented)
+
+`SectionMap` is the internal alignment layer from physical pages and TextFlow
+units to the logical document tree. It is **not** a convenience map that
+assigns every page to the closest preceding TOC entry. `BookSkeleton` supplies
+only title anchors; a TOC omits external wrap, its own pages, some plates, and
+other inserted material. Consequently, a title anchor does not establish a
+section end page or page membership by itself.
+
+The dependency graph is intentionally a DAG rather than a linear pipeline:
+
+```text
+ObservedDocument ──> BookSkeleton (TOC/title anchors) ─┐
+ObservedDocument ──> TextFlow units ───────────────────┼─> SectionMap ─> BookGraph contains edges
+ObservedDocument ──> PageReview ───────────────────────┘
+                         │
+                         └─> VisualRelationReview (4B) ─> BookGraph visual relations
+```
+
+The planned internal contract has two complementary views:
+
+```json
+{
+  "sections": [
+    {
+      "section_id": "s000012",
+      "title": "...",
+      "level": 1,
+      "parent_section_id": null,
+      "skeleton_entry_index": 12,
+      "anchor_evidence_ids": ["..."],
+      "physical_ranges": [[35, 62]],
+      "text_unit_ids": ["tu..."],
+      "attached_visual_pages": [40],
+      "evidence_ids": ["..."],
+      "confidence": "high"
+    }
+  ],
+  "page_placements": [
+    {
+      "page": 13,
+      "placement": "standalone",
+      "section_id": null,
+      "reason": "toc_page",
+      "evidence_ids": ["..."]
+    }
+  ]
+}
+```
+
+`physical_ranges` are evidence-bearing coverage ranges, not a command to
+absorb every page in the range. `page_placements` explicitly records exceptions
+and unresolved pages. Its allowed placement values will be `section_member`,
+`standalone`, and `unresolved`. A section member may distinguish reading-flow
+text from an attached visual asset, but this is not a replacement for physical
+`book_block_position` and does not reintroduce a `visual_insert` flow scope.
+
+The initial implementation must:
+
+- use Skeleton anchors, observed headings, TextFlow continuity, PageReview
+  identities, and provenance as independent evidence sources;
+- classify `external_wrap`, `toc_page`, `blank_page`, copyright/title leaves,
+  and other confirmed standalone pages before considering section membership;
+- leave conflicting or weakly evidenced front/back matter pages unresolved;
+- use a bounded LLM boundary verifier only for unresolved gaps and candidate
+  starts/ends, never as a blanket page-to-section classifier;
+- create public BookGraph `contains` edges and RAG heading paths only from
+  confirmed SectionMap membership.
+
+It must not implement GraphRAG indexing, document metadata extraction,
+image-caption relations, or a new public canonical field for unresolved debug
+state. Its acceptance suite must include a TOC page immediately following a
+chronology anchor, external wrap before the first internal section, and visual
+pages within a body chapter.
 
 ### Phase 4 note/ref model
 
