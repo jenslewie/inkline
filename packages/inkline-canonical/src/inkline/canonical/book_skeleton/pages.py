@@ -99,6 +99,15 @@ def page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
                 "candidate_title_text": _page_text(
                     _candidate_title_context_observations(text_observations)
                 ),
+                "_title_location_observations": [
+                    *_title_context_observations(
+                        text_observations, title_location_observations
+                    ),
+                    *visual_title_observations,
+                ],
+                "_candidate_title_context_observations": (
+                    _candidate_title_context_observations(text_observations)
+                ),
                 "has_toc_hint": any(
                     observation.get("role_hint") == "toc_text"
                     for observation in text_observations
@@ -142,18 +151,30 @@ def observed_page_text(document: dict[str, Any], page_number: int) -> str:
     )
 
 
-def locate_toc_entry_pages(
+def locate_toc_entry_anchors(
     page_records_: list[dict[str, Any]], entry: dict[str, Any], *, exclude_pages: list[int]
-) -> list[int]:
+) -> list[dict[str, Any]]:
     candidates = []
     seen = set()
     for title in _location_titles_for_entry(entry):
-        for page in locate_title_pages(page_records_, title, exclude_pages=exclude_pages):
+        for candidate in locate_title_anchors(page_records_, title, exclude_pages=exclude_pages):
+            page = int(candidate["page"])
             if page in seen:
                 continue
             seen.add(page)
-            candidates.append(page)
+            candidates.append(candidate)
     return candidates
+
+
+def locate_toc_entry_pages(
+    page_records_: list[dict[str, Any]], entry: dict[str, Any], *, exclude_pages: list[int]
+) -> list[int]:
+    return [
+        int(candidate["page"])
+        for candidate in locate_toc_entry_anchors(
+            page_records_, entry, exclude_pages=exclude_pages
+        )
+    ]
 
 
 def _location_titles_for_entry(entry: dict[str, Any]) -> list[str]:
@@ -182,6 +203,17 @@ def _display_title_without_structural_prefix(display_title: str) -> str | None:
 def locate_title_pages(
     page_records_: list[dict[str, Any]], title: str, *, exclude_pages: list[int]
 ) -> list[int]:
+    return [
+        int(candidate["page"])
+        for candidate in locate_title_anchors(
+            page_records_, title, exclude_pages=exclude_pages
+        )
+    ]
+
+
+def locate_title_anchors(
+    page_records_: list[dict[str, Any]], title: str, *, exclude_pages: list[int]
+) -> list[dict[str, Any]]:
     excluded = set(exclude_pages)
     title_key = normalize_title(title)
     if not title_key:
@@ -195,8 +227,28 @@ def locate_title_pages(
         page_key = normalize_title(text)
         if not _title_matches_record(record, title_key, page_key):
             continue
-        candidates.append((page, _title_location_score(record, title_key, text, page_key)))
-    return [page for page, _score in sorted(candidates, key=lambda item: (-item[1], item[0]))]
+        evidence = [
+            *record.get("_title_location_observations", []),
+            *record.get("_candidate_title_context_observations", []),
+        ]
+        observation_ids = sorted(
+            {
+                str(observation["observation_id"])
+                for observation in evidence
+                if str(observation.get("text") or "").strip()
+            }
+        )
+        candidates.append(
+            {
+                "page": page,
+                "score": _title_location_score(record, title_key, text, page_key),
+                "title_observation_ids": observation_ids,
+            }
+        )
+    return sorted(
+        candidates,
+        key=lambda candidate: (-float(candidate["score"]), int(candidate["page"])),
+    )
 
 
 def select_monotonic_start_pages(entries: list[dict[str, Any]]) -> None:

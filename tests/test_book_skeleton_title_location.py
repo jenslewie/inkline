@@ -7,11 +7,15 @@ from inkline.canonical import (
     make_observed_document,
     make_observed_page,
 )
+from inkline.canonical.book_skeleton.pages import (
+    locate_toc_entry_anchors,
+    page_records,
+)
 
 
-def test_locates_split_short_title_blocks_before_notes() -> None:
+def _attila_document() -> dict[str, object]:
     pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 290)]
-    document = make_observed_document(
+    return make_observed_document(
         {
             "doc_id": "attila",
             "title": "匈人王阿提拉",
@@ -74,11 +78,72 @@ def test_locates_split_short_title_blocks_before_notes() -> None:
         ],
     )
 
+
+def test_locates_split_short_title_blocks_before_notes() -> None:
+    document = _attila_document()
+
     skeleton = build_book_skeleton_from_observed(document)
     entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
 
     assert entries["第一章 阿提拉在当下"]["candidate_start_pages"][0] == 6
     assert entries["第一章 阿提拉在当下"]["selected_start_page"] == 6
+
+
+def test_locate_toc_entry_anchors_keeps_matching_observation_ids() -> None:
+    document = _attila_document()
+    records = page_records(document)
+
+    anchors = locate_toc_entry_anchors(
+        records,
+        {"display_title": "第一章 阿提拉在当下"},
+        exclude_pages=[1],
+    )
+
+    assert anchors[0]["page"] == 6
+    assert anchors[0]["title_observation_ids"] == ["obs000002", "obs000003"]
+    assert isinstance(anchors[0]["score"], float)
+
+
+def test_locate_toc_entry_anchors_preserves_title_variant_order() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "egypt",
+            "title": "埃及、希腊与罗马",
+            "language": "zh-CN",
+            "source_file": "egypt.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        [
+            make_observed_page(798, width=1000, height=1400),
+            make_observed_page(809, width=1000, height=1400),
+        ],
+        [
+            make_observation(
+                "obs000008",
+                "text_region",
+                text="第31章\n早期基督教社群",
+                page=798,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000006",
+                "text_region",
+                text="早期基督教社群",
+                page=809,
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    anchors = locate_toc_entry_anchors(
+        page_records(document),
+        {"display_title": "第31章 早期基督教社群"},
+        exclude_pages=[],
+    )
+
+    assert [anchor["page"] for anchor in anchors] == [798, 809]
+    assert anchors[0]["title_observation_ids"] == ["obs000008"]
 
 
 def test_toc_llm_prompt_discourages_spaces_inside_compact_chinese_words() -> None:
