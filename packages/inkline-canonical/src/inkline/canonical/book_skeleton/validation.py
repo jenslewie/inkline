@@ -18,6 +18,11 @@ from inkline.canonical.book_skeleton.contract import (
     REQUIRED_START_ANCHOR_FIELDS,
     REQUIRED_TOP_LEVEL_FIELDS,
 )
+from inkline.canonical.book_skeleton.pages import (
+    locate_toc_entry_anchors,
+    matching_toc_observation_ids,
+    page_records,
+)
 from inkline.canonical.observed.schema import validate_observed_document
 from inkline.canonical.schema import ValidationError
 
@@ -49,7 +54,9 @@ def validate_book_skeleton_against_observed(
         str(observation["observation_id"]): observation
         for observation in document["observations"]
     }
-    toc_pages = set(skeleton["toc_pages"])
+    records = page_records(document)
+    toc_page_numbers = skeleton["toc_pages"]
+    toc_pages = set(toc_page_numbers)
     entries_by_anchor_id = {
         entry["selected_start_anchor"]["anchor_id"]: (index, entry)
         for index, entry in enumerate(skeleton["toc_entries"])
@@ -71,6 +78,13 @@ def validate_book_skeleton_against_observed(
                 raise ValidationError(
                     f"toc_entries[{index}] TOC evidence is not on a TOC page"
                 )
+        _validate_anchor_evidence_semantics(
+            document,
+            records,
+            toc_page_numbers,
+            entry,
+            index,
+        )
         if anchor["resolution_method"] != "printed_page_offset":
             continue
         support = []
@@ -103,6 +117,46 @@ def _required_anchor_observation(
     if observation is None:
         raise ValidationError(f"anchor references unknown observation: {observation_id}")
     return observation
+
+
+def _validate_anchor_evidence_semantics(
+    document: dict[str, Any],
+    records: list[dict[str, Any]],
+    toc_pages: list[int],
+    entry: dict[str, Any],
+    index: int,
+) -> None:
+    anchor = entry["selected_start_anchor"]
+    if anchor["resolution_method"] == "observed_title_match":
+        direct_candidate = next(
+            (
+                candidate
+                for candidate in locate_toc_entry_anchors(
+                    records,
+                    entry,
+                    exclude_pages=toc_pages,
+                )
+                if candidate["page"] == anchor["page"]
+            ),
+            None,
+        )
+        if (
+            direct_candidate is None
+            or anchor["title_observation_ids"]
+            != direct_candidate["title_observation_ids"]
+        ):
+            raise ValidationError(
+                f"toc_entries[{index}] title evidence does not match direct candidate"
+            )
+    expected_toc_observation_ids = matching_toc_observation_ids(
+        document,
+        entry,
+        toc_pages=toc_pages,
+    )
+    if anchor["toc_observation_ids"] != expected_toc_observation_ids:
+        raise ValidationError(
+            f"toc_entries[{index}] TOC evidence does not match entry title"
+        )
 
 
 def audit_book_skeleton(skeleton: dict[str, Any]) -> dict[str, Any]:
@@ -243,6 +297,7 @@ def _validate_start_anchor(
         "supporting_anchor_ids",
     ):
         _validate_anchor_ids(anchor[field], index=index, field=field)
+    _validate_anchor_observation_namespaces(anchor, index)
     if method == "observed_title_match":
         _validate_direct_anchor(anchor, index)
     else:
@@ -257,6 +312,13 @@ def _validate_anchor_ids(values: list[Any], *, index: int, field: str) -> None:
     if len(values) != len(set(values)):
         raise ValidationError(
             f"toc_entries[{index}].selected_start_anchor.{field} must contain unique ids"
+        )
+
+
+def _validate_anchor_observation_namespaces(anchor: dict[str, Any], index: int) -> None:
+    if set(anchor["title_observation_ids"]) & set(anchor["toc_observation_ids"]):
+        raise ValidationError(
+            f"toc_entries[{index}] title and TOC observation evidence must not overlap"
         )
 
 

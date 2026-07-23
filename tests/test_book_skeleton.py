@@ -108,6 +108,41 @@ def _document() -> dict:
     )
 
 
+def _labeled_entry_document(toc_entry: str, body_titles: str | list[str]) -> dict:
+    if isinstance(body_titles, str):
+        body_titles = [body_titles]
+    return make_observed_document(
+        {
+            "doc_id": "labeled-entry",
+            "title": "Labeled Entry",
+            "language": "en",
+            "source_file": "labeled-entry.pdf",
+            "parser_name": "test-parser",
+            "parser_mode": "structured",
+        },
+        [make_observed_page(page, width=1000, height=1400) for page in range(1, 4)],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text=f"目录\n{toc_entry}",
+                page=1,
+                role_hint="toc_text",
+            ),
+            *[
+                make_observation(
+                    f"obs{index:06d}",
+                    "text_region",
+                    text=body_title,
+                    page=2,
+                    role_hint="title_text",
+                )
+                for index, body_title in enumerate(body_titles, start=2)
+            ],
+        ],
+    )
+
+
 def test_build_book_skeleton_from_observed_uses_toc_titles_and_observed_title_pages() -> None:
     skeleton = build_book_skeleton_from_observed(_document())
 
@@ -143,6 +178,59 @@ def test_build_book_skeleton_from_observed_uses_toc_titles_and_observed_title_pa
     )
     assert skeleton["boundaries"]["first_body_page"] == 14
     canonical_api.validate_book_skeleton_against_observed(skeleton, _document())
+
+
+def test_build_book_skeleton_reproduces_roman_label_evidence_from_public_entry() -> None:
+    skeleton = build_book_skeleton_from_observed(
+        _labeled_entry_document("II Campaign 1", "Campaign")
+    )
+
+    anchor = skeleton["toc_entries"][0]["selected_start_anchor"]
+    assert anchor["resolution_method"] == "observed_title_match"
+    assert anchor["title_observation_ids"] == ["obs000002"]
+
+
+def test_build_book_skeleton_reproduces_part_label_evidence_from_public_entry() -> None:
+    skeleton = build_book_skeleton_from_observed(
+        _labeled_entry_document("第一部分 Campaign 1", "Campaign")
+    )
+
+    anchor = skeleton["toc_entries"][0]["selected_start_anchor"]
+    assert anchor["resolution_method"] == "observed_title_match"
+    assert anchor["title_observation_ids"] == ["obs000002"]
+
+
+def test_build_book_skeleton_aggregates_split_derived_title_evidence() -> None:
+    skeleton = build_book_skeleton_from_observed(
+        _labeled_entry_document("II Great Campaign 1", ["Great", "Campaign"])
+    )
+
+    anchor = skeleton["toc_entries"][0]["selected_start_anchor"]
+    assert anchor is not None
+    assert anchor["resolution_method"] == "observed_title_match"
+    assert anchor["title_observation_ids"] == ["obs000002", "obs000003"]
+
+
+def test_build_book_skeleton_does_not_treat_mixed_case_word_as_roman_label() -> None:
+    skeleton = build_book_skeleton_from_observed(
+        _labeled_entry_document("Civil War 1", "War")
+    )
+
+    entry = skeleton["toc_entries"][0]
+    assert entry["candidate_start_pages"] == []
+    assert entry["selected_start_page"] is None
+    assert entry["selected_start_anchor"] is None
+
+
+def test_build_book_skeleton_does_not_match_partial_part_label_residue() -> None:
+    skeleton = build_book_skeleton_from_observed(
+        _labeled_entry_document("第一部分 Campaign 1", "分 Campaign")
+    )
+
+    entry = skeleton["toc_entries"][0]
+    assert entry["candidate_start_pages"] == []
+    assert entry["selected_start_page"] is None
+    assert entry["selected_start_anchor"] is None
 
 
 def test_build_book_skeleton_from_observed_includes_toc_continuation_pages() -> None:
@@ -1561,6 +1649,15 @@ def test_validate_book_skeleton_rejects_duplicate_anchor_evidence_ids() -> None:
         validate_book_skeleton(skeleton)
 
 
+def test_validate_book_skeleton_rejects_title_and_toc_evidence_overlap() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+    anchor = skeleton["toc_entries"][2]["selected_start_anchor"]
+    anchor["toc_observation_ids"] = [anchor["title_observation_ids"][0]]
+
+    with pytest.raises(ValidationError, match="title and TOC observation evidence must not overlap"):
+        validate_book_skeleton(skeleton)
+
+
 def test_validate_book_skeleton_rejects_invalid_anchor_method() -> None:
     skeleton = build_book_skeleton_from_observed(_document())
     skeleton["toc_entries"][2]["selected_start_anchor"]["resolution_method"] = "nearest_title"
@@ -1616,6 +1713,26 @@ def test_validate_book_skeleton_against_observed_rejects_title_evidence_on_other
         canonical_api.validate_book_skeleton_against_observed(skeleton, document)
 
 
+def test_validate_book_skeleton_against_observed_rejects_unrelated_title_evidence_on_anchor_page() -> None:
+    document = _document()
+    skeleton = build_book_skeleton_from_observed(document)
+    document["observations"].append(
+        make_observation(
+            "obs000011",
+            "text_region",
+            text="无关标题",
+            page=42,
+            role_hint="title_text",
+        )
+    )
+    skeleton["toc_entries"][2]["selected_start_anchor"]["title_observation_ids"] = [
+        "obs000011"
+    ]
+
+    with pytest.raises(ValidationError, match="title evidence does not match direct candidate"):
+        canonical_api.validate_book_skeleton_against_observed(skeleton, document)
+
+
 def test_validate_book_skeleton_against_observed_rejects_non_toc_evidence() -> None:
     document = _document()
     skeleton = build_book_skeleton_from_observed(document)
@@ -1624,6 +1741,26 @@ def test_validate_book_skeleton_against_observed_rejects_non_toc_evidence() -> N
     ]
 
     with pytest.raises(ValidationError, match="TOC evidence is not on a TOC page"):
+        canonical_api.validate_book_skeleton_against_observed(skeleton, document)
+
+
+def test_validate_book_skeleton_against_observed_rejects_unrelated_toc_evidence_on_toc_page() -> None:
+    document = _document()
+    skeleton = build_book_skeleton_from_observed(document)
+    document["observations"].append(
+        make_observation(
+            "obs000011",
+            "text_region",
+            text="目录页上的无关项目 123",
+            page=10,
+            role_hint="toc_text",
+        )
+    )
+    skeleton["toc_entries"][2]["selected_start_anchor"]["toc_observation_ids"] = [
+        "obs000011"
+    ]
+
+    with pytest.raises(ValidationError, match="TOC evidence does not match entry title"):
         canonical_api.validate_book_skeleton_against_observed(skeleton, document)
 
 

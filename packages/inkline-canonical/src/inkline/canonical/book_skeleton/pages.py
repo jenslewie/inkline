@@ -28,9 +28,10 @@ SHORT_AMBIGUOUS_TITLE_KEY_MAX_LENGTH = 4
 MAX_PRINTED_PAGE_OFFSET = 128
 MISSING_START_PAGE_COST = 24
 DISPLAY_TITLE_PREFIX_RE = re.compile(
-    r"^(?P<label>(?:第[一二三四五六七八九十百零〇\d]+[章节部篇卷]|"
-    r"[一二三四五六七八九十百零〇\d]+[、.]?|"
-    r"附录\s*[A-Za-z一二三四五六七八九十百零〇\d]*|"
+    r"^(?P<label>(?:第[一二三四五六七八九十百千万零〇\d]+(?:部分|[章节部篇卷])|"
+    r"(?:[IVXLCDM]+|[ivxlcdm]+)(?=\s)|"
+    r"[一二三四五六七八九十百千万零〇\d]+[、.]?|"
+    r"附录\s*[A-Za-z一二三四五六七八九十百千万零〇\d]*|"
     r"专题\s*\d+))\s*(?P<title>.+)$"
 )
 
@@ -155,8 +156,14 @@ def locate_toc_entry_anchors(
 ) -> list[dict[str, Any]]:
     candidates = []
     seen = set()
+    display_title = str(entry.get("display_title") or "").strip()
     for title in _location_titles_for_entry(entry):
-        for candidate in locate_title_anchors(page_records_, title, exclude_pages=exclude_pages):
+        for candidate in locate_title_anchors(
+            page_records_,
+            title,
+            exclude_pages=exclude_pages,
+            require_exact_observation=title != display_title,
+        ):
             page = int(candidate["page"])
             if page in seen:
                 continue
@@ -180,7 +187,6 @@ def _location_titles_for_entry(entry: dict[str, Any]) -> list[str]:
     titles = []
     for title in (
         entry.get("display_title"),
-        entry.get("title"),
         _display_title_without_structural_prefix(str(entry.get("display_title") or "")),
     ):
         if not isinstance(title, str):
@@ -211,7 +217,11 @@ def locate_title_pages(
 
 
 def locate_title_anchors(
-    page_records_: list[dict[str, Any]], title: str, *, exclude_pages: list[int]
+    page_records_: list[dict[str, Any]],
+    title: str,
+    *,
+    exclude_pages: list[int],
+    require_exact_observation: bool = False,
 ) -> list[dict[str, Any]]:
     excluded = set(exclude_pages)
     title_key = normalize_title(title)
@@ -225,6 +235,10 @@ def locate_title_anchors(
         text = _title_location_text(record)
         page_key = normalize_title(text)
         if not _title_matches_record(record, title_key, page_key):
+            continue
+        if require_exact_observation and not _has_exact_aggregate_title_evidence(
+            record, title_key
+        ):
             continue
         evidence = [
             *record.get("_title_location_observations", []),
@@ -318,7 +332,7 @@ def _attach_direct_anchors(
             "resolution_method": "observed_title_match",
             "printed_page_offset": printed_page_offset,
             "title_observation_ids": list(candidate["title_observation_ids"]),
-            "toc_observation_ids": _toc_observation_ids(
+            "toc_observation_ids": matching_toc_observation_ids(
                 document, entry, toc_pages=toc_pages
             ),
             "supporting_anchor_ids": [],
@@ -354,7 +368,7 @@ def _attach_printed_offset_anchors(
             "resolution_method": "printed_page_offset",
             "printed_page_offset": candidate["printed_page_offset"],
             "title_observation_ids": [],
-            "toc_observation_ids": _toc_observation_ids(
+            "toc_observation_ids": matching_toc_observation_ids(
                 document, entry, toc_pages=toc_pages
             ),
             "supporting_anchor_ids": supporting_anchor_ids,
@@ -366,7 +380,7 @@ def _start_anchor_id(entry: dict[str, Any]) -> str:
     return f"sa{int(entry['entry_index']):06d}"
 
 
-def _toc_observation_ids(
+def matching_toc_observation_ids(
     document: dict[str, Any],
     entry: dict[str, Any],
     *,
@@ -692,6 +706,40 @@ def _title_matches_record(record: dict[str, Any], title_key: str, page_key: str)
         or _near_title_match(title_key, title_text_key)
         or _near_title_match(title_key, visual_title_key)
     )
+
+
+def _has_exact_aggregate_title_evidence(
+    record: dict[str, Any], title_key: str
+) -> bool:
+    evidence = [
+        *record.get("_title_location_observations", []),
+        *record.get("_candidate_title_context_observations", []),
+    ]
+    seen: set[tuple[str, str | int]] = set()
+    evidence_text_keys = []
+    for observation in evidence:
+        observation_id = str(observation.get("observation_id") or "")
+        identity: tuple[str, str | int]
+        if observation_id:
+            identity = ("observation_id", observation_id)
+        else:
+            identity = ("object_id", id(observation))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        text_key = normalize_title(str(observation.get("text") or ""))
+        if text_key:
+            evidence_text_keys.append(text_key)
+
+    for start in range(len(evidence_text_keys)):
+        aggregate_key = ""
+        for text_key in evidence_text_keys[start:]:
+            aggregate_key += text_key
+            if aggregate_key == title_key:
+                return True
+            if not title_key.startswith(aggregate_key):
+                break
+    return False
 
 
 def _requires_title_evidence(title_key: str) -> bool:
