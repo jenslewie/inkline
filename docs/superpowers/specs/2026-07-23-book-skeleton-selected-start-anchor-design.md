@@ -22,6 +22,7 @@ is `null` exactly when `selected_start_page` is `null`.
     "anchor_id": "sa000012",
     "page": 42,
     "resolution_method": "observed_title_match",
+    "printed_page_offset": 12,
     "title_observation_ids": ["ob000381"],
     "toc_observation_ids": ["ob000094"],
     "supporting_anchor_ids": [],
@@ -39,8 +40,11 @@ Allowed resolution methods are:
   neighboring direct anchors with the same offset.
 
 Direct anchors have `confidence=high`, at least one title observation id, and
-no supporting anchor ids. Printed-offset anchors have `confidence=medium`, no
-title observation ids, and exactly two supporting direct-anchor ids.
+no supporting anchor ids. Their `printed_page_offset` is an integer when the
+TOC entry has a numeric printed page and is otherwise `null`. Printed-offset
+anchors have `confidence=medium`, no title observation ids, a non-null
+`printed_page_offset`, and exactly two supporting direct-anchor ids with that
+same offset.
 
 `toc_observation_ids` contains the parser-neutral `toc_text` observations from
 the detected TOC pages that contain the normalized entry title. It is allowed
@@ -70,6 +74,8 @@ invariants:
 - null anchor and null selected page occur together;
 - resolution method, confidence, evidence lists, and supporting-anchor shape
   agree;
+- a printed-offset anchor and both supporting direct anchors carry the same
+  non-null `printed_page_offset`;
 - anchor ids and observation ids contain no duplicates.
 
 `validate_book_skeleton_against_observed(skeleton, document)` performs
