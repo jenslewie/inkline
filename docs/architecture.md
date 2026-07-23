@@ -10,39 +10,56 @@ today. Dashed arrows are planned canonical-v2 stages and must not be read as cur
 runtime behavior.
 
 ```mermaid
-flowchart LR
+flowchart TB
     source["PDF / EPUB / Word"] --> adapter["Parser adapter"]
 
-    adapter --> legacy_builder["Legacy canonical builder"]
-    legacy_builder --> canonical_v1["canonical.json: current release contract"]
-    canonical_v1 --> epub["EPUB exporter"]
-    canonical_v1 --> rag["RAG chunk / embed / search"]
+    subgraph release_v1["Current release path"]
+        legacy_builder["Legacy canonical builder"] --> canonical_v1["canonical.json"]
+        canonical_v1 --> release_products["EPUB and RAG"]
+    end
+    adapter --> legacy_builder
 
-    adapter -->|"MinerU v2 path only"| observed["ObservedDocument: parser-neutral observations"]
-    observed --> skeleton["BookSkeleton: TOC hierarchy and title anchors"]
-    observed --> page_review["PageReview: physical-page identity and consumption"]
+    subgraph evidence["Canonical v2: parser-neutral evidence"]
+        observed["ObservedDocument"]
+    end
+    adapter -->|"MinerU v2 path"| observed
+
+    subgraph interpretation["Canonical v2: book interpretation"]
+        skeleton["BookSkeleton: hierarchy and page anchors"]
+        page_review["PageReview: page identity and consumption"]
+        text_flow["TextUnits and logical units"]
+        page_assets["Retained whole-page assets"]
+    end
+    observed --> skeleton
+    observed --> page_review
     skeleton --> page_review
+    observed --> text_flow
+    observed --> page_assets
+    page_review --> page_assets
 
-    observed --> text_units["TextUnit -> logical_unit: layout and continuity pipeline"]
-    page_review --> page_assets["Retained whole-page assets: rendered PNG snapshots"]
+    subgraph planned_relations["Canonical v2: planned relations"]
+        section_map["SectionMap"]
+        visual_review["VisualRelationReview"]
+    end
+    skeleton -.-> section_map
+    page_review -.-> section_map
+    text_flow -.-> section_map
+    observed -.-> visual_review
+    page_review -.-> visual_review
 
-    text_units --> current_builder["Observed BookGraph builder: current direct projection"]
+    subgraph graph_projection["Canonical v2: graph projection"]
+        current_builder["Observed BookGraph builder"]
+        public_graph["Public BookGraph"]
+        internal_canonical["Internal canonical"]
+        current_builder --> public_graph
+        current_builder --> internal_canonical
+    end
+    text_flow --> current_builder
     page_review --> current_builder
     page_assets --> current_builder
-
-    skeleton -.->|"planned input"| section_map["SectionMap: planned"]
-    page_review -.->|"planned input"| section_map
-    text_units -.->|"planned input"| section_map
-    section_map -.->|"confirmed section nodes and contains edges"| current_builder
-
-    observed -.->|"planned input"| visual_review["VisualRelationReview: planned"]
-    page_review -.->|"planned input"| visual_review
-    visual_review -.->|"confirmed assets and caption_of edges"| current_builder
-
-    current_builder --> bookgraph["Public BookGraph: canonical_v2.json shadow"]
-    current_builder --> internal["Internal canonical: public projection plus debug pipeline"]
-    bookgraph -.->|"release migration target"| epub
-    bookgraph -.->|"release migration target"| rag
+    section_map -.-> current_builder
+    visual_review -.-> current_builder
+    public_graph -.->|"release migration target"| release_products
 ```
 
 The important boundaries are:
@@ -59,60 +76,54 @@ The important boundaries are:
 - EPUB and RAG still consume `canonical.json` by default. BookGraph is the migration
   target, not the current release input.
 
-## Current Canonical-v2 Runtime Sequence
+## Current Canonical-v2 Runtime Flow
 
-This diagram follows `build_v2_artifacts()` and the current observed BookGraph builder.
-It is intentionally separate from the dependency graph above: runtime order and
-architectural dependency are different questions.
+This diagram follows the artifacts produced by `build_v2_artifacts()` and the current
+observed BookGraph builder. Builders sit between their inputs and outputs, so the
+data dependencies remain visible without call-and-return arrows.
 
 ```mermaid
-sequenceDiagram
-    participant Orchestrator as canonical_v2 orchestrator
-    participant Observed as ObservedDocument builder
-    participant Skeleton as BookSkeleton builder
-    participant Review as PageReview builder
-    participant Assets as Page asset materializer
-    participant Graph as Observed BookGraph builder
+flowchart TD
+    raw["Raw MinerU inputs"] --> build_observed["1. Build ObservedDocument"]
+    build_observed --> observed["ObservedDocument"]
 
-    Orchestrator->>Observed: build_observed_document_shadow(raw MinerU inputs)
-    Observed-->>Orchestrator: observed
+    observed --> build_skeleton["2. Build BookSkeleton: optional TOC LLM"]
+    build_skeleton --> skeleton["BookSkeleton"]
 
-    Orchestrator->>Skeleton: build_book_skeleton_shadow(observed)
-    Note over Skeleton: Optional TOC LLM; physical pages still come from observed title evidence
-    Skeleton-->>Orchestrator: skeleton
+    observed --> build_review["3. Build PageReview: layout plus skeleton context"]
+    skeleton --> build_review
+    build_review --> page_review["PageReview"]
 
-    Orchestrator->>Review: build_page_review_shadow(observed, skeleton)
-    Note over Review: Rebuild TextUnits, layout audit, and page roles for review routing
-    Note over Review: Use Skeleton boundaries, TOC pages, and body-section starts
-    Review-->>Orchestrator: page_review
+    page_review --> unresolved{"Candidates unresolved and PageReview LLM disabled?"}
+    unresolved -->|"Yes"| intermediate["Return intermediate artifacts only"]
+    unresolved -->|"No"| validate["4. Validate resolved PageReview"]
 
-    alt unresolved candidates and PageReview LLM disabled
-        Orchestrator-->>Orchestrator: withhold public BookGraph and return intermediate artifacts
-    else PageReview is resolved
-        Orchestrator->>Orchestrator: validate_resolved_page_review(page_review)
-        Orchestrator->>Assets: materialize_v2_page_assets(observed, page_review)
-        Note over Assets: Render retained physical pages as 150-DPI whole-page PNG files
-        Assets-->>Orchestrator: observed_with_assets
+    observed --> materialize["5. Materialize retained physical pages"]
+    validate --> materialize
+    materialize --> observed_assets["ObservedDocument with 150-DPI page assets"]
 
-        Orchestrator->>Graph: build_bookgraph_from_observed(observed_with_assets, page_review)
-        Note over Graph: Build TextUnits -> layout classification -> logical_units
-        Note over Graph: Merge continuity -> filter logical_units by PageReview
-        Note over Graph: Create nodes/evidence/appears_on_page -> resolve notes -> strip debug fields
-        Graph-->>Orchestrator: public_graph
-
-        Orchestrator->>Graph: build_internal_canonical_from_observed(observed_with_assets, page_review)
-        Note over Graph: Current code repeats the same observed-to-BookGraph pipeline
-        Note over Graph: Then wraps public entities with page/node/edge/evidence debug records
-        Graph-->>Orchestrator: internal_canonical
+    subgraph duplicated_build["Current implementation: graph pipeline runs twice"]
+        public_builder["6a. Build public graph artifacts"]
+        internal_builder["6b. Build internal canonical artifacts"]
     end
-
-    Note over Orchestrator,Graph: SectionMap and VisualRelationReview are not present in this runtime yet
+    observed_assets --> public_builder
+    page_review --> public_builder
+    observed_assets --> internal_builder
+    page_review --> internal_builder
+    public_builder --> public_graph["Public BookGraph"]
+    internal_builder --> internal_canonical["Internal canonical"]
 ```
 
-The current duplication between public and internal construction is real: both public
-entry points call `build_observed_bookgraph_artifacts()` independently. A future
-SectionMap integration should build the shared observed/text-flow/section artifacts
-once, then derive both outputs from that single result.
+BookSkeleton may use an optional TOC LLM, but its physical-page anchors are resolved
+against `ObservedDocument` evidence. PageReview rebuilds TextUnits, audits layout,
+classifies page roles, and combines those results with Skeleton boundaries, TOC pages,
+and body-section starts.
+
+The current duplication between public and internal construction is real: both entry
+points call `build_observed_bookgraph_artifacts()` independently. `SectionMap` and
+`VisualRelationReview` are not present in this runtime yet. A future integration should
+build the shared observed, text-flow, and relation artifacts once, then derive both
+outputs from that single result.
 
 ## Package Boundaries
 
