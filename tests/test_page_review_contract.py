@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 
-from inkline.canonical import make_observation, make_observed_document, make_observed_page
+from inkline.canonical import (
+    build_book_skeleton_from_observed,
+    make_observation,
+    make_observed_document,
+    make_observed_page,
+    validate_book_skeleton,
+)
 from inkline.canonical.page_review import (
     build_page_review_plan,
     resolve_page_review,
@@ -64,6 +72,61 @@ def test_page_review_selects_only_front_matter_visual_observations() -> None:
     assert by_page[6]["llm_review_status"] == "not_selected"
     assert by_page[6]["text_flow_action"] == "include"
     assert by_page[6]["visual_asset_action"] == "not_needed"
+
+
+def test_page_review_plan_is_independent_of_selected_start_anchor_provenance() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "zh-CN",
+            "source_file": "sample.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        [make_observed_page(page, width=1000, height=1400) for page in range(1, 6)],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\n前言 1\n第一章 起点 4",
+                page=2,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002", "text_region", text="前言", page=1, role_hint="title_text"
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="第一章 起点",
+                page=4,
+                role_hint="title_text",
+            ),
+            make_observation("obs000004", "image_region", page=3, bbox=[100, 100, 900, 1200]),
+        ],
+    )
+    anchored = build_book_skeleton_from_observed(document)
+    validate_book_skeleton(anchored)
+    assert anchored["toc_entries"]
+    assert any(entry["selected_start_anchor"] is not None for entry in anchored["toc_entries"])
+    assert all("selected_start_anchor" in entry for entry in anchored["toc_entries"])
+
+    page_only = deepcopy(anchored)
+    for entry in page_only["toc_entries"]:
+        entry.pop("selected_start_anchor")
+
+    page_roles = [
+        {"page": 1, "page_role": "text_flow_page", "signals": ["body_profile"]},
+        {"page": 2, "page_role": "text_flow_page", "signals": ["body_profile"]},
+        {"page": 3, "page_role": "visual_page", "signals": ["visual_dominant"]},
+        {"page": 4, "page_role": "text_flow_page", "signals": ["body_profile"]},
+        {"page": 5, "page_role": "text_flow_page", "signals": ["body_profile"]},
+    ]
+
+    assert build_page_review_plan(document, anchored, page_roles) == build_page_review_plan(
+        document, page_only, page_roles
+    )
 
 
 def test_page_review_resolves_non_pre_body_visual_pages_from_layout() -> None:
