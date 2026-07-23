@@ -6,8 +6,10 @@ from typing import Any
 from inkline.canonical.book_skeleton.contract import BOOK_SKELETON_ENTRY_ROLES
 from inkline.canonical.book_skeleton.pages import (
     add_printed_page_offset_candidates,
+    attach_selected_start_anchors,
     boundaries,
     detect_toc_pages,
+    locate_toc_entry_anchors,
     locate_toc_entry_pages,
     metadata,
     observed_page_text,
@@ -25,7 +27,9 @@ from inkline.canonical.book_skeleton.toc import (
     parse_toc_entries,
 )
 from inkline.canonical.book_skeleton.toc_llm import normalize_llm_toc_entries
-from inkline.canonical.book_skeleton.validation import validate_book_skeleton
+from inkline.canonical.book_skeleton.validation import (
+    validate_book_skeleton_against_observed,
+)
 from inkline.canonical.observed.schema import validate_observed_document
 
 
@@ -52,8 +56,15 @@ def build_book_skeleton_from_observed(
         infer_toc_levels(entries)
         assign_toc_hierarchy(entries)
     for entry in entries:
-        candidates = locate_toc_entry_pages(records, entry, exclude_pages=toc_pages)
-        entry["candidate_start_pages"] = candidates
+        candidate_anchors = locate_toc_entry_anchors(
+            records, entry, exclude_pages=toc_pages
+        )
+        entry["candidate_start_pages"] = [
+            int(candidate["page"]) for candidate in candidate_anchors
+        ]
+        entry["_candidate_start_anchors"] = {
+            int(candidate["page"]): candidate for candidate in candidate_anchors
+        }
         entry["selected_start_page"] = None
     if entries_from_llm_toc:
         llm_summary = _llm_toc_summary(
@@ -75,6 +86,7 @@ def build_book_skeleton_from_observed(
     add_printed_page_offset_candidates(entries, page_count=len(records))
     select_monotonic_start_pages(entries)
     prune_candidate_start_pages_to_toc_intervals(entries)
+    attach_selected_start_anchors(entries, document, toc_pages=toc_pages)
     public_entries = [_public_toc_entry(entry) for entry in entries]
     skeleton = {
         "metadata": metadata(document),
@@ -83,7 +95,7 @@ def build_book_skeleton_from_observed(
         "boundaries": boundaries(public_entries),
         "llm": llm_summary,
     }
-    validate_book_skeleton(skeleton)
+    validate_book_skeleton_against_observed(skeleton, document)
     return skeleton
 
 
@@ -140,6 +152,7 @@ def _public_toc_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "role": entry["role"],
         "candidate_start_pages": entry["candidate_start_pages"],
         "selected_start_page": entry["selected_start_page"],
+        "selected_start_anchor": deepcopy(entry["selected_start_anchor"]),
         "attrs": attrs,
     }
 

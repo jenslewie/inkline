@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import inkline.canonical as canonical_api
 from inkline.canonical import (
     BOOK_SKELETON_SCHEMA_NAME,
     BOOK_SKELETON_SCHEMA_VERSION,
@@ -113,6 +114,7 @@ def test_build_book_skeleton_from_observed_uses_toc_titles_and_observed_title_pa
     validate_book_skeleton(skeleton)
     assert skeleton["metadata"]["schema_name"] == BOOK_SKELETON_SCHEMA_NAME
     assert skeleton["metadata"]["schema_version"] == BOOK_SKELETON_SCHEMA_VERSION
+    assert BOOK_SKELETON_SCHEMA_VERSION == "0.2-shadow"
     assert skeleton["toc_pages"] == [10]
     assert "printed_page" not in skeleton["toc_entries"][0]
     assert "printed_start_page" not in skeleton["toc_entries"][0]
@@ -122,9 +124,25 @@ def test_build_book_skeleton_from_observed_uses_toc_titles_and_observed_title_pa
         assert removed_field not in skeleton["toc_entries"][0]
     entries = {entry["display_title"]: entry for entry in skeleton["toc_entries"]}
     assert entries["第一章 米兰达"]["selected_start_page"] == 42
+    assert entries["第一章 米兰达"]["selected_start_anchor"] == {
+        "anchor_id": "sa000002",
+        "page": 42,
+        "resolution_method": "observed_title_match",
+        "printed_page_offset": 0,
+        "title_observation_ids": ["obs000004", "obs000005"],
+        "toc_observation_ids": ["obs000001"],
+        "supporting_anchor_ids": [],
+        "confidence": "high",
+    }
     assert entries["丝绸之路主要地名中英古今对照表"]["selected_start_page"] == 317
     assert entries["注释"]["candidate_start_pages"] == [319]
+    assert all(
+        not key.startswith("_")
+        for entry in skeleton["toc_entries"]
+        for key in entry
+    )
     assert skeleton["boundaries"]["first_body_page"] == 14
+    canonical_api.validate_book_skeleton_against_observed(skeleton, _document())
 
 
 def test_build_book_skeleton_from_observed_includes_toc_continuation_pages() -> None:
@@ -1526,6 +1544,89 @@ def test_validate_book_skeleton_rejects_invalid_entry_role() -> None:
         validate_book_skeleton(skeleton)
 
 
+def test_validate_book_skeleton_rejects_anchor_page_mismatch() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+    skeleton["toc_entries"][2]["selected_start_anchor"]["page"] = 43
+
+    with pytest.raises(ValidationError, match="anchor page"):
+        validate_book_skeleton(skeleton)
+
+
+def test_validate_book_skeleton_rejects_duplicate_anchor_evidence_ids() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+    anchor = skeleton["toc_entries"][2]["selected_start_anchor"]
+    anchor["title_observation_ids"].append(anchor["title_observation_ids"][0])
+
+    with pytest.raises(ValidationError, match="title_observation_ids"):
+        validate_book_skeleton(skeleton)
+
+
+def test_validate_book_skeleton_rejects_invalid_anchor_method() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+    skeleton["toc_entries"][2]["selected_start_anchor"]["resolution_method"] = "nearest_title"
+
+    with pytest.raises(ValidationError, match="resolution_method"):
+        validate_book_skeleton(skeleton)
+
+
+def test_validate_book_skeleton_rejects_non_null_page_with_null_anchor() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+    skeleton["toc_entries"][2]["selected_start_anchor"] = None
+
+    with pytest.raises(ValidationError, match="selected_start_anchor"):
+        validate_book_skeleton(skeleton)
+
+
+def test_validate_book_skeleton_rejects_null_page_with_non_null_anchor() -> None:
+    skeleton = build_book_skeleton_from_observed(_document())
+    skeleton["toc_entries"][2]["selected_start_page"] = None
+
+    with pytest.raises(ValidationError, match="selected_start_anchor"):
+        validate_book_skeleton(skeleton)
+
+
+def test_validate_book_skeleton_against_observed_rejects_mismatched_doc_id() -> None:
+    document = _document()
+    skeleton = build_book_skeleton_from_observed(document)
+    document["metadata"]["doc_id"] = "different-doc"
+
+    with pytest.raises(ValidationError, match="doc_id values differ"):
+        canonical_api.validate_book_skeleton_against_observed(skeleton, document)
+
+
+def test_validate_book_skeleton_against_observed_rejects_unknown_observation() -> None:
+    document = _document()
+    skeleton = build_book_skeleton_from_observed(document)
+    skeleton["toc_entries"][2]["selected_start_anchor"]["title_observation_ids"] = [
+        "obs999999"
+    ]
+
+    with pytest.raises(ValidationError, match="unknown observation: obs999999"):
+        canonical_api.validate_book_skeleton_against_observed(skeleton, document)
+
+
+def test_validate_book_skeleton_against_observed_rejects_title_evidence_on_other_page() -> None:
+    document = _document()
+    skeleton = build_book_skeleton_from_observed(document)
+    skeleton["toc_entries"][2]["selected_start_anchor"]["title_observation_ids"] = [
+        "obs000003"
+    ]
+
+    with pytest.raises(ValidationError, match="title evidence is not on anchor page"):
+        canonical_api.validate_book_skeleton_against_observed(skeleton, document)
+
+
+def test_validate_book_skeleton_against_observed_rejects_non_toc_evidence() -> None:
+    document = _document()
+    skeleton = build_book_skeleton_from_observed(document)
+    skeleton["toc_entries"][2]["selected_start_anchor"]["toc_observation_ids"] = [
+        "obs000003"
+    ]
+
+    with pytest.raises(ValidationError, match="TOC evidence is not on a TOC page"):
+        canonical_api.validate_book_skeleton_against_observed(skeleton, document)
+
+
 def test_validate_book_skeleton_rejects_ambiguous_legacy_page_fields() -> None:
     skeleton = build_book_skeleton_from_observed(_document())
     skeleton["toc_entries"][0]["candidate_pages"] = [1]
@@ -1568,8 +1669,10 @@ def test_validate_book_skeleton_rejects_nonmonotonic_selected_start_pages() -> N
     skeleton = build_book_skeleton_from_observed(_document())
     skeleton["toc_entries"][1]["candidate_start_pages"] = [42, 300]
     skeleton["toc_entries"][1]["selected_start_page"] = 300
+    skeleton["toc_entries"][1]["selected_start_anchor"]["page"] = 300
     skeleton["toc_entries"][2]["candidate_start_pages"] = [42]
     skeleton["toc_entries"][2]["selected_start_page"] = 42
+    skeleton["toc_entries"][2]["selected_start_anchor"]["page"] = 42
 
     with pytest.raises(ValidationError, match="monotonic"):
         validate_book_skeleton(skeleton)

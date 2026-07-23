@@ -6,6 +6,7 @@ from inkline.canonical.book_skeleton import (
     build_book_skeleton_from_observed,
     build_book_skeleton_toc_llm_input,
     validate_book_skeleton,
+    validate_book_skeleton_against_observed,
 )
 from inkline.canonical.bookgraph import (
     BOOKGRAPH_SCHEMA_NAME,
@@ -112,6 +113,7 @@ __all__ = [
     "sample_document",
     "strip_footnote_marker",
     "validate_book_skeleton",
+    "validate_book_skeleton_against_observed",
     "validate_bookgraph",
     "validate_document",
     "validate_internal_canonical",

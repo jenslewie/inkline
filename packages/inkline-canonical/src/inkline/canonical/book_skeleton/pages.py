@@ -25,7 +25,6 @@ TITLE_LOCATION_EXCLUDED_ROLE_HINTS = {
     "caption_text",
 }
 SHORT_AMBIGUOUS_TITLE_KEY_MAX_LENGTH = 4
-PRINTED_OFFSET_TOLERANCE = 2
 MAX_PRINTED_PAGE_OFFSET = 128
 MISSING_START_PAGE_COST = 24
 DISPLAY_TITLE_PREFIX_RE = re.compile(
@@ -270,14 +269,127 @@ def add_printed_page_offset_candidates(entries: list[dict[str, Any]], *, page_co
         printed_start_page = entry.get("printed_start_page")
         if not isinstance(printed_start_page, int):
             continue
-        offset = _agreed_neighbor_offset(entries, index)
-        if offset is None:
+        support = _agreed_neighbor_offset_support(entries, index)
+        if support is None:
             continue
+        offset, supporting_entry_indexes = support
         predicted_page = printed_start_page + offset
         if not 1 <= predicted_page <= page_count:
             continue
-        if predicted_page not in entry["candidate_start_pages"]:
-            entry["candidate_start_pages"].append(predicted_page)
+        if predicted_page in entry["candidate_start_pages"]:
+            continue
+        entry["candidate_start_pages"].append(predicted_page)
+        entry["_printed_offset_candidate"] = {
+            "page": predicted_page,
+            "printed_page_offset": offset,
+            "supporting_entry_indexes": supporting_entry_indexes,
+        }
+
+
+def attach_selected_start_anchors(
+    entries: list[dict[str, Any]],
+    document: dict[str, Any],
+    *,
+    toc_pages: list[int],
+) -> None:
+    _attach_direct_anchors(entries, document, toc_pages=toc_pages)
+    _attach_printed_offset_anchors(entries, document, toc_pages=toc_pages)
+
+
+def _attach_direct_anchors(
+    entries: list[dict[str, Any]],
+    document: dict[str, Any],
+    *,
+    toc_pages: list[int],
+) -> None:
+    for entry in entries:
+        entry["selected_start_anchor"] = None
+        selected_page = entry.get("selected_start_page")
+        candidate = (entry.get("_candidate_start_anchors") or {}).get(selected_page)
+        if not isinstance(selected_page, int) or not isinstance(candidate, dict):
+            continue
+        printed_page = entry.get("printed_start_page")
+        printed_page_offset = (
+            selected_page - printed_page if isinstance(printed_page, int) else None
+        )
+        entry["selected_start_anchor"] = {
+            "anchor_id": _start_anchor_id(entry),
+            "page": selected_page,
+            "resolution_method": "observed_title_match",
+            "printed_page_offset": printed_page_offset,
+            "title_observation_ids": list(candidate["title_observation_ids"]),
+            "toc_observation_ids": _toc_observation_ids(
+                document, entry, toc_pages=toc_pages
+            ),
+            "supporting_anchor_ids": [],
+            "confidence": "high",
+        }
+
+
+def _attach_printed_offset_anchors(
+    entries: list[dict[str, Any]],
+    document: dict[str, Any],
+    *,
+    toc_pages: list[int],
+) -> None:
+    for entry in entries:
+        if entry.get("selected_start_anchor") is not None:
+            continue
+        selected_page = entry.get("selected_start_page")
+        candidate = entry.get("_printed_offset_candidate")
+        if (
+            not isinstance(selected_page, int)
+            or not isinstance(candidate, dict)
+            or candidate.get("page") != selected_page
+        ):
+            continue
+        supporting_anchor_ids = []
+        for supporting_index in candidate["supporting_entry_indexes"]:
+            supporting_anchor = entries[supporting_index].get("selected_start_anchor")
+            if isinstance(supporting_anchor, dict):
+                supporting_anchor_ids.append(str(supporting_anchor["anchor_id"]))
+        entry["selected_start_anchor"] = {
+            "anchor_id": _start_anchor_id(entry),
+            "page": selected_page,
+            "resolution_method": "printed_page_offset",
+            "printed_page_offset": candidate["printed_page_offset"],
+            "title_observation_ids": [],
+            "toc_observation_ids": _toc_observation_ids(
+                document, entry, toc_pages=toc_pages
+            ),
+            "supporting_anchor_ids": supporting_anchor_ids,
+            "confidence": "medium",
+        }
+
+
+def _start_anchor_id(entry: dict[str, Any]) -> str:
+    return f"sa{int(entry['entry_index']):06d}"
+
+
+def _toc_observation_ids(
+    document: dict[str, Any],
+    entry: dict[str, Any],
+    *,
+    toc_pages: list[int],
+) -> list[str]:
+    title_key = normalize_title(str(entry.get("display_title") or ""))
+    if not title_key:
+        return []
+    toc_page_set = set(toc_pages)
+    observation_ids = []
+    seen = set()
+    for observation in document["observations"]:
+        if (
+            int(observation["page"]) not in toc_page_set
+            or observation.get("role_hint") != "toc_text"
+            or title_key not in normalize_title(str(observation.get("text") or ""))
+        ):
+            continue
+        observation_id = str(observation["observation_id"])
+        if observation_id not in seen:
+            seen.add(observation_id)
+            observation_ids.append(observation_id)
+    return observation_ids
 
 
 def prune_candidate_start_pages_to_toc_intervals(entries: list[dict[str, Any]]) -> None:
@@ -393,15 +505,23 @@ def _nearest_selected_page(pages: list[int | None], *, reverse: bool) -> int | N
 
 
 def _agreed_neighbor_offset(entries: list[dict[str, Any]], index: int) -> int | None:
-    entry = entries[index]
-    role = entry.get("role")
-    previous_offset = _neighbor_printed_offset(entries, index, role=role, reverse=True)
-    next_offset = _neighbor_printed_offset(entries, index, role=role, reverse=False)
-    if previous_offset is None or next_offset is None:
+    support = _agreed_neighbor_offset_support(entries, index)
+    return support[0] if support is not None else None
+
+
+def _agreed_neighbor_offset_support(
+    entries: list[dict[str, Any]], index: int
+) -> tuple[int, list[int]] | None:
+    role = entries[index].get("role")
+    previous = _neighbor_printed_offset_support(entries, index, role=role, reverse=True)
+    next_ = _neighbor_printed_offset_support(entries, index, role=role, reverse=False)
+    if previous is None or next_ is None:
         return None
-    if abs(previous_offset - next_offset) > PRINTED_OFFSET_TOLERANCE:
+    previous_offset, previous_index = previous
+    next_offset, next_index = next_
+    if previous_offset != next_offset:
         return None
-    return round((previous_offset + next_offset) / 2)
+    return previous_offset, [previous_index, next_index]
 
 
 def _neighbor_printed_offset(
@@ -411,6 +531,19 @@ def _neighbor_printed_offset(
     role: Any,
     reverse: bool,
 ) -> int | None:
+    support = _neighbor_printed_offset_support(
+        entries, index, role=role, reverse=reverse
+    )
+    return support[0] if support is not None else None
+
+
+def _neighbor_printed_offset_support(
+    entries: list[dict[str, Any]],
+    index: int,
+    *,
+    role: Any,
+    reverse: bool,
+) -> tuple[int, int] | None:
     positions = range(index - 1, -1, -1) if reverse else range(index + 1, len(entries))
     for position in positions:
         candidate = entries[position]
@@ -419,7 +552,7 @@ def _neighbor_printed_offset(
         selected_page = candidate.get("selected_start_page")
         printed_page = candidate.get("printed_start_page")
         if isinstance(selected_page, int) and isinstance(printed_page, int):
-            return selected_page - printed_page
+            return selected_page - printed_page, position
     return None
 
 

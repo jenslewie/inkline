@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+import inkline.canonical as canonical_api
 from inkline.canonical import (
     build_book_skeleton_from_observed,
     make_observation,
@@ -15,6 +18,7 @@ from inkline.canonical.book_skeleton.toc import (
     infer_toc_levels,
     parse_toc_entries,
 )
+from inkline.canonical.schema import ValidationError
 
 
 def test_parse_toc_entries_keeps_printed_page_as_internal_evidence() -> None:
@@ -124,6 +128,80 @@ def test_add_printed_page_offset_candidates_fills_ocr_missed_title_page() -> Non
 
     assert entries[1]["candidate_start_pages"] == [27]
     assert [entry["selected_start_page"] for entry in entries] == [15, 27, 43]
+
+    document = _printed_offset_document()
+    skeleton = build_book_skeleton_from_observed(document)
+
+    anchor = skeleton["toc_entries"][1]["selected_start_anchor"]
+    assert anchor["resolution_method"] == "printed_page_offset"
+    assert anchor["page"] == 27
+    assert anchor["printed_page_offset"] == 12
+    assert anchor["title_observation_ids"] == []
+    assert anchor["supporting_anchor_ids"] == ["sa000000", "sa000002"]
+    assert anchor["confidence"] == "medium"
+
+
+def test_validate_book_skeleton_against_observed_rejects_unknown_offset_support() -> None:
+    document = _printed_offset_document()
+    skeleton = build_book_skeleton_from_observed(document)
+    skeleton["toc_entries"][1]["selected_start_anchor"]["supporting_anchor_ids"] = [
+        "sa000000",
+        "sa999999",
+    ]
+
+    with pytest.raises(ValidationError, match="unknown supporting anchor"):
+        canonical_api.validate_book_skeleton_against_observed(skeleton, document)
+
+
+def test_validate_book_skeleton_against_observed_requires_straddling_offset_supports() -> None:
+    document = _printed_offset_document()
+    skeleton = build_book_skeleton_from_observed(document)
+    skeleton["toc_entries"][1]["selected_start_anchor"]["supporting_anchor_ids"] = [
+        "sa000000",
+        "sa000001",
+    ]
+
+    with pytest.raises(ValidationError, match="offset supports must straddle"):
+        canonical_api.validate_book_skeleton_against_observed(skeleton, document)
+
+
+def test_validate_book_skeleton_against_observed_requires_agreed_offset_supports() -> None:
+    document = _printed_offset_document()
+    skeleton = build_book_skeleton_from_observed(document)
+    skeleton["toc_entries"][2]["selected_start_anchor"]["printed_page_offset"] = 13
+
+    with pytest.raises(ValidationError, match="offset supports do not agree"):
+        canonical_api.validate_book_skeleton_against_observed(skeleton, document)
+
+
+def _printed_offset_document() -> dict:
+    pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 50)]
+    return make_observed_document(
+        {
+            "doc_id": "offset-sample",
+            "title": "Offset Sample",
+            "language": "zh-CN",
+            "source_file": "offset-sample.pdf",
+            "parser_name": "test-parser",
+            "parser_mode": "structured",
+        },
+        pages,
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\n亚瑟 3\n主教座堂 15\n查理曼 31",
+                page=1,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002", "text_region", text="亚瑟", page=15, role_hint="title_text"
+            ),
+            make_observation(
+                "obs000003", "text_region", text="查理曼", page=43, role_hint="title_text"
+            ),
+        ],
+    )
 
 
 def test_llm_corrected_toc_title_retains_positional_printed_page_evidence() -> None:

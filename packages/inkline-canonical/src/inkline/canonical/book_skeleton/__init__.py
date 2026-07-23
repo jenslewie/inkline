@@ -10,6 +10,7 @@ from inkline.canonical.book_skeleton.toc_llm import book_skeleton_toc_llm_prompt
 from inkline.canonical.book_skeleton.validation import (
     audit_book_skeleton,
     validate_book_skeleton,
+    validate_book_skeleton_against_observed,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "build_book_skeleton_from_observed",
     "build_book_skeleton_toc_llm_input",
     "validate_book_skeleton",
+    "validate_book_skeleton_against_observed",
 ]
