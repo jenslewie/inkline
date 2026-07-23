@@ -1,5 +1,10 @@
 # Canonical v2 BookGraph Shadow Architecture
 
+> The authoritative cross-package dependency graph and the current executable
+> canonical-v2 sequence live in [Architecture](architecture.md). This document
+> records phase-specific design history as well as planned stages; a diagram or
+> section marked planned here is not evidence that it runs in the current pipeline.
+
 ## Canonical 是中枢
 
 `canonical.json` 不是 MinerU 的附属格式，也不是 EPUB 或 RAG 的临时输入文件。它是 inkline 的中枢契约：上游解析器把 PDF/OCR/版面观察结果交给 canonical，下游 EPUB、RAG、校验和调试工具都围绕 canonical 消费同一份结构化文本。

@@ -2,12 +2,11 @@
 
 Composable document parsing, canonical representation, EPUB export, and RAG pipelines.
 
-The pipeline is centered on a parser-neutral `CanonicalDocument`:
-
-```text
-source document -> parser adapter -> canonical.json -> EPUB
-                                             \-> chunks.jsonl -> embeddings -> FAISS/search
-```
+The pipeline is centered on parser-neutral canonical contracts. The authoritative
+[architecture dependency graph and current canonical-v2 runtime sequence](docs/architecture.md)
+are documented separately so planned dependencies are not confused with code that
+already runs. The current release path still uses `canonical.json` for EPUB and RAG;
+BookGraph remains the pre-release migration path.
 
 ## Layout
 
