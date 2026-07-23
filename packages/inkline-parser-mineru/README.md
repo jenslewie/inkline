@@ -39,7 +39,10 @@ payloads on shadow artifacts.
 
 `mineru-page-review` builds `ObservedDocument -> BookSkeleton -> PageReview` but
 does not write a canonical graph. Its required `--output` is the PageReview JSON;
-the resumable LLM checkpoint and rendered contact sheets are written beside it.
+the resumable per-page LLM checkpoint and rendered page images are written beside it.
+It is the low-level builder. For an accepted workspace artifact, use the golden
+suite runner below so a new LLM result cannot replace a verified PageReview
+without passing the golden comparison.
 
 ```bash
 uv run --extra mineru mineru-page-review \
@@ -53,7 +56,19 @@ uv run --extra mineru mineru-page-review \
   --output /tmp/inkline-page-review/丝绸之路新史_page_review.json
 ```
 
-Re-run the same command after an LLM failure. Completed page groups are reused
+```bash
+UV_CACHE_DIR=/tmp/inkline-uv-cache uv run --extra mineru python \
+  tools/run_page_review_golden_suite.py \
+  --book 四君主
+```
+
+The runner stages output under
+`data/outputs/workspace/page-review/.staging/<run-id>/`, compares it with
+`data/outputs/golden/page-review/`, and publishes only an all-green run. Omit
+`--book` to evaluate all thirteen golden books. It never updates golden output;
+updating that baseline requires explicit human review.
+
+Re-run the same command after an LLM failure. Completed physical pages are reused
 from `/tmp/inkline-page-review/page_review.checkpoint.json`. A checkpoint is
 bound to the review-plan schema and prompt version. When either changes, the
 CLI archives the old checkpoint beside the output as
@@ -63,6 +78,8 @@ The PageReview LLM only sees pages before the Skeleton body boundary. It first
 reviews selected visual candidates, then reviews every remaining pre-body page
 whose book-block position is still `unknown`. That range is provisional
 `pre_body`, not an assertion that all of its pages are front matter: the model
-may identify `cover_page`, `back_cover`, `cover_flap`, `dust_jacket_spread`,
-`front_board`, or `back_board` as `external_wrap`. Books without external wrap
+may identify `front_exterior_page`, `back_exterior_page`, `cover_flap`, or
+`dust_jacket_spread` as `external_wrap`. `front_exterior_page` and
+`back_exterior_page` do not guess whether a PDF surface is a paperback cover or
+a hardcover board. Books without external wrap
 simply have no such results.
