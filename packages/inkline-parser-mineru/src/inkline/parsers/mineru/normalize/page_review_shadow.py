@@ -6,7 +6,6 @@ import base64
 import json
 from copy import deepcopy
 from dataclasses import dataclass
-from math import ceil
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +20,8 @@ from inkline.canonical import (
 )
 from inkline.canonical.page_review.llm import (
     PAGE_REVIEW_PROMPT_VERSION,
-    page_review_groups,
     page_review_llm_prompt,
-    page_review_profile_groups,
+    page_review_prompt_profile,
 )
 from inkline.llm import (
     DEFAULT_OLLAMA_CHAT_URL,
@@ -34,13 +32,8 @@ from inkline.llm import (
 )
 
 PAGE_REVIEW_LLM_NUM_PREDICT = 1024
-PAGE_REVIEW_MAX_GROUP_PAGES = 4
 PAGE_REVIEW_IMAGE_DPI = 96
-PAGE_REVIEW_CONTACT_SHEET_COLUMNS = 2
-PAGE_REVIEW_CONTACT_SHEET_TILE_WIDTH = 480
-PAGE_REVIEW_CONTACT_SHEET_TILE_HEIGHT = 680
-PAGE_REVIEW_CONTACT_SHEET_LABEL_HEIGHT = 32
-PAGE_REVIEW_IMAGE_EVIDENCE_VERSION = "2-targeted-full-resolution"
+PAGE_REVIEW_IMAGE_EVIDENCE_VERSION = "3-one-page-full-resolution"
 PAGE_REVIEW_ROUTING_RASTER_SCALE = 0.25
 PAGE_REVIEW_DARK_PIXEL_LUMA = 180
 PAGE_REVIEW_DARK_PIXEL_RATIO = 0.35
@@ -167,15 +160,13 @@ def _resolve_with_llm(
     runtime: _PageReviewRuntime,
 ) -> dict[str, Any]:
     page_records = {int(record["page"]): record for record in plan["pages"]}
-    groups = _prepare_llm_review_groups(plan, page_records)
-    if not groups:
+    request_pages = _prepare_llm_review_pages(plan, page_records)
+    if not request_pages:
         return plan
-    request_groups = _record_llm_request_groups(page_records, groups)
-    plan["llm_request_groups"] = request_groups
     checkpoint = _load_page_review_checkpoint(
         runtime.checkpoint_path,
         plan=plan,
-        request_groups=request_groups,
+        request_pages=request_pages,
         llm_model=runtime.llm_model,
     )
     if checkpoint is not None and checkpoint["checkpoint"]["status"] == "complete":
@@ -184,18 +175,14 @@ def _resolve_with_llm(
             raise ValueError("completed page review checkpoint lacks resolved_page_review")
         validate_resolved_page_review(review)
         return review
-    group_decisions = _resolve_pending_groups(
+    page_decisions = _resolve_pending_pages(
         plan,
-        request_groups,
+        request_pages,
         page_records,
         checkpoint,
         runtime,
     )
-    decisions = [
-        decision
-        for request_group in request_groups
-        for decision in group_decisions[str(request_group["group_id"])]
-    ]
+    decisions = [page_decisions[page] for page in sorted(request_pages)]
     review = resolve_page_review(
         plan,
         decisions,
@@ -206,9 +193,9 @@ def _resolve_with_llm(
         runtime.checkpoint_path,
         _checkpoint_payload(
             plan,
-            request_groups,
+            request_pages,
             runtime.llm_model,
-            group_decisions,
+            page_decisions,
             status="complete",
             resolved_page_review=review,
         ),
@@ -216,9 +203,9 @@ def _resolve_with_llm(
     return review
 
 
-def _prepare_llm_review_groups(
+def _prepare_llm_review_pages(
     plan: dict[str, Any], page_records: dict[int, dict[str, Any]]
-) -> list[dict[str, Any]]:
+) -> dict[int, dict[str, str]]:
     """Create a resumable two-pass review plan for pre-body pages.
 
     The first pass handles visually suspicious pages selected by layout. The second
@@ -226,14 +213,15 @@ def _prepare_llm_review_groups(
     front-matter section, so an ordinary text leaf cannot silently remain unknown.
     """
 
-    initial_candidates = list(plan["candidate_pages"])
-    initial_groups = page_review_profile_groups(
-        initial_candidates, page_records, max_pages=PAGE_REVIEW_MAX_GROUP_PAGES
-    )
-    for group in initial_groups:
-        group["review_stage"] = "initial_visual"
+    initial_pages = set(plan["candidate_pages"])
+    request_pages = {
+        page: {
+            "matter": _page_review_matter(page_records[page]),
+            "prompt_profile": page_review_prompt_profile(page_records[page]),
+        }
+        for page in sorted(initial_pages)
+    }
 
-    initial_pages = set(initial_candidates)
     residual_pages = [
         page
         for page, record in sorted(page_records.items())
@@ -246,20 +234,14 @@ def _prepare_llm_review_groups(
         record["visual_asset_action"] = "needs_review"
         record["decision_source"] = "llm_page_review"
         record["llm_review_status"] = "pending"
-
-    residual_groups = [
-        {
+        request_pages[page] = {
             "matter": "pre_body",
             "prompt_profile": "front_residual_unknown",
-            "pages": pages,
-            "review_stage": "residual_unknown",
         }
-        for pages in page_review_groups(
-            residual_pages, max_pages=PAGE_REVIEW_MAX_GROUP_PAGES
-        )
-    ]
+    for page, request in request_pages.items():
+        page_records[page]["llm_prompt_profile"] = request["prompt_profile"]
     plan["candidate_pages"] = sorted(initial_pages | set(residual_pages))
-    return initial_groups + residual_groups
+    return request_pages
 
 
 def _is_pre_body_unknown(record: dict[str, Any]) -> bool:
@@ -271,89 +253,91 @@ def _is_pre_body_unknown(record: dict[str, Any]) -> bool:
     )
 
 
-def _resolve_pending_groups(
+def _page_review_matter(record: dict[str, Any]) -> str:
+    context = record.get("skeleton_context")
+    if isinstance(context, dict):
+        matter = context.get("matter")
+        if matter in {"pre_body", "body", "back_matter"}:
+            return str(matter)
+    return "unknown"
+
+
+def _resolve_pending_pages(
     plan: dict[str, Any],
-    request_groups: list[dict[str, Any]],
+    request_pages: dict[int, dict[str, str]],
     page_records: dict[int, dict[str, Any]],
     checkpoint: dict[str, Any] | None,
     runtime: _PageReviewRuntime,
-) -> dict[str, list[dict[str, Any]]]:
-    group_decisions = _checkpoint_group_decisions(checkpoint)
-    unfinished_groups = [
-        request_group
-        for request_group in request_groups
-        if str(request_group["group_id"]) not in group_decisions
-    ]
-    unfinished_pages = [
-        page for request_group in unfinished_groups for page in request_group["pages"]
-    ]
+) -> dict[int, dict[str, Any]]:
+    page_decisions = _checkpoint_page_decisions(checkpoint)
+    unfinished_pages = [page for page in sorted(request_pages) if page not in page_decisions]
     image_paths = _render_page_images(runtime.source_pdf, unfinished_pages, runtime.image_output_dir)
-    contact_sheets = _render_contact_sheets(unfinished_groups, image_paths, runtime.image_output_dir)
-    for request_group in unfinished_groups:
-        _resolve_request_group(
+    for page in unfinished_pages:
+        _resolve_request_page(
             plan,
-            request_group,
+            page,
+            request_pages[page],
             page_records,
             image_paths,
-            contact_sheets,
-            request_groups,
+            request_pages,
             checkpoint,
             runtime,
-            group_decisions,
+            page_decisions,
         )
-    return group_decisions
+    return page_decisions
 
 
-def _resolve_request_group(
+def _resolve_request_page(
     plan: dict[str, Any],
-    request_group: dict[str, Any],
+    page: int,
+    request: dict[str, str],
     page_records: dict[int, dict[str, Any]],
     image_paths: dict[int, Path],
-    contact_sheets: dict[str, Path],
-    request_groups: list[dict[str, Any]],
+    request_pages: dict[int, dict[str, str]],
     checkpoint: dict[str, Any] | None,
     runtime: _PageReviewRuntime,
-    group_decisions: dict[str, list[dict[str, Any]]],
+    page_decisions: dict[int, dict[str, Any]],
 ) -> None:
-    group_id = str(request_group["group_id"])
-    group = list(request_group["pages"])
-    missing_images = [page for page in group if page not in image_paths]
-    if missing_images:
-        error = RuntimeError(f"page review images missing pages: {missing_images}")
-        _record_checkpoint_failure(
-            runtime.checkpoint_path, checkpoint, group_id, error, group_decisions
-        )
+    image_path = image_paths.get(page)
+    if image_path is None:
+        error = RuntimeError(f"page review image missing page: {page}")
+        _record_checkpoint_failure(runtime.checkpoint_path, checkpoint, page, error, page_decisions)
         raise error
     payload = {
         "first_body_page": plan["first_body_page"],
-        "pages": [_llm_page_payload(page_records[page]) for page in group],
+        "pages": [_llm_page_payload(page_records[page])],
     }
+    preceding = page_decisions.get(page - 1)
+    if preceding is not None:
+        payload["preceding_page_decision"] = {
+            "page": page - 1,
+            "book_block_position": preceding.get("book_block_position"),
+            "special_page_kind": preceding.get("special_page_kind"),
+        }
     result: dict[str, Any] | None = None
     try:
-        full_resolution_pages = _full_resolution_pages(group, page_records)
-        prompt_profile = str(request_group["prompt_profile"])
+        prompt_profile = _effective_prompt_profile(request["prompt_profile"], preceding)
+        page_records[page]["llm_prompt_profile"] = prompt_profile
         result = chat_json(
             _llm_config(runtime.llm_model, runtime.llm_api_url, runtime.llm_timeout_seconds),
             messages=_llm_messages(
                 page_review_llm_prompt(payload, profile=prompt_profile),
-                group,
-                contact_sheets[group_id],
-                image_paths,
-                full_resolution_pages,
+                page,
+                image_path,
             ),
         )
         reviewed = result.get("page_reviews")
         if not isinstance(reviewed, list):
             raise ValueError("page review LLM response missing page_reviews")
-        validated = validate_page_review_decisions(reviewed, group)
-        group_decisions[group_id] = [{"page": page, **decision} for page, decision in validated.items()]
+        validated = validate_page_review_decisions(reviewed, [page])
+        page_decisions[page] = {"page": page, **validated[page]}
         _write_page_review_checkpoint(
             runtime.checkpoint_path,
             _checkpoint_payload(
                 plan,
-                request_groups,
+                request_pages,
                 runtime.llm_model,
-                group_decisions,
+                page_decisions,
                 status="in_progress",
             ),
         )
@@ -361,34 +345,56 @@ def _resolve_request_group(
         _record_checkpoint_failure(
             runtime.checkpoint_path,
             checkpoint,
-            group_id,
+            page,
             exc,
-            group_decisions,
+            page_decisions,
             raw_response=result,
         )
         raise
+
+
+def _effective_prompt_profile(
+    default_profile: str, preceding_page_decision: dict[str, Any] | None
+) -> str:
+    """Add only bounded prior identity context to a single-page visual review."""
+
+    if preceding_page_decision is None:
+        return default_profile
+    preceding_kind = preceding_page_decision.get("special_page_kind")
+    if default_profile == "front_visual_identity" and preceding_kind == "front_exterior_page":
+        return "after_front_exterior"
+    if default_profile == "front_visual_identity" and preceding_kind == "back_exterior_page":
+        return "after_back_exterior"
+    if default_profile == "front_visual_identity" and preceding_kind == "dust_jacket_spread":
+        return "after_dust_jacket_spread"
+    if default_profile == "front_visual_identity" and preceding_kind == "decorative_preliminary_page":
+        return "after_decorative_preliminary"
+    if default_profile == "front_visual_identity" and preceding_kind == "title_page":
+        return "after_title_page"
+
+    return default_profile
 
 
 def _load_page_review_checkpoint(
     checkpoint_path: str | Path | None,
     *,
     plan: dict[str, Any],
-    request_groups: list[dict[str, Any]],
+    request_pages: dict[int, dict[str, str]],
     llm_model: str,
 ) -> dict[str, Any] | None:
     if checkpoint_path is None:
         return None
     path = Path(checkpoint_path)
     if not path.exists():
-        return _checkpoint_payload(plan, request_groups, llm_model, {}, status="in_progress")
+        return _checkpoint_payload(plan, request_pages, llm_model, {}, status="in_progress")
     try:
         checkpoint = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"page review checkpoint is not valid JSON: {path}") from exc
-    expected = _checkpoint_fingerprint(plan, request_groups, llm_model)
+    expected = _checkpoint_fingerprint(plan, request_pages, llm_model)
     if checkpoint.get("fingerprint") != expected:
         _archive_stale_page_review_checkpoint(path)
-        fresh_checkpoint = _checkpoint_payload(plan, request_groups, llm_model, {}, status="in_progress")
+        fresh_checkpoint = _checkpoint_payload(plan, request_pages, llm_model, {}, status="in_progress")
         _write_page_review_checkpoint(path, fresh_checkpoint)
         return fresh_checkpoint
     return checkpoint
@@ -405,37 +411,37 @@ def _archive_stale_page_review_checkpoint(path: Path) -> None:
     path.replace(stale_path)
 
 
-def _checkpoint_group_decisions(checkpoint: dict[str, Any] | None) -> dict[str, list[dict[str, Any]]]:
+def _checkpoint_page_decisions(checkpoint: dict[str, Any] | None) -> dict[int, dict[str, Any]]:
     if checkpoint is None:
         return {}
-    raw_groups = checkpoint.get("group_decisions")
-    if not isinstance(raw_groups, dict):
-        raise ValueError("page review checkpoint group_decisions must be an object")
-    decisions: dict[str, list[dict[str, Any]]] = {}
-    for group_id, group_items in raw_groups.items():
-        if not isinstance(group_id, str) or not isinstance(group_items, list):
-            raise ValueError("page review checkpoint has invalid group decisions")
-        decisions[group_id] = group_items
+    raw_pages = checkpoint.get("page_decisions")
+    if not isinstance(raw_pages, dict):
+        raise ValueError("page review checkpoint page_decisions must be an object")
+    decisions: dict[int, dict[str, Any]] = {}
+    for raw_page, decision in raw_pages.items():
+        if not isinstance(raw_page, str) or not raw_page.isdigit() or not isinstance(decision, dict):
+            raise ValueError("page review checkpoint has invalid page decisions")
+        decisions[int(raw_page)] = decision
     return decisions
 
 
 def _record_checkpoint_failure(
     checkpoint_path: str | Path | None,
     checkpoint: dict[str, Any] | None,
-    group_id: str,
+    page: int,
     error: Exception,
-    group_decisions: dict[str, list[dict[str, Any]]] | None = None,
+    page_decisions: dict[int, dict[str, Any]] | None = None,
     raw_response: dict[str, Any] | None = None,
 ) -> None:
     if checkpoint_path is None or checkpoint is None:
         return
-    decisions = group_decisions if group_decisions is not None else _checkpoint_group_decisions(checkpoint)
+    decisions = page_decisions if page_decisions is not None else _checkpoint_page_decisions(checkpoint)
     payload = deepcopy(checkpoint)
-    payload["group_decisions"] = decisions
+    payload["page_decisions"] = {str(key): value for key, value in decisions.items()}
     payload["checkpoint"] = {
         "status": "failed",
-        "completed_group_ids": sorted(decisions),
-        "failed_group_id": group_id,
+        "completed_pages": sorted(decisions),
+        "failed_page": page,
         "error": str(error),
     }
     payload["failed_group_response"] = raw_response
@@ -444,9 +450,9 @@ def _record_checkpoint_failure(
 
 def _checkpoint_payload(
     plan: dict[str, Any],
-    request_groups: list[dict[str, Any]],
+    request_pages: dict[int, dict[str, str]],
     llm_model: str,
-    group_decisions: dict[str, list[dict[str, Any]]],
+    page_decisions: dict[int, dict[str, Any]],
     *,
     status: str,
     resolved_page_review: dict[str, Any] | None = None,
@@ -458,14 +464,14 @@ def _checkpoint_payload(
             "doc_id": plan["metadata"]["doc_id"],
             "title": plan["metadata"]["title"],
         },
-        "fingerprint": _checkpoint_fingerprint(plan, request_groups, llm_model),
+        "fingerprint": _checkpoint_fingerprint(plan, request_pages, llm_model),
         "checkpoint": {
             "status": status,
-            "completed_group_ids": sorted(group_decisions),
-            "failed_group_id": None,
+            "completed_pages": sorted(page_decisions),
+            "failed_page": None,
             "error": None,
         },
-        "group_decisions": group_decisions,
+        "page_decisions": {str(page): decision for page, decision in page_decisions.items()},
     }
     if resolved_page_review is not None:
         payload["resolved_page_review"] = resolved_page_review
@@ -473,7 +479,7 @@ def _checkpoint_payload(
 
 
 def _checkpoint_fingerprint(
-    plan: dict[str, Any], request_groups: list[dict[str, Any]], llm_model: str
+    plan: dict[str, Any], request_pages: dict[int, dict[str, str]], llm_model: str
 ) -> dict[str, Any]:
     return {
         "doc_id": plan["metadata"]["doc_id"],
@@ -481,7 +487,7 @@ def _checkpoint_fingerprint(
         "page_review_prompt_version": PAGE_REVIEW_PROMPT_VERSION,
         "page_review_image_evidence_version": PAGE_REVIEW_IMAGE_EVIDENCE_VERSION,
         "candidate_pages": plan["candidate_pages"],
-        "request_groups": request_groups,
+        "request_pages": {str(page): request_pages[page] for page in sorted(request_pages)},
         "llm_model": llm_model,
     }
 
@@ -496,31 +502,6 @@ def _write_page_review_checkpoint(
     temporary_path = path.with_suffix(f"{path.suffix}.tmp")
     temporary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary_path.replace(path)
-
-
-def _record_llm_request_groups(
-    page_records: dict[int, dict[str, Any]], groups: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    requests = []
-    for index, group in enumerate(groups, start=1):
-        group_id = f"g{index:04d}"
-        pages = list(group["pages"])
-        matter = str(group["matter"])
-        prompt_profile = str(group["prompt_profile"])
-        review_stage = str(group["review_stage"])
-        requests.append(
-            {
-                "group_id": group_id,
-                "matter": matter,
-                "pages": pages,
-                "prompt_profile": prompt_profile,
-                "review_stage": review_stage,
-            }
-        )
-        for page in pages:
-            page_records[page]["llm_group_id"] = group_id
-            page_records[page]["llm_prompt_profile"] = prompt_profile
-    return requests
 
 
 def _llm_config(model: str, api_url: str, timeout_seconds: int) -> OllamaChatConfig:
@@ -539,57 +520,20 @@ def _llm_config(model: str, api_url: str, timeout_seconds: int) -> OllamaChatCon
 
 def _llm_messages(
     prompt: str,
-    pages: list[int],
-    contact_sheet_path: Path,
-    page_image_paths: dict[int, Path],
-    full_resolution_pages: list[int],
+    page: int,
+    page_image_path: Path,
 ) -> list[dict[str, Any]]:
-    images = [base64.b64encode(contact_sheet_path.read_bytes()).decode("ascii")]
-    for page in full_resolution_pages:
-        images.append(base64.b64encode(page_image_paths[page].read_bytes()).decode("ascii"))
-    evidence_note = "No additional full-resolution page images are attached."
-    if full_resolution_pages:
-        evidence_note = (
-            "Additional full-resolution images are attached for physical pages "
-            f"{full_resolution_pages}, in that exact order."
-        )
     return [
         {
             "role": "user",
             "content": (
-                "The first image is a contact sheet containing only the selected candidate pages. "
-                f"Its physical pages are {pages}; each tile is labeled with its physical page number. "
-                f"{evidence_note} "
-                "Use those labels as the page values in the required JSON.\n\n"
+                f"The attached image is physical PDF page {page}. Classify only this page and use "
+                f"{page} as the page value in the required JSON.\n\n"
                 f"{prompt}"
             ),
-            "images": images,
+            "images": [base64.b64encode(page_image_path.read_bytes()).decode("ascii")],
         }
     ]
-
-
-def _full_resolution_pages(
-    pages: list[int], page_records: dict[int, dict[str, Any]]
-) -> list[int]:
-    """Attach readable evidence only where structure or layout leaves real ambiguity."""
-
-    return [page for page in pages if _needs_full_resolution_image(page_records[page])]
-
-
-def _needs_full_resolution_image(page_record: dict[str, Any]) -> bool:
-    context = page_record.get("skeleton_context")
-    if isinstance(context, dict):
-        if context.get("matter") == "pre_body":
-            return True
-        if context.get("is_body_section_start") is True:
-            return True
-    signals = page_record.get("signals") or []
-    visual_kinds = page_record.get("visual_kinds") or []
-    return bool(
-        {"visual_verifier_candidate", "visual_sparse_text"} & set(signals)
-        or "image_region" in visual_kinds
-        or "table_region" in visual_kinds
-    )
 
 
 def _llm_page_payload(page_record: dict[str, Any]) -> dict[str, Any]:
@@ -601,48 +545,6 @@ def _llm_page_payload(page_record: dict[str, Any]) -> dict[str, Any]:
         "signals": deepcopy(page_record.get("signals") or []),
         "visual_kinds": deepcopy(page_record.get("visual_kinds") or []),
     }
-
-
-def _render_contact_sheets(
-    request_groups: list[dict[str, Any]], image_paths: dict[int, Path], output_dir: Path
-) -> dict[str, Path]:
-    try:
-        from PIL import Image, ImageDraw  # type: ignore
-    except ImportError as exc:  # pragma: no cover - optional runtime
-        raise RuntimeError("page review contact sheets require Pillow.") from exc
-
-    sheets: dict[str, Path] = {}
-    for request_group in request_groups:
-        group_id = str(request_group["group_id"])
-        pages = [int(page) for page in request_group["pages"]]
-        rows = ceil(len(pages) / PAGE_REVIEW_CONTACT_SHEET_COLUMNS)
-        sheet = Image.new(
-            "RGB",
-            (
-                PAGE_REVIEW_CONTACT_SHEET_COLUMNS * PAGE_REVIEW_CONTACT_SHEET_TILE_WIDTH,
-                rows * (PAGE_REVIEW_CONTACT_SHEET_LABEL_HEIGHT + PAGE_REVIEW_CONTACT_SHEET_TILE_HEIGHT),
-            ),
-            "white",
-        )
-        draw = ImageDraw.Draw(sheet)
-        for index, page in enumerate(pages):
-            column = index % PAGE_REVIEW_CONTACT_SHEET_COLUMNS
-            row = index // PAGE_REVIEW_CONTACT_SHEET_COLUMNS
-            x = column * PAGE_REVIEW_CONTACT_SHEET_TILE_WIDTH
-            y = row * (PAGE_REVIEW_CONTACT_SHEET_LABEL_HEIGHT + PAGE_REVIEW_CONTACT_SHEET_TILE_HEIGHT)
-            draw.text((x + 8, y + 8), f"PDF page {page}", fill="black")
-            with Image.open(image_paths[page]) as source:
-                tile = source.convert("RGB")
-                tile.thumbnail(
-                    (PAGE_REVIEW_CONTACT_SHEET_TILE_WIDTH, PAGE_REVIEW_CONTACT_SHEET_TILE_HEIGHT)
-                )
-                tile_x = x + (PAGE_REVIEW_CONTACT_SHEET_TILE_WIDTH - tile.width) // 2
-                tile_y = y + PAGE_REVIEW_CONTACT_SHEET_LABEL_HEIGHT
-                sheet.paste(tile, (tile_x, tile_y))
-        sheet_path = output_dir / f"group_{group_id}.jpg"
-        sheet.save(sheet_path, format="JPEG", quality=85, optimize=True)
-        sheets[group_id] = sheet_path
-    return sheets
 
 
 def _render_page_images(

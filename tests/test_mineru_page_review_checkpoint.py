@@ -8,7 +8,7 @@ from inkline.canonical import make_observed_document, make_observed_page
 from inkline.parsers.mineru.normalize import page_review_shadow
 
 
-def test_page_review_checkpoint_resumes_after_a_failed_group(tmp_path, monkeypatch) -> None:
+def test_page_review_checkpoint_resumes_after_a_failed_page(tmp_path, monkeypatch) -> None:
     observed = make_observed_document(
         {
             "doc_id": "sample",
@@ -23,9 +23,7 @@ def test_page_review_checkpoint_resumes_after_a_failed_group(tmp_path, monkeypat
     )
     image_one = tmp_path / "page_0001.png"
     image_three = tmp_path / "page_0003.png"
-    group_one = tmp_path / "group_g0001.jpg"
-    group_two = tmp_path / "group_g0002.jpg"
-    for image in (image_one, image_three, group_one, group_two):
+    for image in (image_one, image_three):
         image.write_bytes(b"image")
     checkpoint_path = tmp_path / "page_review.checkpoint.json"
     monkeypatch.setattr(
@@ -42,23 +40,16 @@ def test_page_review_checkpoint_resumes_after_a_failed_group(tmp_path, monkeypat
         "_render_page_images",
         lambda *_args, **_kwargs: {1: image_one, 3: image_three},
     )
-    monkeypatch.setattr(
-        page_review_shadow,
-        "_render_contact_sheets",
-        lambda *_args, **_kwargs: {"g0001": group_one, "g0002": group_two},
-    )
-    monkeypatch.setattr(page_review_shadow, "PAGE_REVIEW_MAX_GROUP_PAGES", 1)
-
     first_run_pages: list[int] = []
 
-    def fail_second_group(_config, *, messages):
+    def fail_second_page(_config, *, messages):
         page = _page_from_message(messages)
         first_run_pages.append(page)
         if page == 3:
             raise RuntimeError("temporary model failure")
         return {"page_reviews": [_decision(page)]}
 
-    monkeypatch.setattr(page_review_shadow, "chat_json", fail_second_group)
+    monkeypatch.setattr(page_review_shadow, "chat_json", fail_second_page)
     with pytest.raises(RuntimeError, match="temporary model failure"):
         page_review_shadow.build_page_review_shadow(
             observed,
@@ -75,18 +66,18 @@ def test_page_review_checkpoint_resumes_after_a_failed_group(tmp_path, monkeypat
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     assert first_run_pages == [1, 3]
     assert checkpoint["checkpoint"]["status"] == "failed"
-    assert checkpoint["checkpoint"]["completed_group_ids"] == ["g0001"]
-    assert checkpoint["checkpoint"]["failed_group_id"] == "g0002"
-    assert checkpoint["group_decisions"]["g0001"] == [_decision(1)]
+    assert checkpoint["checkpoint"]["completed_pages"] == [1]
+    assert checkpoint["checkpoint"]["failed_page"] == 3
+    assert checkpoint["page_decisions"] == {"1": _decision(1)}
 
     resumed_pages: list[int] = []
 
-    def resolve_remaining_group(_config, *, messages):
+    def resolve_remaining_page(_config, *, messages):
         page = _page_from_message(messages)
         resumed_pages.append(page)
         return {"page_reviews": [_decision(page)]}
 
-    monkeypatch.setattr(page_review_shadow, "chat_json", resolve_remaining_group)
+    monkeypatch.setattr(page_review_shadow, "chat_json", resolve_remaining_page)
     review = page_review_shadow.build_page_review_shadow(
         observed,
         {
@@ -102,7 +93,7 @@ def test_page_review_checkpoint_resumes_after_a_failed_group(tmp_path, monkeypat
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     assert resumed_pages == [3]
     assert checkpoint["checkpoint"]["status"] == "complete"
-    assert checkpoint["checkpoint"]["completed_group_ids"] == ["g0001", "g0002"]
+    assert checkpoint["checkpoint"]["completed_pages"] == [1, 3]
     assert review["llm"]["model"] == "qwen-test"
     assert review["llm"]["prompt_version"] == page_review_shadow.PAGE_REVIEW_PROMPT_VERSION
 
@@ -112,11 +103,11 @@ def test_page_review_checkpoint_preserves_invalid_model_response(tmp_path) -> No
     checkpoint = {
         "checkpoint": {
             "status": "in_progress",
-            "completed_group_ids": [],
-            "failed_group_id": None,
+            "completed_pages": [],
+            "failed_page": None,
             "error": None,
         },
-        "group_decisions": {},
+        "page_decisions": {},
     }
     response = {
         "page_reviews": [
@@ -135,13 +126,13 @@ def test_page_review_checkpoint_preserves_invalid_model_response(tmp_path) -> No
     page_review_shadow._record_checkpoint_failure(
         checkpoint_path,
         checkpoint,
-        "g0018",
+        18,
         ValueError("page_role is invalid"),
         raw_response=response,
     )
 
     written = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-    assert written["checkpoint"]["failed_group_id"] == "g0018"
+    assert written["checkpoint"]["failed_page"] == 18
     assert written["failed_group_response"] == response
 
 
@@ -153,7 +144,7 @@ def test_page_review_checkpoint_archives_an_older_review_contract_and_restarts(t
                 "fingerprint": {
                     "doc_id": "sample",
                     "candidate_pages": [1],
-                    "request_groups": [{"group_id": "g0001", "pages": [1]}],
+                    "request_pages": {"1": {"prompt_profile": "front_special"}},
                     "llm_model": "qwen-test",
                 }
             }
@@ -173,7 +164,7 @@ def test_page_review_checkpoint_archives_an_older_review_contract_and_restarts(t
     checkpoint = page_review_shadow._load_page_review_checkpoint(
         checkpoint_path,
         plan=plan,
-        request_groups=[{"group_id": "g0001", "pages": [1]}],
+        request_pages={1: {"prompt_profile": "front_special"}},
         llm_model="qwen-test",
     )
 
@@ -181,15 +172,15 @@ def test_page_review_checkpoint_archives_an_older_review_contract_and_restarts(t
     assert stale_path.exists()
     assert json.loads(stale_path.read_text(encoding="utf-8"))["fingerprint"]["candidate_pages"] == [1]
     assert checkpoint["checkpoint"]["status"] == "in_progress"
-    assert checkpoint["group_decisions"] == {}
+    assert checkpoint["page_decisions"] == {}
     assert json.loads(checkpoint_path.read_text(encoding="utf-8")) == checkpoint
 
 
 def _page_from_message(messages: list[dict[str, object]]) -> int:
     content = str(messages[0]["content"])
-    if "physical pages are [1]" in content:
+    if "physical PDF page 1" in content:
         return 1
-    if "physical pages are [3]" in content:
+    if "physical PDF page 3" in content:
         return 3
     raise AssertionError(f"Unexpected LLM message: {content}")
 

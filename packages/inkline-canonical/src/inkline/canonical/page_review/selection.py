@@ -23,7 +23,6 @@ _VISUAL_LAYOUT_ROLES = {
 }
 _LAYOUT_SPECIAL_PAGE_KINDS = {
     "blank_page": "blank_page",
-    "cover_page": "cover_page",
 }
 _RASTER_VISUAL_SIGNALS = {"raster_dark_visual_layout"}
 

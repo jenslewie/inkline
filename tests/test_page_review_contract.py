@@ -220,6 +220,117 @@ def test_page_review_accepts_dedication_page() -> None:
     assert resolved["pages"][0]["special_page_kind"] == "dedication_page"
 
 
+def test_page_review_normalizes_epigraph_and_visual_chart_pages_as_visual_assets() -> None:
+    plan = {
+        "metadata": {"schema_name": "inkline_page_review", "schema_version": "0.9-shadow"},
+        "candidate_pages": [3, 4, 5, 6],
+        "pages": [
+            _record(3, "text_flow_page", "needs_review", "needs_review", "pending"),
+            _record(4, "text_flow_page", "needs_review", "needs_review", "pending"),
+            _record(5, "text_flow_page", "needs_review", "needs_review", "pending"),
+            _record(6, "text_flow_page", "needs_review", "needs_review", "pending"),
+        ],
+    }
+
+    resolved = resolve_page_review(
+        plan,
+        [
+            _decision(3, "text_flow_page", "epigraph_page", "include", "not_needed", "high"),
+            _decision(4, "text_flow_page", "plate_page", "include", "not_needed", "high"),
+            _decision(5, "text_flow_page", "chronology_chart_page", "include", "not_needed", "high"),
+            _decision(6, "text_flow_page", "genealogy_chart_page", "include", "not_needed", "high"),
+        ],
+        llm_model="qwen-test",
+        llm_prompt_version="test-prompt-v1",
+    )
+
+    for record, special_page_kind in zip(
+        resolved["pages"],
+        ["epigraph_page", "plate_page", "chronology_chart_page", "genealogy_chart_page"],
+        strict=True,
+    ):
+        assert record["special_page_kind"] == special_page_kind
+        assert record["page_role"] == "visual_page"
+        assert record["text_flow_action"] == "exclude"
+        assert record["visual_asset_action"] == "retain"
+
+
+def test_page_review_normalizes_external_identity_to_external_wrap() -> None:
+    plan = {
+        "metadata": {"schema_name": "inkline_page_review", "schema_version": "0.9-shadow"},
+        "candidate_pages": [1, 2],
+        "pages": [
+            _record(1, "text_flow_page", "needs_review", "needs_review", "pending"),
+            _record(2, "text_flow_page", "needs_review", "needs_review", "pending"),
+        ],
+    }
+
+    resolved = resolve_page_review(
+        plan,
+        [
+            _decision(1, "text_flow_page", "front_exterior_page", "include", "not_needed", "high"),
+            _decision(2, "text_flow_page", "cover_flap", "include", "not_needed", "high"),
+        ],
+        llm_model="qwen-test",
+        llm_prompt_version="test-prompt-v1",
+    )
+
+    assert [record["book_block_position"] for record in resolved["pages"]] == [
+        "external_wrap",
+        "external_wrap",
+    ]
+
+
+def test_page_review_normalizes_decorative_preliminary_identities_as_visual_assets() -> None:
+    plan = {
+        "metadata": {"schema_name": "inkline_page_review", "schema_version": "1.2-shadow"},
+        "candidate_pages": [3, 4],
+        "pages": [
+            _record(3, "text_flow_page", "needs_review", "needs_review", "pending"),
+            _record(4, "text_flow_page", "needs_review", "needs_review", "pending"),
+        ],
+    }
+
+    resolved = resolve_page_review(
+        plan,
+        [
+            _decision(3, "text_flow_page", "decorative_preliminary_page", "include", "not_needed", "high"),
+            _decision(4, "text_flow_page", "decorative_title_page", "include", "not_needed", "high"),
+        ],
+        llm_model="qwen-test",
+        llm_prompt_version="test-prompt-v1",
+    )
+
+    for record in resolved["pages"]:
+        assert record["page_role"] == "visual_page"
+        assert record["book_block_position"] == "front_matter"
+        assert record["text_flow_action"] == "exclude"
+        assert record["visual_asset_action"] == "retain"
+
+
+def test_page_review_keeps_ambiguous_front_visual_page_position_unknown() -> None:
+    plan = {
+        "metadata": {"schema_name": "inkline_page_review", "schema_version": "1.0-shadow"},
+        "candidate_pages": [2],
+        "pages": [
+            {
+                **_record(2, "visual_page", "needs_review", "needs_review", "pending"),
+                "book_block_position": "front_matter",
+                "llm_prompt_profile": "front_visual_identity",
+            }
+        ],
+    }
+
+    resolved = resolve_page_review(
+        plan,
+        [_decision(2, "visual_page", None, "exclude", "retain", "low")],
+        llm_model="qwen-test",
+        llm_prompt_version="test-prompt-v1",
+    )
+
+    assert resolved["pages"][0]["book_block_position"] == "unknown"
+
+
 def test_page_review_normalizes_acknowledgments_page_to_front_text_flow() -> None:
     plan = {
         "metadata": {"schema_name": "inkline_page_review", "schema_version": "0.6-shadow"},
@@ -279,7 +390,7 @@ def test_page_review_accepts_cover_flap() -> None:
     assert resolved["pages"][0]["book_block_position"] == "external_wrap"
 
 
-def test_page_review_normalizes_hardcover_wrap_special_pages() -> None:
+def test_page_review_normalizes_external_surface_special_pages() -> None:
     plan = {
         "metadata": {"schema_name": "inkline_page_review", "schema_version": "0.7-shadow"},
         "candidate_pages": [2, 3],
@@ -304,7 +415,7 @@ def test_page_review_normalizes_hardcover_wrap_special_pages() -> None:
             _decision(
                 3,
                 "text_flow_page",
-                "front_board",
+                "front_exterior_page",
                 "include",
                 "not_needed",
                 "high",
@@ -316,7 +427,7 @@ def test_page_review_normalizes_hardcover_wrap_special_pages() -> None:
     )
 
     for record, special_page_kind in zip(
-        resolved["pages"], ["dust_jacket_spread", "front_board"], strict=True
+        resolved["pages"], ["dust_jacket_spread", "front_exterior_page"], strict=True
     ):
         assert record["special_page_kind"] == special_page_kind
         assert record["page_role"] == "visual_page"
@@ -325,20 +436,47 @@ def test_page_review_normalizes_hardcover_wrap_special_pages() -> None:
         assert record["visual_asset_action"] == "retain"
 
 
-def test_page_review_rejects_external_wrap_kind_with_book_position() -> None:
+def test_page_review_rejects_retired_material_specific_external_kinds() -> None:
+    plan = {
+        "metadata": {"schema_name": "inkline_page_review", "schema_version": "1.0-shadow"},
+        "candidate_pages": [2],
+        "pages": [_record(2, "visual_page", "needs_review", "needs_review", "pending")],
+    }
+
+    with pytest.raises(ValidationError, match="special_page_kind is invalid"):
+        resolve_page_review(
+            plan,
+            [
+                _decision(
+                    2,
+                    "visual_page",
+                    "front_board",
+                    "exclude",
+                    "retain",
+                    "high",
+                    book_block_position="external_wrap",
+                )
+            ],
+            llm_model="qwen-test",
+            llm_prompt_version="test-prompt-v1",
+        )
+
+
+def test_page_review_derives_external_wrap_position_from_external_identity() -> None:
     plan = {
         "metadata": {"schema_name": "inkline_page_review", "schema_version": "0.4-shadow"},
         "candidate_pages": [2],
         "pages": [_record(2, "visual_page", "needs_review", "needs_review", "pending")],
     }
 
-    with pytest.raises(ValidationError, match="requires external_wrap"):
-        resolve_page_review(
-            plan,
-            [_decision(2, "visual_page", "cover_flap", "exclude", "retain", "high")],
-            llm_model="qwen-test",
-            llm_prompt_version="test-prompt-v1",
-        )
+    resolved = resolve_page_review(
+        plan,
+        [_decision(2, "visual_page", "cover_flap", "exclude", "retain", "high")],
+        llm_model="qwen-test",
+        llm_prompt_version="test-prompt-v1",
+    )
+
+    assert resolved["pages"][0]["book_block_position"] == "external_wrap"
 
 
 def test_page_review_derives_copyright_page_consumption_policy() -> None:

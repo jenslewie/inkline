@@ -7,7 +7,7 @@ from typing import Any
 
 from inkline.canonical.schema import ValidationError
 
-PAGE_REVIEW_SCHEMA_VERSION = "0.8-shadow"
+PAGE_REVIEW_SCHEMA_VERSION = "1.4-shadow"
 PAGE_REVIEW_TEXT_FLOW_ACTIONS = {
     "include",
     "exclude",
@@ -24,37 +24,55 @@ PAGE_REVIEW_BOOK_BLOCK_POSITIONS = {
     "unknown",
 }
 PAGE_REVIEW_SPECIAL_PAGE_KINDS = {
-    "cover_page",
-    "back_cover",
+    "front_exterior_page",
+    "back_exterior_page",
     "cover_flap",
     "dust_jacket_spread",
-    "front_board",
-    "back_board",
     "half_title_page",
     "title_page",
+    "decorative_preliminary_page",
+    "decorative_title_page",
+    "epigraph_page",
     "dedication_page",
     "acknowledgments_page",
     "copyright_page",
     "toc_page",
     "blank_page",
+    "plate_page",
+    "chronology_chart_page",
+    "genealogy_chart_page",
 }
 PAGE_REVIEW_CONFIDENCES = {"high", "medium", "low"}
 _EXTERNAL_WRAP_SPECIAL_PAGE_KINDS = {
-    "cover_page",
-    "back_cover",
+    "front_exterior_page",
+    "back_exterior_page",
     "cover_flap",
     "dust_jacket_spread",
-    "front_board",
-    "back_board",
 }
 _FRONT_MATTER_SPECIAL_PAGE_KINDS = {
     "half_title_page",
     "title_page",
+    "decorative_preliminary_page",
+    "decorative_title_page",
+    "epigraph_page",
     "dedication_page",
     "acknowledgments_page",
     "copyright_page",
     "toc_page",
     "blank_page",
+}
+_VISUAL_SPECIAL_PAGE_POLICY = {
+    "page_role": "visual_page",
+    "text_flow_action": "exclude",
+    "visual_asset_action": "retain",
+}
+_VISUAL_SPECIAL_PAGE_KINDS = {
+    "decorative_preliminary_page",
+    "decorative_title_page",
+    "epigraph_page",
+    "plate_page",
+    "chronology_chart_page",
+    "genealogy_chart_page",
 }
 _COPYRIGHT_PAGE_POLICY = {
     "page_role": "visual_page",
@@ -70,6 +88,7 @@ _ACKNOWLEDGMENTS_PAGE_POLICY = {
 }
 _EXTERNAL_WRAP_PAGE_POLICY = {
     "page_role": "visual_page",
+    "book_block_position": "external_wrap",
     "text_flow_action": "exclude",
     "visual_asset_action": "retain",
 }
@@ -100,11 +119,24 @@ def resolve_page_review(
         record["decision_source"] = "llm_page_review"
         record["llm_review_status"] = "sent_and_resolved"
         record["confidence"] = decision["confidence"]
+        if _is_ambiguous_front_visual_decision(record):
+            record["book_block_position"] = "unknown"
     resolved["llm"] = {
         "model": llm_model,
         "prompt_version": llm_prompt_version,
     }
     return resolved
+
+
+def _is_ambiguous_front_visual_decision(record: dict[str, Any]) -> bool:
+    """Keep an explicitly unresolved pre-body visual page positionally unresolved."""
+
+    return (
+        record.get("llm_prompt_profile") == "front_visual_identity"
+        and record.get("page_role") == "visual_page"
+        and record.get("special_page_kind") is None
+        and record.get("confidence") == "low"
+    )
 
 
 def validate_resolved_page_review(review: dict[str, Any]) -> None:
@@ -225,6 +257,8 @@ def _normalized_page_fields(record: dict[str, Any], path: str) -> dict[str, str 
         fields.update(_ACKNOWLEDGMENTS_PAGE_POLICY)
     if special_page_kind in _EXTERNAL_WRAP_SPECIAL_PAGE_KINDS:
         fields.update(_EXTERNAL_WRAP_PAGE_POLICY)
+    if special_page_kind in _VISUAL_SPECIAL_PAGE_KINDS:
+        fields.update(_VISUAL_SPECIAL_PAGE_POLICY)
     return fields
 
 

@@ -19,8 +19,8 @@ def test_page_review_golden_checker_reports_only_stable_page_contract_diffs(tmp_
     tool = _load_tool()
     golden_path = tmp_path / "golden.json"
     observed_path = tmp_path / "observed.json"
-    golden = _page_review("sample", "cover_page")
-    observed = _page_review("sample", "back_cover")
+    golden = _page_review("sample", "front_exterior_page")
+    observed = _page_review("sample", "back_exterior_page")
     observed["metadata"]["schema_version"] = "0.8-shadow"
     observed["llm"] = {"model": "new-model", "prompt_version": "new-prompt"}
     golden_path.write_text(json.dumps(golden), encoding="utf-8")
@@ -34,8 +34,8 @@ def test_page_review_golden_checker_reports_only_stable_page_contract_diffs(tmp_
             "kind": "field_mismatch",
             "page": 1,
             "field": "special_page_kind",
-            "golden": "cover_page",
-            "observed": "back_cover",
+            "golden": "front_exterior_page",
+            "observed": "back_exterior_page",
         }
     ]
 
@@ -44,8 +44,8 @@ def test_page_review_golden_checker_accepts_metadata_changes(tmp_path) -> None:
     tool = _load_tool()
     golden_path = tmp_path / "golden.json"
     observed_path = tmp_path / "observed.json"
-    golden_path.write_text(json.dumps(_page_review("sample", "cover_page")), encoding="utf-8")
-    observed = _page_review("sample", "cover_page")
+    golden_path.write_text(json.dumps(_page_review("sample", "front_exterior_page")), encoding="utf-8")
+    observed = _page_review("sample", "front_exterior_page")
     observed["metadata"]["schema_version"] = "0.8-shadow"
     observed_path.write_text(json.dumps(observed), encoding="utf-8")
 
@@ -59,8 +59,8 @@ def test_page_review_golden_checker_rejects_an_unexpected_page(tmp_path) -> None
     tool = _load_tool()
     golden_path = tmp_path / "golden.json"
     observed_path = tmp_path / "observed.json"
-    golden_path.write_text(json.dumps(_page_review("sample", "cover_page")), encoding="utf-8")
-    observed = _page_review("sample", "cover_page")
+    golden_path.write_text(json.dumps(_page_review("sample", "front_exterior_page")), encoding="utf-8")
+    observed = _page_review("sample", "front_exterior_page")
     observed["pages"].append(
         {
             "page": 2,
