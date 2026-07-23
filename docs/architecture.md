@@ -14,33 +14,33 @@ flowchart LR
     source["PDF / EPUB / Word"] --> adapter["Parser adapter"]
 
     adapter --> legacy_builder["Legacy canonical builder"]
-    legacy_builder --> canonical_v1["canonical.json<br/>current release contract"]
+    legacy_builder --> canonical_v1["canonical.json: current release contract"]
     canonical_v1 --> epub["EPUB exporter"]
     canonical_v1 --> rag["RAG chunk / embed / search"]
 
-    adapter -->|"MinerU v2 path only"| observed["ObservedDocument<br/>parser-neutral observations"]
-    observed --> skeleton["BookSkeleton<br/>TOC hierarchy and title anchors"]
-    observed --> page_review["PageReview<br/>physical-page identity and consumption"]
+    adapter -->|"MinerU v2 path only"| observed["ObservedDocument: parser-neutral observations"]
+    observed --> skeleton["BookSkeleton: TOC hierarchy and title anchors"]
+    observed --> page_review["PageReview: physical-page identity and consumption"]
     skeleton --> page_review
 
-    observed --> text_units["TextUnit -> logical_unit<br/>layout and continuity pipeline"]
-    page_review --> page_assets["Retained whole-page assets<br/>rendered PNG snapshots"]
+    observed --> text_units["TextUnit -> logical_unit: layout and continuity pipeline"]
+    page_review --> page_assets["Retained whole-page assets: rendered PNG snapshots"]
 
-    text_units --> current_builder["Observed BookGraph builder<br/>current direct projection"]
+    text_units --> current_builder["Observed BookGraph builder: current direct projection"]
     page_review --> current_builder
     page_assets --> current_builder
 
-    skeleton -.->|"planned input"| section_map["SectionMap<br/>planned"]
+    skeleton -.->|"planned input"| section_map["SectionMap: planned"]
     page_review -.->|"planned input"| section_map
     text_units -.->|"planned input"| section_map
     section_map -.->|"confirmed section nodes and contains edges"| current_builder
 
-    observed -.->|"planned input"| visual_review["VisualRelationReview<br/>planned"]
+    observed -.->|"planned input"| visual_review["VisualRelationReview: planned"]
     page_review -.->|"planned input"| visual_review
     visual_review -.->|"confirmed assets and caption_of edges"| current_builder
 
-    current_builder --> bookgraph["Public BookGraph<br/>canonical_v2.json shadow"]
-    current_builder --> internal["Internal canonical<br/>public projection plus debug pipeline"]
+    current_builder --> bookgraph["Public BookGraph: canonical_v2.json shadow"]
+    current_builder --> internal["Internal canonical: public projection plus debug pipeline"]
     bookgraph -.->|"release migration target"| epub
     bookgraph -.->|"release migration target"| rag
 ```
