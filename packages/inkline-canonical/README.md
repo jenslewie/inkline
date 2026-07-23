@@ -68,12 +68,21 @@ parser output -> ObservedDocument
 pre-release development artifacts. Existing EPUB/RAG flows still consume the
 current canonical contract until the BookGraph projection switch is complete.
 
-`BookSkeleton` anchors are not section spans. The planned internal `SectionMap`
-combines Skeleton anchors, PageReview identities, TextFlow units, and observed
-heading evidence to establish confirmed logical membership. It must preserve
-`standalone` and `unresolved` physical pages instead of assigning them to the
-nearest preceding TOC title. Only confirmed membership becomes BookGraph
-`contains` edges and later RAG heading-path context.
+`BookSkeleton` schema `0.2-shadow` records a `selected_start_anchor` exactly
+when `selected_start_page` is non-null. Its exact fields are `anchor_id`,
+`page`, `resolution_method`, `printed_page_offset`, `title_observation_ids`,
+`toc_observation_ids`, `supporting_anchor_ids`, and `confidence`.
+`observed_title_match` is direct and `high` confidence; `printed_page_offset`
+is `medium` confidence and has exactly two straddling direct anchors that agree
+on the offset. A selected start anchor proves where a section starts and why.
+It does not prove that later pages or resources belong to that section.
+
+The planned internal `SectionMap` maps
+`selected_start_anchor.title_observation_ids` to TextUnits/logical units rather
+than rediscovering observed heading evidence, then owns membership and ranges.
+It must preserve `standalone` and `unresolved` physical pages instead of
+assigning them to the nearest preceding TOC title. Only confirmed membership
+becomes BookGraph `contains` edges and later RAG heading-path context.
 
 ## TOC LLM Boundary
 
@@ -81,12 +90,15 @@ The preferred TOC path is to let the LLM read the TOC visual structure and emit
 public TOC entries: `display_title`, `level`, `parent_entry_index`, and `role`.
 The prompt must define each field explicitly, including that `level` starts at 1
 and `role` is limited to `front_matter`, `body`, `back_matter`, or `unknown`.
+The TOC LLM may emit only TOC-structure fields; it must not emit physical
+pages, start anchors, printed-page offsets, or observation ids.
 
 Code should not patch LLM-capable structure after the fact. If the model can
 infer a field from the TOC image, improve the prompt/schema/examples first.
 Deterministic code is responsible for validation and for facts outside the
-LLM's evidence, especially `candidate_start_pages` and `selected_start_page`,
-which are derived from ObservedDocument physical page evidence.
+LLM's evidence, especially `candidate_start_pages`, `selected_start_page`, and
+`selected_start_anchor`, which are derived from ObservedDocument physical page
+and TOC evidence. The TOC LLM emits neither anchors nor anchor evidence.
 
 Public BookSkeleton TOC entries intentionally do not expose split
 `raw_title`/`title`/`raw_label`/`label` fields. Internal builders may derive
@@ -159,7 +171,8 @@ observation ids before BookGraph creates visual assets or `caption_of` edges.
 reading-flow role: `external_wrap`, `front_matter`, `body`, `back_matter`, or
 `unknown`. Before the first Skeleton body page, PageReview uses the provisional
 internal context `pre_body`; it does not assume those pages are front matter. It
-does deterministically materialize
+consumes `selected_start_page` and remains independent of
+`selected_start_anchor` provenance. It does deterministically materialize
 `front_matter` for pages covered by a localized Skeleton front-matter section
 and for `toc_page`. PageReview then closes the remaining pre-body `unknown`
 pages with a bounded second LLM pass, so ordinary internal front prose does not

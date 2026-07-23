@@ -102,11 +102,11 @@ ObservedDocument 负责表达“解析器观察到了什么”。BookGraph 负�
 
 所有 canonical 构建阶段都遵守 [Canonical Non-Semantic Construction Policy](canonical-non-semantic-policy.md)。结构判断只能使用 parser explicit structure、geometry、layout、reading order、style、markers、continuity 和 provenance 等可观察证据；不能使用文本含义、关键词语义、书籍主题或 LLM classifier。
 
-`BookSkeleton` 是 Phase 4/5 之间新增的 shadow 骨架层，用来把书籍宏观结构前移到 node 构造之前。它不改现有 `canonical.json`，也不直接改 public BookGraph node。规则层只负责：
+`BookSkeleton` 是 Phase 4/5 之间新增的 schema `0.2-shadow` 骨架层，用来把书籍宏观结构前移到 node 构造之前。它不改现有 `canonical.json`，也不直接改 public BookGraph node。规则层只负责：
 
 - 从 ObservedDocument 中检测 TOC pages。
-- 抽取 TOC entries 的标题、目录编号和层级；目录印刷页码只可作为 internal audit evidence，
-  不进入 public BookSkeleton contract，也不用来定位 PDF 物理页。
+- 抽取 TOC entries 的标题、目录编号和层级；目录印刷页码只作为内部 TOC evidence。它不会作为
+  独立 public entry 字段暴露，但可由已验证的 `printed_page_offset` start anchor 使用。
 - 用 ObservedDocument 的 `title_text` 定位标题出现的 PDF 物理页；普通正文 `body_text`
   中出现同名词组不能作为 `candidate_start_pages`。
 
@@ -120,16 +120,36 @@ ObservedDocument 负责表达“解析器观察到了什么”。BookGraph 负�
 - `candidate_start_pages`: 规则层基于 title evidence 定位出的 PDF 物理起始页候选；候选会按
   TOC 相邻 entry 的物理区间裁剪，避免后部注释/参考区重复标题污染正文标题候选。
 - `selected_start_page`: 从候选中基于 TOC 顺序和局部证据选出的 PDF 物理起始页。
+- `selected_start_anchor`: `selected_start_page` 的可验证 provenance；它在且仅在
+  `selected_start_page` 非 `null` 时存在，且其 `page` 必须等于 `selected_start_page`。字段精确为
+  `anchor_id`, `page`, `resolution_method`, `printed_page_offset`,
+  `title_observation_ids`, `toc_observation_ids`, `supporting_anchor_ids`, `confidence`。
 - `attrs`: 预留扩展字段。public skeleton 不写入内部调试字段。
+
+`selected_start_anchor.resolution_method` 只允许 `observed_title_match` 或
+`printed_page_offset`。前者是直接的 observed-title match：必须有
+`title_observation_ids`、不带 `supporting_anchor_ids`，并且置信度为 `high`。后者是印刷页码偏移
+推导：不能带 title evidence，必须带整数 `printed_page_offset`，置信度为 `medium`，并且恰好由两个
+前后夹持该 entry 的 `observed_title_match` direct anchors 支持；两个支持锚点必须同意该 offset。
+`toc_observation_ids` 保留目录页上的 TOC evidence，`supporting_anchor_ids` 只引用这些已选的 start
+anchors。
+
+`selected_start_anchor` proves where a section starts and why. It does not
+prove that later pages or resources belong to that section.
 
 Public BookSkeleton 不暴露 `raw_title` / `title` / `raw_label` / `label`。LLM 读取 TOC 图片后应直接
 输出完整 `display_title`、层级、父子关系和 role；如果模型能从 TOC 视觉结构完成这件事，应优先通过
 prompt/schema/examples 修正，而不是在代码中补语义拆分。规则层可以临时从 `display_title` 派生定位候选，
 但这些临时字段不能进入 public contract。
 
-可选 LLM 层不能输出或决定 PDF 物理页码。物理页只来自规则层 title location evidence，写入
-`candidate_start_pages` 和 `selected_start_page`。这个约束是为了避免“LLM 猜页码”污染 pipeline，
-同时让后续 BookGraph 构造可以先拥有书的宏观骨架，再生成 paragraph / display_block / note 等节点。
+The TOC LLM may emit only TOC-structure fields; it must not emit physical
+pages, start anchors, printed-page offsets, or observation ids.
+
+可选 LLM 层不能输出或决定 PDF 物理页码，也不输出 anchors 或 evidence。物理页和
+`selected_start_anchor` 只来自规则层的 title location / TOC evidence，写入
+`candidate_start_pages`、`selected_start_page` 和 `selected_start_anchor`。这个约束是为了避免“LLM 猜页码”
+污染 pipeline，同时让后续 BookGraph 构造可以先拥有书的宏观骨架，再生成 paragraph / display_block /
+note 等节点。
 
 LLM verifier 的输入应由 audit 信号触发，而不是逐页调用。Phase 4 的 public audit 只报告会影响
 BookSkeleton contract 的问题，例如缺失起始页、TOC entry 粘连、role 顺序异常；内部 OCR label 修正不作为
@@ -561,12 +581,14 @@ signals, but it does not rewrite observations, create visual assets, or resolve
 image-to-caption relationships.
 
 `BookSkeleton.selected_start_page` is a **title anchor**, not evidence that all
-following physical pages belong to that title. In particular, an external-wrap
+following physical pages belong to that title. `PageReview` consumes
+`selected_start_page` and remains independent of `selected_start_anchor`
+provenance. In particular, an external-wrap
 page, a TOC page, an unlisted plate, or an inserted visual page may occur
 between two TOC anchors. PageReview therefore never assigns a page to the
 nearest preceding TOC entry. A later `SectionMap` stage will establish section
-membership from confirmed page identities, observed headings, and bounded
-semantic boundary review. Its internal result must distinguish `assigned`,
+membership from confirmed page identities, mapped anchor title observations,
+and bounded semantic boundary review. Its internal result must distinguish `section_member`,
 `standalone`, and `unresolved` pages rather than forcing every physical page
 into a section. Only confirmed section containment will later become BookGraph
 `contains` edges and RAG heading-path context.
@@ -750,9 +772,12 @@ for this first 4B slice.
 `SectionMap` is the internal alignment layer from physical pages and TextFlow
 units to the logical document tree. It is **not** a convenience map that
 assigns every page to the closest preceding TOC entry. `BookSkeleton` supplies
-only title anchors; a TOC omits external wrap, its own pages, some plates, and
-other inserted material. Consequently, a title anchor does not establish a
-section end page or page membership by itself.
+verified start anchors; a TOC omits external wrap, its own pages, some plates,
+and other inserted material. SectionMap maps each
+`selected_start_anchor.title_observation_ids` to TextUnits/logical units rather
+than rediscovering observed heading evidence. A selected start anchor proves
+where a section starts and why; it does not establish a section end page or
+page/resource membership by itself. SectionMap owns membership and ranges.
 
 The dependency graph is intentionally a DAG rather than a linear pipeline:
 
@@ -804,8 +829,9 @@ text from an attached visual asset, but this is not a replacement for physical
 
 The initial implementation must:
 
-- use Skeleton anchors, observed headings, TextFlow continuity, PageReview
-  identities, and provenance as independent evidence sources;
+- map `selected_start_anchor.title_observation_ids` to TextUnits/logical units,
+  then use TextFlow continuity, PageReview identities, and provenance to decide
+  membership and ranges;
 - classify `external_wrap`, `toc_page`, `blank_page`, copyright/title leaves,
   and other confirmed standalone pages before considering section membership;
 - leave conflicting or weakly evidenced front/back matter pages unresolved;
