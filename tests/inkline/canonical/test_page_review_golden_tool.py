@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def _load_tool():
-    path = Path(__file__).resolve().parents[1] / "tools" / "check_page_review_golden.py"
+    path = Path(__file__).resolve().parents[3] / "tools" / "check_page_review_golden.py"
     spec = importlib.util.spec_from_file_location("check_page_review_golden", path)
     assert spec is not None
     assert spec.loader is not None

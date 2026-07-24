@@ -9,7 +9,7 @@ from inkline.canonical import make_bookgraph, make_evidence, make_node
 
 
 def _load_tool() -> Any:
-    path = Path(__file__).resolve().parents[1] / "tools" / "audit_scoped_note_resolution.py"
+    path = Path(__file__).resolve().parents[3] / "tools" / "audit_scoped_note_resolution.py"
     spec = importlib.util.spec_from_file_location("audit_scoped_note_resolution", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

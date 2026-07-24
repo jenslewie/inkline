@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 
 CHECKED_CANONICAL_FILES = [
     ROOT / "packages/inkline-canonical/src/inkline/canonical/bookgraph/schema.py",

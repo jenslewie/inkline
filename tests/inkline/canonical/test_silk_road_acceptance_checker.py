@@ -7,7 +7,7 @@ from typing import Any
 
 
 def _load_checker():
-    path = Path(__file__).resolve().parents[1] / "tools" / "check_silk_road_canonical.py"
+    path = Path(__file__).resolve().parents[3] / "tools" / "check_silk_road_canonical.py"
     spec = importlib.util.spec_from_file_location("check_silk_road_canonical", path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

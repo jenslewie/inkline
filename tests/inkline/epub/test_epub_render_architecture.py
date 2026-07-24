@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 
 RENDER_PATH = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[3]
     / "packages"
     / "inkline-epub"
     / "src"

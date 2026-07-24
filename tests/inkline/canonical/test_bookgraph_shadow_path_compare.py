@@ -13,7 +13,7 @@ from inkline.canonical import (
 
 
 def _load_tool() -> Any:
-    path = Path(__file__).resolve().parents[1] / "tools" / "compare_bookgraph_shadow_paths.py"
+    path = Path(__file__).resolve().parents[3] / "tools" / "compare_bookgraph_shadow_paths.py"
     spec = importlib.util.spec_from_file_location("compare_bookgraph_shadow_paths", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

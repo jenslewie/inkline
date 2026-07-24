@@ -9,7 +9,7 @@ from inkline.canonical import make_observation, make_observed_document, make_obs
 
 
 def _load_tool() -> Any:
-    path = Path(__file__).resolve().parents[1] / "tools" / "audit_text_unit_layout.py"
+    path = Path(__file__).resolve().parents[3] / "tools" / "audit_text_unit_layout.py"
     spec = importlib.util.spec_from_file_location("audit_text_unit_layout", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

@@ -5,7 +5,7 @@ from pathlib import Path
 
 def test_canonical_top_level_modules_stay_grouped() -> None:
     canonical_dir = (
-        Path(__file__).resolve().parents[1]
+        Path(__file__).resolve().parents[3]
         / "packages"
         / "inkline-canonical"
         / "src"

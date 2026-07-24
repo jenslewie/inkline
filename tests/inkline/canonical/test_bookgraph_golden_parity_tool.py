@@ -9,7 +9,7 @@ from inkline.canonical import make_bookgraph, make_evidence, make_node
 
 
 def _load_tool() -> Any:
-    path = Path(__file__).resolve().parents[1] / "tools" / "check_bookgraph_golden_parity.py"
+    path = Path(__file__).resolve().parents[3] / "tools" / "check_bookgraph_golden_parity.py"
     spec = importlib.util.spec_from_file_location("check_bookgraph_golden_parity", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
