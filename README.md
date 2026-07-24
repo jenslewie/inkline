@@ -172,6 +172,12 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run --extra mineru mineru-to-book-skeleton
   --llm
 ```
 
+The lookup below applies after running the documented 13-book backfill (Task 3),
+or after first generating the `女王与苏丹` BookSkeleton/ObservedDocument pair
+by applying the dedicated command above to that book's inputs and output names.
+The preceding example generates only the `埃及` artifact, so it does not create
+the `女王与苏丹` path by itself.
+
 To inspect a specific review observation in the paired artifact:
 
 ```bash
