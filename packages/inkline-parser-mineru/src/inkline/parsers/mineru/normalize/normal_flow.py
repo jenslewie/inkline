@@ -178,7 +178,7 @@ def _append_table_or_continuation(ids: IdFactory, state: _NormalFlowState, block
         state.prev_major_type = TABLE
     else:
         state.out.append(
-            canonical_block(
+            canonical_block(  # pyright: ignore[reportArgumentType]
                 ids.next(),
                 TABLE_CONTINUATION,
                 "",

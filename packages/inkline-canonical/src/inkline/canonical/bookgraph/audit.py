@@ -100,7 +100,7 @@ def _note_ref_runs(nodes: list[dict[str, Any]]) -> int:
             if not isinstance(run, dict):
                 continue
             attrs = run.get("attrs") if isinstance(run.get("attrs"), dict) else {}
-            if run.get("target_note_id") or attrs.get("target_note_id"):
+            if run.get("target_note_id") or attrs.get("target_note_id"):  # pyright: ignore[reportOptionalMemberAccess]
                 count += 1
     return count
 
@@ -199,7 +199,7 @@ def _body_like_display_reasons(node: dict[str, Any]) -> list[str]:
 
 def _legacy_block_id(node: dict[str, Any]) -> str | None:
     attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
-    value = attrs.get("legacy_block_id")
+    value = attrs.get("legacy_block_id")  # pyright: ignore[reportOptionalMemberAccess]
     return str(value) if value else None
 
 
@@ -299,16 +299,16 @@ def _changed_fields(projected: dict[str, Any], legacy: dict[str, Any]) -> list[s
 
 def _inline_runs(block: dict[str, Any]) -> list[dict[str, Any]]:
     attrs = block.get("attrs") if isinstance(block.get("attrs"), dict) else {}
-    runs = attrs.get("inline_runs")
+    runs = attrs.get("inline_runs")  # pyright: ignore[reportOptionalMemberAccess]
     return runs if isinstance(runs, list) else []
 
 
 def _source_for_compare(block: dict[str, Any]) -> dict[str, Any]:
     source = block.get("source") if isinstance(block.get("source"), dict) else {}
     comparable = {
-        key: deepcopy(source[key])
+        key: deepcopy(source[key])  # pyright: ignore[reportOptionalSubscript]
         for key in ("page", "bbox", "pages", "spans")
-        if key in source and source[key] not in (None, [])
+        if key in source and source[key] not in (None, [])  # pyright: ignore[reportOperatorIssue,reportOptionalSubscript]
     }
     if "page" in comparable and "pages" not in comparable:
         comparable["pages"] = [comparable["page"]]

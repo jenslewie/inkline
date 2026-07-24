@@ -1,3 +1,5 @@
+from typing import Any
+
 from inkline.parsers.mineru.reconcile.notes.marker_inline import (
     _inline_runs_text,
     _InlineMarkerLocation,
@@ -38,7 +40,7 @@ def test_qwen_symbol_marker_before_omitted_comma() -> None:
 
 
 def test_qwen_does_not_override_existing_equation_inline_run() -> None:
-    block = {
+    block: Any = {
         "block_id": "b000080",
         "type": "paragraph",
         "text": "用来助焊以及鞣革的硇砂 是某些商路上的最重要的货物。",
@@ -93,7 +95,7 @@ def test_qwen_does_not_override_existing_equation_inline_run() -> None:
 
 
 def test_qwen_keeps_text_when_visible_marker_matches_valid_existing_inline_run() -> None:
-    block = {
+    block: Any = {
         "block_id": "b000350",
         "type": "paragraph",
         "text": "让当地统治者学会了在礼物上附上木简。14号室出土的三根木简。",
@@ -153,7 +155,7 @@ def test_qwen_keeps_text_when_visible_marker_matches_valid_existing_inline_run()
 
 
 def test_qwen_inserts_ref_without_stripping_marker_that_starts_after_text() -> None:
-    block = {
+    block: Any = {
         "block_id": "b000350",
         "type": "paragraph",
         "text": (
@@ -218,7 +220,7 @@ def test_qwen_inserts_ref_without_stripping_marker_that_starts_after_text() -> N
 
 
 def test_qwen_reused_block_id_falls_back_to_text_anchor_when_ids_drift() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b000350",
             "type": "footnote",
@@ -266,7 +268,7 @@ def test_qwen_reused_block_id_falls_back_to_text_anchor_when_ids_drift() -> None
 
 
 def test_qwen_reused_block_crop_id_falls_back_without_visible_marker() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b000302",
             "type": "footnote",
@@ -306,7 +308,7 @@ def test_qwen_reused_block_crop_id_falls_back_without_visible_marker() -> None:
 
 
 def test_qwen_reused_block_crop_id_uses_geometry_to_disambiguate_text_matches() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b000292",
             "type": "paragraph",
@@ -353,7 +355,7 @@ def test_qwen_reused_block_crop_id_uses_geometry_to_disambiguate_text_matches() 
 
 
 def test_qwen_reused_block_crop_id_prefers_visible_marker_over_geometry() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b001346",
             "type": "paragraph",
@@ -395,7 +397,7 @@ def test_qwen_reused_block_crop_id_prefers_visible_marker_over_geometry() -> Non
 
 
 def test_qwen_overrides_invalid_existing_equation_inline_run() -> None:
-    block = {
+    block: Any = {
         "block_id": "b1",
         "type": "paragraph",
         "text": "正确正文。",
@@ -452,7 +454,7 @@ def test_qwen_overrides_invalid_existing_equation_inline_run() -> None:
 
 
 def test_qwen_insertion_preserves_other_mineru_inline_runs() -> None:
-    block = {
+    block: Any = {
         "block_id": "b1",
         "type": "paragraph",
         "text": "甲 乙 丙",
@@ -503,7 +505,7 @@ def test_qwen_insertion_preserves_other_mineru_inline_runs() -> None:
 
 
 def test_qwen_insertion_does_not_relocate_unmappable_existing_inline_ref() -> None:
-    block = {
+    block: Any = {
         "text": "abcdef",
         "attrs": {
             "inline_runs": [
@@ -537,7 +539,7 @@ def test_qwen_insertion_does_not_relocate_unmappable_existing_inline_ref() -> No
 
 
 def test_qwen_insertion_preserves_resolved_refs_when_text_mapping_fails() -> None:
-    block = {
+    block: Any = {
         "text": "abcdef",
         "attrs": {
             "inline_runs": [
@@ -632,7 +634,7 @@ def test_qwen_numeric_marker_does_not_use_before_only_when_after_is_in_quote() -
 
 
 def test_qwen_numeric_cross_block_marker_before_terminal_punctuation() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b000102",
             "type": "paragraph",
@@ -671,7 +673,7 @@ def test_qwen_numeric_cross_block_marker_before_terminal_punctuation() -> None:
 
 
 def test_qwen_body_ref_uses_block_id_to_disambiguate_matching_context() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b1",
             "type": "paragraph",
@@ -712,7 +714,7 @@ def test_qwen_body_ref_uses_block_id_to_disambiguate_matching_context() -> None:
 
 
 def test_qwen_body_ref_with_block_id_does_not_fallback_to_other_block() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b1",
             "type": "paragraph",
@@ -741,7 +743,7 @@ def test_qwen_body_ref_with_block_id_does_not_fallback_to_other_block() -> None:
 
 
 def test_qwen_body_ref_strips_neighbor_symbol_marker_from_matching_context() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b000102",
             "type": "paragraph",
@@ -774,7 +776,7 @@ def test_qwen_body_ref_strips_neighbor_symbol_marker_from_matching_context() -> 
 
 
 def test_qwen_recovers_scoped_chapter_endnote_ref() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b_chapter",
             "type": "heading",
@@ -844,7 +846,7 @@ def test_qwen_recovers_scoped_chapter_endnote_ref() -> None:
 
 
 def test_qwen_recovers_adjacent_visible_symbol_and_numeric_markers() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b_body",
             "type": "paragraph",
@@ -910,7 +912,7 @@ def test_qwen_recovers_adjacent_visible_symbol_and_numeric_markers() -> None:
 
 
 def test_qwen_uses_unique_visible_star_in_requested_block_when_ocr_context_differs() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b_body",
             "type": "paragraph",
@@ -943,7 +945,7 @@ def test_qwen_uses_unique_visible_star_in_requested_block_when_ocr_context_diffe
 
 
 def test_qwen_does_not_use_page_unique_star_without_block_or_context_match() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b_body",
             "type": "paragraph",
@@ -986,7 +988,7 @@ def test_qwen_does_not_use_page_unique_star_without_block_or_context_match() -> 
 
 
 def test_qwen_visible_marker_removal_spans_adjacent_text_runs() -> None:
-    block = {
+    block: Any = {
         "text": "a¹²b",
         "attrs": {
             "inline_runs": [
@@ -1011,7 +1013,7 @@ def test_qwen_visible_marker_removal_spans_adjacent_text_runs() -> None:
 
 
 def test_qwen_visible_marker_removal_spans_runs_after_structured_ref() -> None:
-    block = {
+    block: Any = {
         "text": "1a¹²b",
         "attrs": {
             "inline_runs": [
@@ -1043,7 +1045,7 @@ def test_qwen_visible_marker_removal_spans_runs_after_structured_ref() -> None:
 
 
 def test_qwen_refinement_strips_visible_marker_for_existing_ref() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b_body",
             "type": "paragraph",

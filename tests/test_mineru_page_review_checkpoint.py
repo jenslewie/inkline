@@ -167,6 +167,7 @@ def test_page_review_checkpoint_archives_an_older_review_contract_and_restarts(t
         request_pages={1: {"prompt_profile": "front_special"}},
         llm_model="qwen-test",
     )
+    assert checkpoint is not None
 
     stale_path = checkpoint_path.with_name(f"{checkpoint_path.name}.stale")
     assert stale_path.exists()
@@ -187,7 +188,7 @@ def _page_from_message(messages: list[dict[str, object]]) -> int:
     raise AssertionError(f"Unexpected LLM message: {content}")
 
 
-def _decision(page: int) -> dict[str, str | int]:
+def _decision(page: int) -> dict[str, str | int | None]:
     return {
         "page": page,
         "page_role": "visual_page",

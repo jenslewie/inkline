@@ -156,7 +156,9 @@ class TextStyleAnalyzer:
             if width < coord_w * 0.45:
                 continue
             metrics = self.block_metrics(block)
-            size = metrics.comparable_size if metrics else None
+            if metrics is None:
+                continue
+            size = metrics.comparable_size
             if size is None:
                 continue
             sizes.append(size)

@@ -101,7 +101,7 @@ def test_page_snapshot_asset_uses_relative_path(tmp_path) -> None:
 
     materialize_page_snapshot_assets(canonical, str(pdf_path), tmp_path, dpi=72)
 
-    image_asset = canonical["assets"]["images"][0]
+    image_asset = canonical["assets"]["images"][0]  # pyright: ignore[reportCallIssue,reportArgumentType]
     assert image_asset["path"] == "images/pages/page_0001.png"
 
 
@@ -158,7 +158,7 @@ def test_dense_text_image_can_repair_missing_visible_edge(tmp_path) -> None:
     assert attrs["image_path"] == "images/repaired/fig_page_0001.png"
     assert attrs["original_image_path"] == "images/original.jpg"
     assert attrs["image_render_bbox"][3] >= 188
-    image_asset = canonical["assets"]["images"][0]
+    image_asset = canonical["assets"]["images"][0]  # pyright: ignore[reportCallIssue,reportArgumentType]
     assert image_asset["path"] == "images/repaired/fig_page_0001.png"
     from PIL import Image
 

@@ -21,7 +21,7 @@ _TABLE_PAGE_BOTTOM_MARKER_RATIO = 0.74
 __all__ = ["reconcile_table_continuations"]
 
 
-def _is_table_continuation_marker(text: str) -> bool:
+def _is_table_continuation_marker(text: str | None) -> bool:
     t = normalize_ws(text or "").strip()
     t = t.strip("()（）[]【】")
     return t in {"接上页", "接下页", "续表", "续上表"}

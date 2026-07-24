@@ -4,7 +4,7 @@ from collections import Counter
 from copy import deepcopy
 from itertools import pairwise
 from statistics import median
-from typing import Any
+from typing import Any, TypeGuard
 
 MIN_BODY_WIDTH_RATIO = 0.2
 MAX_BODY_WIDTH_RATIO = 0.92
@@ -334,7 +334,7 @@ def _text_line_metrics(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for unit in units:
         attrs = unit.get("attrs") if isinstance(unit.get("attrs"), dict) else {}
-        by_observation = attrs.get("text_line_metrics_by_observation")
+        by_observation = attrs.get("text_line_metrics_by_observation")  # pyright: ignore[reportOptionalMemberAccess]
         if not isinstance(by_observation, dict):
             continue
         for metrics in by_observation.values():
@@ -843,9 +843,9 @@ def _is_display_candidate(signals: list[str]) -> bool:
 def _short_line_group(unit: dict[str, Any], page_sizes: dict[int, dict[str, float]]) -> str | None:
     attrs = unit.get("attrs") if isinstance(unit.get("attrs"), dict) else {}
     merge_reasons = (
-        attrs.get("merge_reasons") if isinstance(attrs.get("merge_reasons"), list) else []
+        attrs.get("merge_reasons") if isinstance(attrs.get("merge_reasons"), list) else []  # pyright: ignore[reportOptionalMemberAccess]
     )
-    if "same_page_short_line_group" not in merge_reasons:
+    if "same_page_short_line_group" not in merge_reasons:  # pyright: ignore[reportOperatorIssue]
         return None
     bboxes = _line_bboxes(unit)
     if len(bboxes) < 2:
@@ -886,7 +886,7 @@ def _spread(values: list[float]) -> float:
     return max(values) - min(values)
 
 
-def _valid_bbox(value: Any) -> bool:
+def _valid_bbox(value: Any) -> TypeGuard[list[float]]:
     return (
         isinstance(value, list)
         and len(value) == 4

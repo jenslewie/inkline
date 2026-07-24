@@ -632,7 +632,7 @@ def _is_set_off_after_narrow_bridge_before_body(
         _bbox_width(prev_bb) * 1.35, scaled_body_width * 0.45
     )
     gap_from_bridge = float(cur_bb[1]) - float(prev_bb[3])
-    gap_to_body = float((_bbox(nxt) or [0, 0, 0, 0])[1]) - float(cur_bb[3])
+    gap_to_body = float((_bbox(nxt) or [0, 0, 0, 0])[1]) - float(cur_bb[3])  # pyright: ignore[reportArgumentType]
     gap_limit = max(58.0, scaled_body_width * 0.08)
     return (
         aligned_left

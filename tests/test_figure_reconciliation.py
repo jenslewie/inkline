@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Sequence
+
 from inkline.parsers.mineru.reconcile.figure import reconcile_figure_captions
 from inkline.parsers.mineru.schema.block_types import (
     CAPTION,
@@ -12,7 +14,7 @@ from inkline.parsers.mineru.schema.block_types import (
 )
 
 
-def _block(type_: str, text: str, page: int = 1, bbox: tuple | None = None) -> dict:
+def _block(type_: str, text: str, page: int = 1, bbox: Sequence[float] | None = None) -> dict:
     """Create a test block. Default bboxes use RENDERED-pixel coordinates (>650 wide, >750 tall)
     so PageGeometry.from_canonical_blocks correctly infers page_width=1000."""
     b: dict = {"type": type_, "text": text, "block_id": f"b_{type_}_{text[:4]}"}

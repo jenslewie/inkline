@@ -30,11 +30,13 @@ def test_run_mineru_raw_writes_run_state(tmp_path, monkeypatch):
         assert kwargs["backend"] == "vlm-auto-engine"
         assert kwargs["parse_method"] == "auto"
 
-    common.read_fn = read_fn
-    common.do_parse = do_parse
+    monkeypatch.setattr(common, "read_fn", read_fn, raising=False)
+    monkeypatch.setattr(common, "do_parse", do_parse, raising=False)
 
     enum_class = types.ModuleType("mineru.utils.enum_class")
-    enum_class.MakeMode = types.SimpleNamespace(MM_MD="mm_markdown")
+    monkeypatch.setattr(
+        enum_class, "MakeMode", types.SimpleNamespace(MM_MD="mm_markdown"), raising=False
+    )
 
     monkeypatch.setitem(sys.modules, "mineru", types.ModuleType("mineru"))
     monkeypatch.setitem(sys.modules, "mineru.cli", types.ModuleType("mineru.cli"))

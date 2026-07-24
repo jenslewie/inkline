@@ -349,7 +349,7 @@ def _logical_unit_from_observation_group(
         observation_bbox = observation.get("bbox")
         if _valid_bbox(observation_bbox):
             bbox = (
-                _union_bbox(bbox, observation_bbox)
+                _union_bbox(bbox, observation_bbox)  # pyright: ignore[reportArgumentType]
                 if bbox is not None
                 else deepcopy(observation_bbox)
             )
@@ -372,15 +372,15 @@ def _merge_observation_attrs(attrs: dict[str, Any], observation: dict[str, Any])
     observation_attrs = (
         observation.get("attrs") if isinstance(observation.get("attrs"), dict) else {}
     )
-    text_line_metrics = observation_attrs.get("text_line_metrics")
+    text_line_metrics = observation_attrs.get("text_line_metrics")  # pyright: ignore[reportOptionalMemberAccess]
     if isinstance(text_line_metrics, dict):
         attrs.setdefault("text_line_metrics_by_observation", {})[
             str(observation["observation_id"])
         ] = deepcopy(text_line_metrics)
-    inline_runs = observation_attrs.get("inline_runs")
+    inline_runs = observation_attrs.get("inline_runs")  # pyright: ignore[reportOptionalMemberAccess]
     if isinstance(inline_runs, list):
         attrs.setdefault("inline_runs", []).extend(deepcopy(inline_runs))
-    note_refs = observation_attrs.get("note_refs")
+    note_refs = observation_attrs.get("note_refs")  # pyright: ignore[reportOptionalMemberAccess]
     if isinstance(note_refs, list):
         attrs.setdefault("note_refs", []).extend(deepcopy(note_refs))
 
@@ -557,7 +557,7 @@ def _first_unit_text_line_metrics(unit: dict[str, Any]) -> dict[str, Any] | None
     if not observation_ids:
         return None
     attrs = unit.get("attrs") if isinstance(unit.get("attrs"), dict) else {}
-    metrics_by_observation = attrs.get("text_line_metrics_by_observation")
+    metrics_by_observation = attrs.get("text_line_metrics_by_observation")  # pyright: ignore[reportOptionalMemberAccess]
     if not isinstance(metrics_by_observation, dict):
         return None
     metrics = metrics_by_observation.get(str(observation_ids[0]))
@@ -648,14 +648,14 @@ def _public_bookgraph(debug_graph: dict[str, Any]) -> dict[str, Any]:
 
 def _public_node(node: dict[str, Any]) -> dict[str, Any]:
     public = deepcopy(node)
-    attrs = public.get("attrs") if isinstance(public.get("attrs"), dict) else {}
-    public["attrs"] = {key: value for key, value in attrs.items() if key not in INTERNAL_NODE_ATTRS}
+    attrs = public.get("attrs") or {}
+    public["attrs"] = {key: value for key, value in attrs.items() if key not in INTERNAL_NODE_ATTRS}  # pyright: ignore[reportOptionalMemberAccess]
     return public
 
 
 def _public_edge(edge: dict[str, Any]) -> dict[str, Any]:
     public = deepcopy(edge)
-    attrs = public.get("attrs") if isinstance(public.get("attrs"), dict) else {}
+    attrs = public.get("attrs") or {}
     public["attrs"] = {key: value for key, value in attrs.items() if key not in INTERNAL_NODE_ATTRS}
     return public
 

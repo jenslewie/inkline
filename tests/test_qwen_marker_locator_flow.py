@@ -2,6 +2,7 @@ import sys
 from argparse import Namespace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 from inkline.parsers.mineru.normalize.core import (
@@ -133,7 +134,7 @@ def test_page_then_block_retries_missing_pages_with_block_dpi(monkeypatch, tmp_p
 
 
 def test_missing_pages_include_resolved_refs_without_inline_run() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b_body",
             "type": "paragraph",
@@ -190,7 +191,7 @@ def test_missing_pages_include_resolved_refs_without_inline_run() -> None:
 
 
 def test_qwen_definition_hints_split_merged_middle_footnote() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b_note",
             "type": "footnote",
@@ -225,7 +226,7 @@ def test_qwen_definition_hints_split_merged_middle_footnote() -> None:
 
 
 def test_qwen_footnote_markers_keep_full_page_defs_when_block_evidence_follows() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b_note_star",
             "type": "footnote",
@@ -327,7 +328,7 @@ def test_single_marker_retry_merges_missing_marker(monkeypatch, tmp_path: Path) 
 
 
 def test_problem_page_plan_keeps_scoped_endnote_body_candidates() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b_chapter",
             "type": "heading",
@@ -393,7 +394,7 @@ def test_problem_page_plan_keeps_scoped_endnote_body_candidates() -> None:
 
 
 def test_problem_page_plan_reviews_two_line_footnote_with_unmarked_second_line() -> None:
-    blocks = [
+    blocks: list[Any] = [
         {
             "block_id": "b_note",
             "type": "footnote",

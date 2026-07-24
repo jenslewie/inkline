@@ -4,10 +4,15 @@ import re
 from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from inkline.canonical.bookgraph.footnote_text import strip_footnote_marker
 from inkline.canonical.bookgraph.schema import make_bookgraph, make_edge, validate_bookgraph
+
+
+def _attrs(owner: dict[str, Any]) -> dict[str, Any]:
+    return cast(dict[str, Any], owner.get("attrs") or {})
+
 
 _NOTE_SECTION_HEADING_PATTERN = re.compile(r"^\s*(?:注释|注|notes?|endnotes?)\s*$", re.IGNORECASE)
 _NOTE_SECTION_STOP_HEADING_PATTERN = re.compile(
@@ -228,7 +233,7 @@ def _resolve_scoped_note_refs_normalized(graph: dict[str, Any]) -> dict[str, Any
             candidates = _scoped_note_candidates(notes_by_scope_marker, marker, scope_key)
             if len(candidates) == 1:
                 note = candidates[0]
-                note_attrs = note.get("attrs") if isinstance(note.get("attrs"), dict) else {}
+                note_attrs = _attrs(note)
                 _set_scoped_note_ref_target(run, marker, note)
                 edge_key = ("references_note", str(node["node_id"]), str(note["node_id"]))
                 if edge_key not in existing_edges:
@@ -303,7 +308,7 @@ def _page_foot_notes_by_page_marker(
     for node in nodes:
         if node.get("node_type") != "note":
             continue
-        attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+        attrs = _attrs(node)
         if attrs.get("source_placement") != "page_foot" or attrs.get("scope") != "page":
             continue
         marker = str(attrs.get("marker") or "").strip()
@@ -342,13 +347,13 @@ def _unique_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _note_ref_marker(run: dict[str, Any]) -> str:
-    attrs = run.get("attrs") if isinstance(run.get("attrs"), dict) else {}
+    attrs = _attrs(run)
     marker = attrs.get("marker") or run.get("marker") or run.get("text")
     return str(marker or "").strip()
 
 
 def _note_ref_target(run: dict[str, Any]) -> str:
-    attrs = run.get("attrs") if isinstance(run.get("attrs"), dict) else {}
+    attrs = _attrs(run)
     return str(attrs.get("target_note_id") or run.get("target_note_id") or "").strip()
 
 
@@ -439,7 +444,7 @@ def _note_section_scope(source_placement: str, scope_key: str) -> str:
 
 
 def _in_note_section(node: dict[str, Any]) -> bool:
-    attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+    attrs = _attrs(node)
     return bool(attrs.get("note_section_id"))
 
 
@@ -468,7 +473,7 @@ def _scoped_notes_by_marker(
     for node in nodes:
         if node.get("node_type") != "note":
             continue
-        attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+        attrs = _attrs(node)
         if attrs.get("source_placement") == "page_foot":
             continue
         marker = str(attrs.get("marker") or "").strip()
@@ -493,7 +498,7 @@ def _scoped_note_candidates(
 
 
 def _set_scoped_note_ref_target(run: dict[str, Any], marker: str, note: dict[str, Any]) -> None:
-    note_attrs = note.get("attrs") if isinstance(note.get("attrs"), dict) else {}
+    note_attrs = _attrs(note)
     attrs = run.setdefault("attrs", {})
     attrs["marker"] = marker
     attrs["target_note_id"] = str(note["node_id"])
@@ -592,7 +597,7 @@ def _reference_text_nodes_by_page(
 ) -> dict[int, list[dict[str, Any]]]:
     by_page: dict[int, list[dict[str, Any]]] = {}
     for node in nodes:
-        attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+        attrs = _attrs(node)
         if "reference_text" not in attrs.get("role_hints", []):
             continue
         for page in _node_pages(node, evidence_by_id):
@@ -640,7 +645,7 @@ def _note_marker(text: str, attrs: dict[str, Any]) -> str:
 
 
 def _source_text_unit_ids(node: dict[str, Any]) -> list[str]:
-    attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+    attrs = _attrs(node)
     source_text_unit_id = attrs.get("source_text_unit_id")
     if isinstance(source_text_unit_id, str) and source_text_unit_id:
         return [source_text_unit_id]
@@ -659,7 +664,7 @@ def _note_ref_counts(nodes: list[dict[str, Any]]) -> Counter[str]:
         for run in node.get("inline_runs") or []:
             if not isinstance(run, dict) or run.get("type") != "note_ref":
                 continue
-            attrs = run.get("attrs") if isinstance(run.get("attrs"), dict) else {}
+            attrs = _attrs(run)
             if attrs.get("target_note_id") or run.get("target_note_id"):
                 counts["resolved"] += 1
             else:
@@ -672,6 +677,6 @@ def _note_attr_counts(nodes: list[dict[str, Any]], attr: str) -> Counter[str]:
     for node in nodes:
         if node.get("node_type") != "note":
             continue
-        attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+        attrs = _attrs(node)
         counts[str(attrs.get(attr) or "unknown")] += 1
     return counts

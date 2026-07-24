@@ -185,7 +185,7 @@ def _process_toc_page(ids: IdFactory, page_blocks: List[RawBlock]) -> List[Dict[
             continue
         if b.raw_type == "title" and block_text(b) == "目录":
             out.append(
-                canonical_block(
+                canonical_block(  # pyright: ignore[reportArgumentType]
                     ids.next(),
                     HEADING,
                     "目录",

@@ -110,7 +110,7 @@ def test_book_skeleton_cli_writes_skeleton_without_canonical_output(tmp_path, mo
         "llm_api_url": "http://example.test/api/chat",
         "llm_timeout_seconds": 300,
     }
-    assert "source_file" in captured["observed_kwargs"]["metadata"]
+    assert "source_file" in captured["observed_kwargs"]["metadata"]  # pyright: ignore[reportIndexIssue]
 
 
 def test_book_skeleton_llm_messages_keep_toc_images_separate_and_ordered(tmp_path) -> None:

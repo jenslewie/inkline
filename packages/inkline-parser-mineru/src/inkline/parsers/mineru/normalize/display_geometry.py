@@ -166,7 +166,7 @@ def display_attrs_for_group(
     if all(profile.is_right_aligned_short(block) for block in group if block.bbox):
         attrs["alignment"] = "right"
         attrs["style_hints"] = {"text_align": "right"}
-        attrs.setdefault("classification_evidence", []).append("geometry_right_aligned_group")
+        attrs.setdefault("classification_evidence", []).append("geometry_right_aligned_group")  # pyright: ignore[reportAttributeAccessIssue]
     return attrs
 
 

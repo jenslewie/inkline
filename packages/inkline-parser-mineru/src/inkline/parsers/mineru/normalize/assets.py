@@ -600,7 +600,7 @@ def _trim_rect_bottom_to_horizontal_rule(page: Any, rect: Any, original_rect: An
         row_bottom = rect.y0 + (row + 1) * row_pdf_height
         if row_bottom <= original_rect.y1 + 2.0:
             break
-        dark_pixels = sum(1 for col in range(pix.width) if pixels[col, row] < 220)
+        dark_pixels = sum(1 for col in range(pix.width) if pixels[col, row] < 220)  # pyright: ignore[reportOptionalSubscript,reportOperatorIssue]
         if dark_pixels >= min_dark_pixels:
             return fitz.Rect(rect.x0, rect.y0, rect.x1, row_bottom)
     return rect
@@ -692,7 +692,7 @@ def _visible_content_bbox(page: Any, search: Any) -> Optional[Tuple[Any, Any]]:
         image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L")
     except Exception:
         return None
-    ink = image.point(lambda p: 255 if p < 245 else 0)
+    ink = image.point(lambda p: 255 if p < 245 else 0)  # pyright: ignore[reportOperatorIssue]
     return pix, ink.getbbox()
 
 

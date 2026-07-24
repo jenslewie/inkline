@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from copy import deepcopy
-from typing import Any
+from typing import Any, TypeGuard
 
 from inkline.canonical.observed.schema import validate_observed_document
 
@@ -161,7 +161,7 @@ def _visual_dominant_annotation_page(
 
 def _reading_order(observation: dict[str, Any]) -> int:
     attrs = observation.get("attrs") if isinstance(observation.get("attrs"), dict) else {}
-    value = attrs.get("reading_order")
+    value = attrs.get("reading_order")  # pyright: ignore[reportOptionalMemberAccess]
     return int(value) if isinstance(value, int) else 999999
 
 
@@ -520,7 +520,7 @@ def _next_observation_starts_continuation(observation: dict[str, Any]) -> bool:
 
 def _observation_text_line_metrics(observation: dict[str, Any]) -> dict[str, Any] | None:
     attrs = observation.get("attrs") if isinstance(observation.get("attrs"), dict) else {}
-    metrics = attrs.get("text_line_metrics")
+    metrics = attrs.get("text_line_metrics")  # pyright: ignore[reportOptionalMemberAccess]
     return metrics if isinstance(metrics, dict) else None
 
 
@@ -597,7 +597,7 @@ def _merge_attrs(
         attrs.setdefault("note_refs", []).extend(deepcopy(note_refs))
 
 
-def _valid_bbox(value: Any) -> bool:
+def _valid_bbox(value: Any) -> TypeGuard[list[float]]:
     return (
         isinstance(value, list)
         and len(value) == 4

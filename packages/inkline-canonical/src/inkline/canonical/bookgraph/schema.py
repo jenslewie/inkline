@@ -260,7 +260,7 @@ def _validate_inline_runs(inline_runs: list[Any], node_types: dict[str, str], pa
         if run.get("type") != "note_ref":
             continue
         attrs = run.get("attrs") if isinstance(run.get("attrs"), dict) else {}
-        target_note_id = attrs.get("target_note_id") or run.get("target_note_id")
+        target_note_id = attrs.get("target_note_id") or run.get("target_note_id")  # pyright: ignore[reportOptionalMemberAccess]
         if target_note_id is None:
             continue
         if not isinstance(target_note_id, str):

@@ -7,6 +7,7 @@ class CanonicalSource(TypedDict):
     page: int | None
     bbox: list[float] | None
     pages: NotRequired[list[int]]
+    spans: NotRequired[list[dict[str, Any]]]
 
 
 class CanonicalBlock(TypedDict):

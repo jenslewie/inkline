@@ -41,7 +41,7 @@ def _project_attrs(node: dict[str, Any]) -> dict[str, Any]:
 
 def _legacy_block_id(node: dict[str, Any]) -> str | None:
     attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
-    value = attrs.get("legacy_block_id")
+    value = attrs.get("legacy_block_id")  # pyright: ignore[reportOptionalMemberAccess]
     return str(value) if value else None
 
 

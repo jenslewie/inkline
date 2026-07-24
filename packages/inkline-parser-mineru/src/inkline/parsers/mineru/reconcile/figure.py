@@ -506,7 +506,7 @@ def _legend_strip_context(
     bbox = _bbox(figure)
     if page is None or not bbox:
         return None
-    page_height = _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+    page_height = _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT)  # pyright: ignore[reportCallIssue,reportArgumentType]
     anchor_left = float(bbox[0])
     anchor_right = float(bbox[2])
     return _LegendStripContext(
@@ -733,8 +733,8 @@ def _is_same_visual_figure_fragment(blocks: List[Dict[str, Any]], left_idx: int)
 def _figure_pair_geometry(
     blocks: List[Dict[str, Any]], left: Dict[str, Any], left_bbox: BBox, right_bbox: BBox
 ) -> _FigurePairGeometry:
-    page = _block_page(left)
-    page_width = _page_coord_widths(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
+    page = _block_page(left) or 0
+    page_width = _page_coord_widths(blocks).get(page, _DEFAULT_PAGE_HEIGHT)  # pyright: ignore[reportCallIssue,reportArgumentType]
     page_height = _page_coord_heights(blocks).get(page, _DEFAULT_PAGE_HEIGHT)
     left_width = max(1.0, float(left_bbox[2]) - float(left_bbox[0]))
     left_height = max(1.0, float(left_bbox[3]) - float(left_bbox[1]))

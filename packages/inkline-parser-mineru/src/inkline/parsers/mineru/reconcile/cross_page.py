@@ -323,7 +323,7 @@ def _next_same_page_text_block(
     for k in range(start, len(blocks)):
         b = blocks[k]
         if _block_page(b) != page:
-            if _block_page(b) and _block_page(b) > page:
+            if _block_page(b) and _block_page(b) > page:  # pyright: ignore[reportOptionalOperand]
                 return None
             continue
         if b.get("type") in MERGEABLE_TEXT_TYPES:
@@ -357,8 +357,8 @@ def _starts_after_next_page_float(
     ]
     if not float_boxes:
         return False
-    top_y = min(float(bb[1]) for bb in float_boxes)
-    bottom_y = max(float(bb[3]) for bb in float_boxes)
+    top_y = min(float(bb[1]) for bb in float_boxes)  # pyright: ignore[reportOptionalSubscript]
+    bottom_y = max(float(bb[3]) for bb in float_boxes)  # pyright: ignore[reportOptionalSubscript]
     h = page_heights.get(rp, _DEFAULT_PAGE_HEIGHT)
     return top_y <= h * 0.25 and bottom_y <= float(rbb[1]) <= bottom_y + h * 0.16
 
@@ -646,7 +646,9 @@ def _display_gate_blocks_merge(candidate: _CrossPageCandidate, context: _CrossPa
         return False
     right_page = _block_page(candidate.right)
     return not _display_block_layout(
-        candidate.right, context.layout, context.page_widths.get(right_page)
+        candidate.right,
+        context.layout,
+        context.page_widths.get(right_page),  # pyright: ignore[reportArgumentType]
     )
 
 
@@ -824,7 +826,7 @@ def _set_off_display_before_float_body_resume(
         return False
     page_local_set_off = _is_set_off_from_previous_body(blocks, idx, layout, page_widths)
     if (
-        not _display_block_layout(left, layout, page_widths.get(_block_page(left)))
+        not _display_block_layout(left, layout, page_widths.get(_block_page(left)))  # pyright: ignore[reportArgumentType]
         and not page_local_set_off
     ):
         return False

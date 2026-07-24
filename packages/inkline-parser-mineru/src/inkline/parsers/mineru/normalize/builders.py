@@ -20,6 +20,10 @@ from ..schema.models import BBox, IdFactory, RawBlock, canonical_block
 from ..schema.patterns import TOC_LINE_RE
 
 
+def _canonical_dict(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+    return dict(canonical_block(*args, **kwargs))
+
+
 def _build_display_attrs(
     raw_lines: List[str],
     blocks: Sequence[RawBlock],
@@ -88,7 +92,7 @@ def make_display_block(
     text = "\n".join(raw_lines).strip()
     page = blocks[0].page if blocks else None
     bbox = union_bbox([b.bbox for b in blocks if b.bbox])
-    block = canonical_block(
+    block = _canonical_dict(
         ids.next(),
         DISPLAY_BLOCK,
         text,
@@ -139,13 +143,13 @@ def make_display_group(ids: IdFactory, groups: List[List[RawBlock]]) -> Dict[str
         items.append(item)
     text = "\n\n".join(i["text"] for i in items)
     lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-    attrs = {
+    attrs: Dict[str, Any] = {
         "layout_role": "standalone_display_group",
         "layout_form": "standalone_sparse_page_group",
         "line_count": len(lines),
         "items": items,
     }
-    return canonical_block(
+    return _canonical_dict(
         ids.next(),
         DISPLAY_BLOCK,
         text,
@@ -193,7 +197,7 @@ def make_paragraph(
         attrs["inline_runs"] = inline_runs
     if extra_attrs:
         attrs.update(extra_attrs)
-    return canonical_block(ids.next(), block_type, text, b.page, b.bbox, attrs=attrs)
+    return _canonical_dict(ids.next(), block_type, text, b.page, b.bbox, attrs=attrs)
 
 
 def make_flush_right_terminal_block(ids: IdFactory, blocks: Sequence[RawBlock]) -> Dict[str, Any]:
@@ -207,7 +211,7 @@ def make_flush_right_terminal_block(ids: IdFactory, blocks: Sequence[RawBlock]) 
         "raw_types": [b.raw_type for b in blocks],
         "style_hints": {"text_align": "right"},
     }
-    block = canonical_block(
+    block = _canonical_dict(
         ids.next(),
         DISPLAY_BLOCK,
         text,
@@ -237,10 +241,10 @@ def make_heading(
         raw_type = "mixed"
     attrs = {"raw_type": raw_type, "raw_text": raw_text}
     if raw_type == "mixed":
-        attrs["raw_types"] = raw_types
+        attrs["raw_types"] = raw_types  # pyright: ignore[reportArgumentType]
     if role:
         attrs["role"] = role
-    return canonical_block(
+    return _canonical_dict(
         ids.next(),
         HEADING,
         norm_text,
@@ -263,7 +267,7 @@ def make_toc_item(
         display_text = normalize_toc_number(m.group("title")).strip()
         attrs["title"] = display_text
         attrs["target_page_label"] = m.group("page")
-    return canonical_block(
+    return _canonical_dict(
         ids.next(), TOC_ITEM, display_text, b.page, b.bbox, attrs=attrs, level=level
     )
 
@@ -286,7 +290,7 @@ def make_figure(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
         "captions": captions,
         "footnotes": footnotes,
     }
-    return canonical_block(ids.next(), FIGURE, "", b.page, b.bbox, attrs=attrs)
+    return _canonical_dict(ids.next(), FIGURE, "", b.page, b.bbox, attrs=attrs)
 
 
 def make_full_page_figure(
@@ -324,7 +328,7 @@ def make_page_snapshot_figure(
     if role == "visual_label_page":
         attrs["absorbed_block_ids"] = [f"raw:{b.page}:{b.index}" for b in blocks]
         attrs["absorbed_text"] = visual_texts
-    return canonical_block(
+    return _canonical_dict(
         ids.next(),
         FIGURE,
         "",
@@ -398,7 +402,7 @@ def make_table(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
     cell_alignments = _table_title_cell_alignments(html)
     if cell_alignments:
         attrs["cell_alignments"] = cell_alignments
-    block = canonical_block(ids.next(), TABLE, caption_text, b.page, b.bbox, attrs=attrs)
+    block = _canonical_dict(ids.next(), TABLE, caption_text, b.page, b.bbox, attrs=attrs)
     if not caption_text and html:
         block["text"] = _html_table_to_text(html)
     return block
@@ -508,4 +512,4 @@ def make_chart_table(ids: IdFactory, b: RawBlock) -> Dict[str, Any]:
         if isinstance(content, dict)
         else None,
     }
-    return canonical_block(ids.next(), TABLE, chart_text, b.page, b.bbox, attrs=attrs)
+    return _canonical_dict(ids.next(), TABLE, chart_text, b.page, b.bbox, attrs=attrs)
