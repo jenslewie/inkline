@@ -170,7 +170,9 @@ def test_page_review_checkpoint_archives_an_older_review_contract_and_restarts(t
 
     stale_path = checkpoint_path.with_name(f"{checkpoint_path.name}.stale")
     assert stale_path.exists()
-    assert json.loads(stale_path.read_text(encoding="utf-8"))["fingerprint"]["candidate_pages"] == [1]
+    assert json.loads(stale_path.read_text(encoding="utf-8"))["fingerprint"]["candidate_pages"] == [
+        1
+    ]
     assert checkpoint["checkpoint"]["status"] == "in_progress"
     assert checkpoint["page_decisions"] == {}
     assert json.loads(checkpoint_path.read_text(encoding="utf-8")) == checkpoint

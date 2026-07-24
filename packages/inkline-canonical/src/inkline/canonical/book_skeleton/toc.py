@@ -7,14 +7,16 @@ from typing import Any
 TOC_ENTRY_RE = re.compile(
     r"^\s*(?P<title>.+?)\s*(?:[/／.·•…\-\s]+)?(?P<page>[ivxlcdmIVXLCDM\d]+)\s*$"
 )
-TOC_ENTRY_PART_RE = re.compile(
-    r"\s*(?P<title>.+?)\s+(?P<page>[ivxlcdmIVXLCDM\d]+)(?=\s+\S|$)"
-)
+TOC_ENTRY_PART_RE = re.compile(r"\s*(?P<title>.+?)\s+(?P<page>[ivxlcdmIVXLCDM\d]+)(?=\s+\S|$)")
 PACKED_PARENTHESIZED_TOC_ENTRY_RE = re.compile(
     r"(?P<title>[^/／()（）]+?)\s*[（(]\s*(?P<page>\d+)\s*[）)]"
 )
-TOC_PART_LABEL_RE = re.compile(r"^(?P<label>第[一二三四五六七八九十百千万\d]+部分)\s+(?P<title>.+)$")
-TOC_CHAPTER_LABEL_RE = re.compile(r"^(?P<label>第[一二三四五六七八九十百千万\d]+[章节])\s+(?P<title>.+)$")
+TOC_PART_LABEL_RE = re.compile(
+    r"^(?P<label>第[一二三四五六七八九十百千万\d]+部分)\s+(?P<title>.+)$"
+)
+TOC_CHAPTER_LABEL_RE = re.compile(
+    r"^(?P<label>第[一二三四五六七八九十百千万\d]+[章节])\s+(?P<title>.+)$"
+)
 TOC_TOPIC_LABEL_RE = re.compile(r"^(?P<label>专题\s*\d+)\s+(?P<title>.+)$")
 TOC_APPENDIX_NUMBER_LABEL_RE = re.compile(r"^(?P<label>附录\s*\d+)\s+(?P<title>.+)$")
 TOC_APPENDIX_LABEL_RE = re.compile(r"^(?P<label>附录)\s+(?P<title>.+)$")
@@ -137,8 +139,12 @@ def assign_toc_hierarchy(entries: list[dict[str, Any]]) -> None:
     stack_by_level: dict[int, int] = {}
     for entry in entries:
         level = int(entry["level"])
-        parent_level = max((candidate for candidate in stack_by_level if candidate < level), default=None)
-        entry["parent_entry_index"] = stack_by_level[parent_level] if parent_level is not None else None
+        parent_level = max(
+            (candidate for candidate in stack_by_level if candidate < level), default=None
+        )
+        entry["parent_entry_index"] = (
+            stack_by_level[parent_level] if parent_level is not None else None
+        )
         if _is_non_parentable_top_level_entry(entry):
             continue
         stack_by_level[level] = int(entry["entry_index"])
@@ -165,7 +171,10 @@ def looks_like_body_toc_entry(entry: dict[str, Any]) -> bool:
 
 def looks_like_body_toc_title(title: str) -> bool:
     stripped = title.strip()
-    return BODY_TITLE_RE.match(stripped) is not None or NUMERIC_BODY_TITLE_RE.match(stripped) is not None
+    return (
+        BODY_TITLE_RE.match(stripped) is not None
+        or NUMERIC_BODY_TITLE_RE.match(stripped) is not None
+    )
 
 
 def apply_structural_role_guardrails(entries: list[dict[str, Any]]) -> None:
@@ -175,12 +184,7 @@ def apply_structural_role_guardrails(entries: list[dict[str, Any]]) -> None:
 
 
 def normalize_toc_line(line: str) -> str:
-    return (
-        line.replace("／", "/")
-        .replace("．", ".")
-        .replace("—", "-")
-        .replace("–", "-")
-    )
+    return line.replace("／", "/").replace("．", ".").replace("—", "-").replace("–", "-")
 
 
 def clean_toc_title(title: str) -> str:
@@ -289,7 +293,11 @@ def _expected_label_suffix(page_token: str, expected_label: str) -> str | None:
     if page_token.endswith(expected_label):
         return expected_label
     ocr_suffix = expected_label.replace("1", "I")
-    if ocr_suffix != expected_label and len(page_token) > len(ocr_suffix) and page_token.endswith(ocr_suffix):
+    if (
+        ocr_suffix != expected_label
+        and len(page_token) > len(ocr_suffix)
+        and page_token.endswith(ocr_suffix)
+    ):
         return ocr_suffix
     return None
 
@@ -327,9 +335,7 @@ def _has_non_numeric_toc_label(title: str) -> bool:
     )
 
 
-def _toc_entry_parts(
-    raw_title: str, *, printed_start_page: str | None = None
-) -> dict[str, Any]:
+def _toc_entry_parts(raw_title: str, *, printed_start_page: str | None = None) -> dict[str, Any]:
     raw_label, label, title, level, attrs = _split_toc_label(raw_title)
     display_title = f"{label} {title}" if label else title
     return {

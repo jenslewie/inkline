@@ -237,7 +237,10 @@ def test_observed_only_input_is_compressed_for_llm() -> None:
     observed_input = tool.build_observed_only_input(package)
 
     assert "pages" not in observed_input
-    assert observed_input["page_signal_index"][0] == {"page": 1, "signals": ["early_page", "first_page", "title_hint"]}
+    assert observed_input["page_signal_index"][0] == {
+        "page": 1,
+        "signals": ["early_page", "first_page", "title_hint"],
+    }
     assert {item["page"] for item in observed_input["evidence_pages"]} >= {1, 2, 4, 5}
 
 
@@ -462,7 +465,9 @@ def test_toc_llm_input_uses_full_toc_page_text() -> None:
                 bbox=[40, 80, 360, 500],
                 role_hint="toc_text",
             ),
-            make_observation("body", "text_region", text="第一章 开始", page=2, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "body", "text_region", text="第一章 开始", page=2, bbox=[40, 80, 360, 500]
+            ),
         ],
     )
 
@@ -522,7 +527,9 @@ def test_locate_title_pages_prefers_content_title_over_running_header() -> None:
                 bbox=[40, 80, 360, 500],
                 role_hint="toc_text",
             ),
-            make_observation("body", "text_region", text="第一章 正文", page=2, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "body", "text_region", text="第一章 正文", page=2, bbox=[40, 80, 360, 500]
+            ),
             make_observation(
                 "appendix-title",
                 "text_region",
@@ -530,9 +537,15 @@ def test_locate_title_pages_prefers_content_title_over_running_header() -> None:
                 page=3,
                 bbox=[90, 110, 360, 500],
             ),
-            make_observation("running-header", "page_marker", text=title, page=5, bbox=[90, 40, 360, 60]),
-            make_observation("printed-page", "page_marker", text="/385", page=5, bbox=[365, 40, 390, 60]),
-            make_observation("continued", "text_region", text="附录正文续页。", page=5, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "running-header", "page_marker", text=title, page=5, bbox=[90, 40, 360, 60]
+            ),
+            make_observation(
+                "printed-page", "page_marker", text="/385", page=5, bbox=[365, 40, 390, 60]
+            ),
+            make_observation(
+                "continued", "text_region", text="附录正文续页。", page=5, bbox=[40, 80, 360, 500]
+            ),
         ],
     )
 
@@ -548,7 +561,9 @@ def test_locate_title_pages_prefers_first_section_title_over_later_note_heading(
         doc_id="appendix-note-heading",
         page_count=8,
         observations=[
-            make_observation("toc", "text_region", text=f"目录\n{title} 381", page=1, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "toc", "text_region", text=f"目录\n{title} 381", page=1, bbox=[40, 80, 360, 500]
+            ),
             make_observation(
                 "appendix-title",
                 "text_region",
@@ -580,8 +595,12 @@ def test_locate_title_pages_handles_title_split_across_leading_lines() -> None:
         doc_id="split-title",
         page_count=8,
         observations=[
-            make_observation("toc", "text_region", text=f"目录\n{title} 433", page=1, bbox=[40, 80, 360, 500]),
-            make_observation("title-part-1", "text_region", text="附录1", page=3, bbox=[180, 100, 220, 120]),
+            make_observation(
+                "toc", "text_region", text=f"目录\n{title} 433", page=1, bbox=[40, 80, 360, 500]
+            ),
+            make_observation(
+                "title-part-1", "text_region", text="附录1", page=3, bbox=[180, 100, 220, 120]
+            ),
             make_observation(
                 "title-part-2",
                 "text_region",
@@ -589,7 +608,9 @@ def test_locate_title_pages_handles_title_split_across_leading_lines() -> None:
                 page=3,
                 bbox=[120, 140, 300, 160],
             ),
-            make_observation("body", "text_region", text="附录正文开始。", page=3, bbox=[40, 220, 360, 500]),
+            make_observation(
+                "body", "text_region", text="附录正文开始。", page=3, bbox=[40, 220, 360, 500]
+            ),
             make_observation(
                 "note-heading",
                 "text_region",
@@ -621,7 +642,9 @@ def test_locate_title_pages_handles_title_split_across_role_hints() -> None:
         doc_id="split-title-role-hints",
         page_count=3,
         observations=[
-            make_observation("toc", "text_region", text=f"目录\n{title} 1", page=1, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "toc", "text_region", text=f"目录\n{title} 1", page=1, bbox=[40, 80, 360, 500]
+            ),
             make_observation(
                 "part",
                 "text_region",
@@ -653,7 +676,9 @@ def test_locate_title_pages_ignores_circled_note_marker_in_title() -> None:
         doc_id="circled-note-title",
         page_count=3,
         observations=[
-            make_observation("toc", "text_region", text=f"目录\n{title} 896", page=1, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "toc", "text_region", text=f"目录\n{title} 896", page=1, bbox=[40, 80, 360, 500]
+            ),
             make_observation(
                 "title",
                 "text_region",
@@ -676,7 +701,9 @@ def test_locate_title_pages_requires_title_hint_for_generic_short_titles() -> No
         doc_id="generic-title-body-mention",
         page_count=3,
         observations=[
-            make_observation("toc", "text_region", text="目录\n注释 500", page=1, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "toc", "text_region", text="目录\n注释 500", page=1, bbox=[40, 80, 360, 500]
+            ),
             make_observation(
                 "body-mention",
                 "text_region",
@@ -820,8 +847,12 @@ def test_toc_driven_skeleton_plan_does_not_verify_every_body_chapter() -> None:
                 role_hint="toc_text",
             ),
             make_observation("front", "text_region", text="前言", page=2, bbox=[40, 80, 360, 500]),
-            make_observation("ch1", "text_region", text="第一章 开始", page=3, bbox=[40, 80, 360, 500]),
-            make_observation("ch2", "text_region", text="第二章 后续", page=5, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "ch1", "text_region", text="第一章 开始", page=3, bbox=[40, 80, 360, 500]
+            ),
+            make_observation(
+                "ch2", "text_region", text="第二章 后续", page=5, bbox=[40, 80, 360, 500]
+            ),
             make_observation("app", "text_region", text="附录", page=7, bbox=[40, 80, 360, 500]),
         ],
     )
@@ -857,7 +888,9 @@ def test_toc_driven_skeleton_plan_skips_index_continuation_pages_before_residual
                 bbox=[40, 80, 360, 500],
                 role_hint="toc_text",
             ),
-            make_observation("body", "text_region", text="第一章 正文", page=2, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "body", "text_region", text="第一章 正文", page=2, bbox=[40, 80, 360, 500]
+            ),
             make_observation(
                 "index-title",
                 "text_region",
@@ -873,7 +906,9 @@ def test_toc_driven_skeleton_plan_skips_index_continuation_pages_before_residual
                 page=6,
                 bbox=[40, 80, 360, 500],
             ),
-            make_observation("index-header", "text_region", text="索引/101", page=7, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "index-header", "text_region", text="索引/101", page=7, bbox=[40, 80, 360, 500]
+            ),
             make_observation(
                 "index-2",
                 "text_region",
@@ -881,7 +916,13 @@ def test_toc_driven_skeleton_plan_skips_index_continuation_pages_before_residual
                 page=8,
                 bbox=[40, 80, 360, 500],
             ),
-            make_observation("cover-back", "text_region", text="ISBN 978 条形码 定价", page=9, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "cover-back",
+                "text_region",
+                text="ISBN 978 条形码 定价",
+                page=9,
+                bbox=[40, 80, 360, 500],
+            ),
         ],
     )
 
@@ -909,7 +950,9 @@ def test_toc_driven_skeleton_plan_does_not_force_named_gazetteer_to_back_matter(
                 bbox=[40, 80, 360, 500],
                 role_hint="toc_text",
             ),
-            make_observation("body", "text_region", text="第一章 正文", page=14, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "body", "text_region", text="第一章 正文", page=14, bbox=[40, 80, 360, 500]
+            ),
             make_observation(
                 "gazetteer",
                 "text_region",
@@ -918,7 +961,9 @@ def test_toc_driven_skeleton_plan_does_not_force_named_gazetteer_to_back_matter(
                 bbox=[40, 80, 360, 500],
                 role_hint="title_text",
             ),
-            make_observation("afterword", "text_region", text="译后记", page=321, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "afterword", "text_region", text="译后记", page=321, bbox=[40, 80, 360, 500]
+            ),
         ],
     )
 
@@ -969,8 +1014,12 @@ def test_toc_driven_skeleton_plan_does_not_infer_pages_from_printed_offsets() ->
                 bbox=[40, 80, 360, 500],
                 role_hint="title_text",
             ),
-            make_observation("chapter-30", "text_region", text="30 战争之后", page=449, bbox=[40, 80, 360, 500]),
-            make_observation("afterword", "text_region", text="出版后记", page=519, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "chapter-30", "text_region", text="30 战争之后", page=449, bbox=[40, 80, 360, 500]
+            ),
+            make_observation(
+                "afterword", "text_region", text="出版后记", page=519, bbox=[40, 80, 360, 500]
+            ),
         ],
     )
 
@@ -1048,7 +1097,9 @@ def test_toc_driven_skeleton_plan_prefers_true_note_title_over_running_header() 
                 bbox=[40, 80, 360, 500],
                 role_hint="toc_text",
             ),
-            make_observation("body", "text_region", text="第一章 正文", page=25, bbox=[40, 80, 360, 500]),
+            make_observation(
+                "body", "text_region", text="第一章 正文", page=25, bbox=[40, 80, 360, 500]
+            ),
             make_observation(
                 "appendix-like",
                 "text_region",

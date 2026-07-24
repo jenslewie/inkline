@@ -168,9 +168,7 @@ def _validate_pages(pages: list[dict[str, Any]]) -> set[int]:
     return seen
 
 
-def _validate_observations(
-    observations: list[dict[str, Any]], pages: set[int]
-) -> None:
+def _validate_observations(observations: list[dict[str, Any]], pages: set[int]) -> None:
     observation_ids: set[str] = set()
     for index, observation in enumerate(observations):
         if not isinstance(observation, dict):

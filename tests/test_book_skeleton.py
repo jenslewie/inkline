@@ -171,11 +171,7 @@ def test_build_book_skeleton_from_observed_uses_toc_titles_and_observed_title_pa
     }
     assert entries["丝绸之路主要地名中英古今对照表"]["selected_start_page"] == 317
     assert entries["注释"]["candidate_start_pages"] == [319]
-    assert all(
-        not key.startswith("_")
-        for entry in skeleton["toc_entries"]
-        for key in entry
-    )
+    assert all(not key.startswith("_") for entry in skeleton["toc_entries"] for key in entry)
     assert skeleton["boundaries"]["first_body_page"] == 14
     canonical_api.validate_book_skeleton_against_observed(skeleton, _document())
 
@@ -212,9 +208,7 @@ def test_build_book_skeleton_aggregates_split_derived_title_evidence() -> None:
 
 
 def test_build_book_skeleton_does_not_treat_mixed_case_word_as_roman_label() -> None:
-    skeleton = build_book_skeleton_from_observed(
-        _labeled_entry_document("Civil War 1", "War")
-    )
+    skeleton = build_book_skeleton_from_observed(_labeled_entry_document("Civil War 1", "War"))
 
     entry = skeleton["toc_entries"][0]
     assert entry["candidate_start_pages"] == []
@@ -345,7 +339,10 @@ def test_build_book_skeleton_from_observed_splits_glued_toc_entries() -> None:
     skeleton = build_book_skeleton_from_observed(document)
     display_titles = [entry["display_title"] for entry in skeleton["toc_entries"]]
 
-    assert "I 日本：从战国时代到世界强权 32 中国：衰落中的明王朝 213 有子名 “舍” 384 朝鲜：通向战利品的大道" not in display_titles
+    assert (
+        "I 日本：从战国时代到世界强权 32 中国：衰落中的明王朝 213 有子名 “舍” 384 朝鲜：通向战利品的大道"
+        not in display_titles
+    )
     assert display_titles == [
         "1 日本：从战国时代到世界强权",
         "2 中国：衰落中的明王朝",
@@ -441,11 +438,7 @@ def test_build_book_skeleton_from_observed_preserves_toc_title_ellipsis() -> Non
             make_observation(
                 "obs000001",
                 "text_region",
-                text=(
-                    "目录\n"
-                    "21 与此同时，在马尼拉…… 300"
-                    "22 “咨尔丰臣平秀吉……特封尔为日本国王” 303"
-                ),
+                text=("目录\n21 与此同时，在马尼拉…… 30022 “咨尔丰臣平秀吉……特封尔为日本国王” 303"),
                 page=27,
                 role_hint="toc_text",
             ),
@@ -602,15 +595,18 @@ def test_build_book_skeleton_from_observed_keeps_split_toc_lines_and_part_hierar
     assert "第三部分 战后余波" in entries
     assert entries["第一部分 通往阿金库尔之路"]["level"] == 1
     assert entries["第一章 “正当继承权”"]["level"] == 2
-    assert entries["第一章 “正当继承权”"]["parent_entry_index"] == entries[
-        "第一部分 通往阿金库尔之路"
-    ]["entry_index"]
-    assert entries["第九章 “顺风驶向法兰西”"]["parent_entry_index"] == entries[
-        "第二部分 阿金库尔远征"
-    ]["entry_index"]
-    assert entries["第十六章 死亡名单"]["parent_entry_index"] == entries[
-        "第三部分 战后余波"
-    ]["entry_index"]
+    assert (
+        entries["第一章 “正当继承权”"]["parent_entry_index"]
+        == entries["第一部分 通往阿金库尔之路"]["entry_index"]
+    )
+    assert (
+        entries["第九章 “顺风驶向法兰西”"]["parent_entry_index"]
+        == entries["第二部分 阿金库尔远征"]["entry_index"]
+    )
+    assert (
+        entries["第十六章 死亡名单"]["parent_entry_index"]
+        == entries["第三部分 战后余波"]["entry_index"]
+    )
 
 
 def test_build_book_skeleton_from_observed_assigns_chapter_subheading_hierarchy() -> None:
@@ -691,12 +687,14 @@ def test_build_book_skeleton_from_observed_assigns_chapter_subheading_hierarchy(
 
     assert entries["第一章 启示预言的传统"]["level"] == 1
     assert entries["犹太教和早期基督教的启示文学"]["level"] == 2
-    assert entries["犹太教和早期基督教的启示文学"]["parent_entry_index"] == entries[
-        "第一章 启示预言的传统"
-    ]["entry_index"]
-    assert entries["中世纪欧洲的启示文学传统"]["parent_entry_index"] == entries[
-        "第一章 启示预言的传统"
-    ]["entry_index"]
+    assert (
+        entries["犹太教和早期基督教的启示文学"]["parent_entry_index"]
+        == entries["第一章 启示预言的传统"]["entry_index"]
+    )
+    assert (
+        entries["中世纪欧洲的启示文学传统"]["parent_entry_index"]
+        == entries["第一章 启示预言的传统"]["entry_index"]
+    )
     assert "第五章 十字军运动的后果" in entries
     assert "/ 追寻千禧年 第五章 十字军运动的后果" not in entries
     assert entries["结论"]["level"] == 1
@@ -1031,10 +1029,7 @@ def test_build_book_skeleton_from_observed_regresses_silk_split_title_pages() ->
     skeleton = build_book_skeleton_from_observed(
         document,
         llm_classification={
-            "entry_roles": [
-                {"entry_index": index, "role": "body"}
-                for index in range(5)
-            ]
+            "entry_roles": [{"entry_index": index, "role": "body"} for index in range(5)]
             + [
                 {"entry_index": 5, "role": "back_matter"},
                 {"entry_index": 6, "role": "back_matter"},
@@ -1360,7 +1355,9 @@ def test_normalize_llm_toc_entries_does_not_rewrite_display_title_content() -> N
     assert entries[1]["display_title"] == "第二章 The Silk Road"
 
 
-def test_build_book_skeleton_from_observed_preserves_llm_level_and_parent_for_unknown_matter_titles() -> None:
+def test_build_book_skeleton_from_observed_preserves_llm_level_and_parent_for_unknown_matter_titles() -> (
+    None
+):
     skeleton = build_book_skeleton_from_observed(
         _document(),
         llm_toc_entries=[
@@ -1654,7 +1651,9 @@ def test_validate_book_skeleton_rejects_title_and_toc_evidence_overlap() -> None
     anchor = skeleton["toc_entries"][2]["selected_start_anchor"]
     anchor["toc_observation_ids"] = [anchor["title_observation_ids"][0]]
 
-    with pytest.raises(ValidationError, match="title and TOC observation evidence must not overlap"):
+    with pytest.raises(
+        ValidationError, match="title and TOC observation evidence must not overlap"
+    ):
         validate_book_skeleton(skeleton)
 
 
@@ -1694,9 +1693,7 @@ def test_validate_book_skeleton_against_observed_rejects_mismatched_doc_id() -> 
 def test_validate_book_skeleton_against_observed_rejects_unknown_observation() -> None:
     document = _document()
     skeleton = build_book_skeleton_from_observed(document)
-    skeleton["toc_entries"][2]["selected_start_anchor"]["title_observation_ids"] = [
-        "obs999999"
-    ]
+    skeleton["toc_entries"][2]["selected_start_anchor"]["title_observation_ids"] = ["obs999999"]
 
     with pytest.raises(ValidationError, match="unknown observation: obs999999"):
         canonical_api.validate_book_skeleton_against_observed(skeleton, document)
@@ -1705,15 +1702,15 @@ def test_validate_book_skeleton_against_observed_rejects_unknown_observation() -
 def test_validate_book_skeleton_against_observed_rejects_title_evidence_on_other_page() -> None:
     document = _document()
     skeleton = build_book_skeleton_from_observed(document)
-    skeleton["toc_entries"][2]["selected_start_anchor"]["title_observation_ids"] = [
-        "obs000003"
-    ]
+    skeleton["toc_entries"][2]["selected_start_anchor"]["title_observation_ids"] = ["obs000003"]
 
     with pytest.raises(ValidationError, match="title evidence is not on anchor page"):
         canonical_api.validate_book_skeleton_against_observed(skeleton, document)
 
 
-def test_validate_book_skeleton_against_observed_rejects_unrelated_title_evidence_on_anchor_page() -> None:
+def test_validate_book_skeleton_against_observed_rejects_unrelated_title_evidence_on_anchor_page() -> (
+    None
+):
     document = _document()
     skeleton = build_book_skeleton_from_observed(document)
     document["observations"].append(
@@ -1725,9 +1722,7 @@ def test_validate_book_skeleton_against_observed_rejects_unrelated_title_evidenc
             role_hint="title_text",
         )
     )
-    skeleton["toc_entries"][2]["selected_start_anchor"]["title_observation_ids"] = [
-        "obs000011"
-    ]
+    skeleton["toc_entries"][2]["selected_start_anchor"]["title_observation_ids"] = ["obs000011"]
 
     with pytest.raises(ValidationError, match="title evidence does not match direct candidate"):
         canonical_api.validate_book_skeleton_against_observed(skeleton, document)
@@ -1736,15 +1731,15 @@ def test_validate_book_skeleton_against_observed_rejects_unrelated_title_evidenc
 def test_validate_book_skeleton_against_observed_rejects_non_toc_evidence() -> None:
     document = _document()
     skeleton = build_book_skeleton_from_observed(document)
-    skeleton["toc_entries"][2]["selected_start_anchor"]["toc_observation_ids"] = [
-        "obs000003"
-    ]
+    skeleton["toc_entries"][2]["selected_start_anchor"]["toc_observation_ids"] = ["obs000003"]
 
     with pytest.raises(ValidationError, match="TOC evidence is not on a TOC page"):
         canonical_api.validate_book_skeleton_against_observed(skeleton, document)
 
 
-def test_validate_book_skeleton_against_observed_rejects_unrelated_toc_evidence_on_toc_page() -> None:
+def test_validate_book_skeleton_against_observed_rejects_unrelated_toc_evidence_on_toc_page() -> (
+    None
+):
     document = _document()
     skeleton = build_book_skeleton_from_observed(document)
     document["observations"].append(
@@ -1756,9 +1751,7 @@ def test_validate_book_skeleton_against_observed_rejects_unrelated_toc_evidence_
             role_hint="toc_text",
         )
     )
-    skeleton["toc_entries"][2]["selected_start_anchor"]["toc_observation_ids"] = [
-        "obs000011"
-    ]
+    skeleton["toc_entries"][2]["selected_start_anchor"]["toc_observation_ids"] = ["obs000011"]
 
     with pytest.raises(ValidationError, match="TOC evidence does not match entry title"):
         canonical_api.validate_book_skeleton_against_observed(skeleton, document)
@@ -1838,10 +1831,7 @@ def test_audit_book_skeleton_reports_entry_level_quality_issues() -> None:
 
     assert audit["summary"]["toc_entry_count"] == len(skeleton["toc_entries"])
     assert audit["summary"]["issue_count"] == 4
-    assert {
-        issue["issue_type"]
-        for issue in audit["issues"]
-    } == {
+    assert {issue["issue_type"] for issue in audit["issues"]} == {
         "unlocated_entry",
         "selected_start_page_not_in_candidates",
         "non_monotonic_selected_start_page",

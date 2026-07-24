@@ -167,9 +167,13 @@ def _validate_parent_refs(entries: list[dict[str, Any]]) -> None:
         level = int(entry["level"])
         parent_index = entry["parent_entry_index"]
         if level == 1 and parent_index is not None:
-            raise ValidationError(f"llm toc entry {index}.parent_entry_index must be null at level 1")
+            raise ValidationError(
+                f"llm toc entry {index}.parent_entry_index must be null at level 1"
+            )
         if level > 1 and parent_index is None:
-            raise ValidationError(f"llm toc entry {index}.parent_entry_index is required below level 1")
+            raise ValidationError(
+                f"llm toc entry {index}.parent_entry_index is required below level 1"
+            )
         if parent_index is not None and int(entries[parent_index]["level"]) >= level:
             raise ValidationError(
                 f"llm toc entry {index}.parent_entry_index must point to a lower-level parent"

@@ -50,13 +50,9 @@ def validate_internal_canonical(internal: dict[str, Any]) -> None:
         if not isinstance(value, expected_type):
             raise ValidationError(f"{field} must be {expected_type.__name__}")
     if internal["schema_name"] != INTERNAL_CANONICAL_SCHEMA_NAME:
-        raise ValidationError(
-            f"schema_name must be {INTERNAL_CANONICAL_SCHEMA_NAME}"
-        )
+        raise ValidationError(f"schema_name must be {INTERNAL_CANONICAL_SCHEMA_NAME}")
     if internal["schema_version"] != INTERNAL_CANONICAL_SCHEMA_VERSION:
-        raise ValidationError(
-            f"schema_version must be {INTERNAL_CANONICAL_SCHEMA_VERSION}"
-        )
+        raise ValidationError(f"schema_version must be {INTERNAL_CANONICAL_SCHEMA_VERSION}")
     validate_bookgraph(internal["public_projection"])
     _validate_public_debug_pairs(internal["pages"], "pages")
     _validate_public_debug_pairs(internal["nodes"], "nodes")

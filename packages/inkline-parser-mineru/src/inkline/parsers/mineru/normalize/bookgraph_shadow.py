@@ -169,7 +169,9 @@ def _note_reference_edges(
             target_note_id = run.get("target_note_id") if isinstance(run, dict) else None
             if not target_note_id:
                 continue
-            target = footnote_nodes.get(str(target_note_id)) or block_to_node.get(str(target_note_id))
+            target = footnote_nodes.get(str(target_note_id)) or block_to_node.get(
+                str(target_note_id)
+            )
             if target is None:
                 continue
             edges.append(

@@ -25,10 +25,9 @@ def test_v2_pipeline_builds_skeleton_and_review_before_bookgraph(monkeypatch, tm
     monkeypatch.setattr(
         canonical_v2,
         "build_page_review_shadow",
-        lambda value, supplied_skeleton, **kwargs: events.append(
-            ("review", value, supplied_skeleton, kwargs["checkpoint_path"])
-        )
-        or review,
+        lambda value, supplied_skeleton, **kwargs: (
+            events.append(("review", value, supplied_skeleton, kwargs["checkpoint_path"])) or review
+        ),
     )
     monkeypatch.setattr(
         canonical_v2,
@@ -38,22 +37,23 @@ def test_v2_pipeline_builds_skeleton_and_review_before_bookgraph(monkeypatch, tm
     monkeypatch.setattr(
         canonical_v2,
         "materialize_v2_page_assets",
-        lambda value, supplied_review, **_kwargs: events.append(
-            ("assets", value, supplied_review)
-        )
-        or {"assets": {"images": []}},
+        lambda value, supplied_review, **_kwargs: (
+            events.append(("assets", value, supplied_review)) or {"assets": {"images": []}}
+        ),
     )
     monkeypatch.setattr(
         canonical_v2,
         "build_bookgraph_from_observed",
-        lambda value, **kwargs: events.append(("bookgraph", value, kwargs["page_review"]))
-        or {"nodes": []},
+        lambda value, **kwargs: (
+            events.append(("bookgraph", value, kwargs["page_review"])) or {"nodes": []}
+        ),
     )
     monkeypatch.setattr(
         canonical_v2,
         "build_internal_canonical_from_observed",
-        lambda value, **kwargs: events.append(("internal", value, kwargs["page_review"]))
-        or {"pages": []},
+        lambda value, **kwargs: (
+            events.append(("internal", value, kwargs["page_review"])) or {"pages": []}
+        ),
     )
 
     artifacts = canonical_v2.build_v2_artifacts(

@@ -286,9 +286,7 @@ def _book_summary(
 def _combined_summary(books: list[dict[str, Any]]) -> dict[str, int]:
     return {
         "book_count": len(books),
-        "scoped_resolved_count": sum(
-            book["summary"]["scoped_resolved_count"] for book in books
-        ),
+        "scoped_resolved_count": sum(book["summary"]["scoped_resolved_count"] for book in books),
         "high_risk_resolved_count": sum(
             book["summary"]["high_risk_resolved_count"] for book in books
         ),
@@ -328,7 +326,7 @@ def _note_index(nodes: list[dict[str, Any]]) -> dict[tuple[str, str, str], list[
 
 
 def _duplicate_note_keys(
-    note_index: dict[tuple[str, str, str], list[dict[str, Any]]]
+    note_index: dict[tuple[str, str, str], list[dict[str, Any]]],
 ) -> set[tuple[str, str, str]]:
     return {key for key, notes in note_index.items() if len(notes) > 1}
 

@@ -189,7 +189,9 @@ def validate_page_review_decisions(
             raise ValidationError(f"page_review decisions[{index}] must be object")
         page = decision.get("page")
         if not isinstance(page, int) or page not in expected:
-            raise ValidationError(f"page_review decisions[{index}].page is not a selected candidate")
+            raise ValidationError(
+                f"page_review decisions[{index}].page is not a selected candidate"
+            )
         if page in resolved:
             raise ValidationError(f"duplicate page_review decision for page {page}")
         fields = _validate_page_record(
@@ -280,7 +282,15 @@ def _validate_special_page_position(
     *,
     required: bool,
 ) -> None:
-    if required and special_page_kind in _EXTERNAL_WRAP_SPECIAL_PAGE_KINDS and book_block_position != "external_wrap":
+    if (
+        required
+        and special_page_kind in _EXTERNAL_WRAP_SPECIAL_PAGE_KINDS
+        and book_block_position != "external_wrap"
+    ):
         raise ValidationError(f"{path}.special_page_kind requires external_wrap")
-    if required and special_page_kind in _FRONT_MATTER_SPECIAL_PAGE_KINDS and book_block_position != "front_matter":
+    if (
+        required
+        and special_page_kind in _FRONT_MATTER_SPECIAL_PAGE_KINDS
+        and book_block_position != "front_matter"
+    ):
         raise ValidationError(f"{path}.special_page_kind requires front_matter")

@@ -155,7 +155,9 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
                     "error": generation_errors[book],
                 }
             )
-    report["status"] = "pass" if all(item["status"] == "pass" for item in report["books"]) else "fail"
+    report["status"] = (
+        "pass" if all(item["status"] == "pass" for item in report["books"]) else "fail"
+    )
     report.update(
         {
             "golden_root": str(args.golden_root),
@@ -186,10 +188,10 @@ def main(argv: list[str] | None = None) -> int:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--book", action="append", help="Golden book to evaluate; repeat for focused runs.")
     parser.add_argument(
-        "--golden-root", type=Path, default=Path("data/outputs/golden/page-review")
+        "--book", action="append", help="Golden book to evaluate; repeat for focused runs."
     )
+    parser.add_argument("--golden-root", type=Path, default=Path("data/outputs/golden/page-review"))
     parser.add_argument("--mineru-root", type=Path, default=Path("data/outputs/mineru"))
     parser.add_argument("--samples-root", type=Path, default=Path("data/samples"))
     parser.add_argument(

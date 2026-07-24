@@ -245,7 +245,7 @@ def test_audit_bookgraph_reports_heading_like_display_candidates() -> None:
             "bbox": [10, 330, 700, 360],
             "layout_context": "standalone",
             "reasons": ["short_text", "top_of_page", "no_sentence_terminal"],
-        }
+        },
     ]
 
 

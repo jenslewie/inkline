@@ -130,7 +130,9 @@ def test_run_suite_publishes_only_a_passing_staged_result(tmp_path: Path, monkey
     assert not (tmp_path / "staging" / "suite" / "alpha").exists()
 
 
-def test_run_suite_reports_generation_failure_without_publishing(tmp_path: Path, monkeypatch) -> None:
+def test_run_suite_reports_generation_failure_without_publishing(
+    tmp_path: Path, monkeypatch
+) -> None:
     tool = _load_tool()
     golden_root = tmp_path / "golden"
     workspace_root = tmp_path / "workspace"
@@ -195,7 +197,9 @@ def test_runner_cli_forwards_repeated_book_selection(tmp_path: Path, monkeypatch
     assert received["args"].llm is False
 
 
-def _write_review(path: Path, doc_id: str, *, special_page_kind: str = "front_exterior_page") -> None:
+def _write_review(
+    path: Path, doc_id: str, *, special_page_kind: str = "front_exterior_page"
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(

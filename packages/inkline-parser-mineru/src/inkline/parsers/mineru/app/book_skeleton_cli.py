@@ -78,9 +78,7 @@ def main() -> None:
         observed,
         use_llm=args.llm,
         source_pdf=args.source_pdf,
-        image_output_dir=(
-            output_path.parent / f"{output_path.stem}_toc_llm_pages"
-        ),
+        image_output_dir=(output_path.parent / f"{output_path.stem}_toc_llm_pages"),
         llm_model=args.llm_model,
         llm_api_url=args.llm_api_url,
         llm_timeout_seconds=args.llm_timeout_seconds,

@@ -169,9 +169,7 @@ def test_build_bookgraph_shadow_creates_heading_path_aware_rag_units() -> None:
         "n000004",
     ]
     assert all(unit["heading_path"] == ["Chapter 1"] for unit in graph["projections"]["rag_units"])
-    assert all(
-        unit["parent_node_ids"] == ["n000001"] for unit in graph["projections"]["rag_units"]
-    )
+    assert all(unit["parent_node_ids"] == ["n000001"] for unit in graph["projections"]["rag_units"])
 
 
 def test_projection_round_trips_supported_block_fields() -> None:
@@ -182,11 +180,9 @@ def test_projection_round_trips_supported_block_fields() -> None:
     supported = [block for block in canonical["blocks"] if block["type"] != "figure"]
 
     assert [
-        (block["block_id"], block["type"], block["text"], block.get("level"))
-        for block in projected
+        (block["block_id"], block["type"], block["text"], block.get("level")) for block in projected
     ] == [
-        (block["block_id"], block["type"], block["text"], block.get("level"))
-        for block in supported
+        (block["block_id"], block["type"], block["text"], block.get("level")) for block in supported
     ]
     assert projected[1]["attrs"]["inline_runs"] == supported[1]["attrs"]["inline_runs"]
     assert projected[1]["source"]["spans"] == supported[1]["source"]["spans"]

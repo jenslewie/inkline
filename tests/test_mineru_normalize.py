@@ -296,9 +296,7 @@ def test_normalize_mineru_outputs_writes_optional_book_skeleton_shadow(tmp_path)
     assert skeleton["boundaries"]["first_body_page"] == 2
 
 
-def test_normalize_mineru_outputs_can_use_llm_book_skeleton_roles(
-    tmp_path, monkeypatch
-) -> None:
+def test_normalize_mineru_outputs_can_use_llm_book_skeleton_roles(tmp_path, monkeypatch) -> None:
     content_list_v2 = tmp_path / "sample_content_list_v2.json"
     middle = tmp_path / "sample_middle.json"
     output = tmp_path / "canonical.json"
@@ -367,9 +365,7 @@ def test_normalize_mineru_outputs_can_use_llm_book_skeleton_roles(
     assert skeleton["boundaries"]["first_back_matter_page"] == 4
 
 
-def test_normalize_mineru_outputs_can_use_llm_toc_entries(
-    tmp_path, monkeypatch
-) -> None:
+def test_normalize_mineru_outputs_can_use_llm_toc_entries(tmp_path, monkeypatch) -> None:
     content_list_v2 = tmp_path / "sample_content_list_v2.json"
     middle = tmp_path / "sample_middle.json"
     output = tmp_path / "canonical.json"
@@ -468,9 +464,7 @@ def test_normalize_mineru_outputs_can_use_llm_toc_entries(
     assert entries["陌生后置材料"]["selected_start_page"] == 4
 
 
-def test_normalize_mineru_outputs_sends_toc_page_images_to_llm(
-    tmp_path, monkeypatch
-) -> None:
+def test_normalize_mineru_outputs_sends_toc_page_images_to_llm(tmp_path, monkeypatch) -> None:
     content_list_v2 = tmp_path / "sample_content_list_v2.json"
     middle = tmp_path / "sample_middle.json"
     source_pdf = tmp_path / "sample.pdf"

@@ -58,9 +58,7 @@ def build_page_review_plan(
         records.append(record)
     _defer_non_pre_body_reviews(records)
     candidate_pages = [
-        int(record["page"])
-        for record in records
-        if record["llm_review_status"] == "pending"
+        int(record["page"]) for record in records if record["llm_review_status"] == "pending"
     ]
     return {
         "metadata": {
@@ -104,9 +102,7 @@ def _first_back_matter_page(skeleton: dict[str, Any]) -> int | None:
     return _boundary_page(skeleton, "first_back_matter_page")
 
 
-def _first_front_matter_page(
-    skeleton: dict[str, Any], first_body_page: int | None
-) -> int | None:
+def _first_front_matter_page(skeleton: dict[str, Any], first_body_page: int | None) -> int | None:
     """Return the earliest localized front-matter section before the body."""
 
     if first_body_page is None:
@@ -131,11 +127,7 @@ def _boundary_page(skeleton: dict[str, Any], key: str) -> int | None:
 
 
 def _toc_pages(skeleton: dict[str, Any]) -> set[int]:
-    return {
-        page
-        for page in skeleton.get("toc_pages") or []
-        if isinstance(page, int) and page > 0
-    }
+    return {page for page in skeleton.get("toc_pages") or [] if isinstance(page, int) and page > 0}
 
 
 def _visual_observation_kinds(document: dict[str, Any]) -> dict[int, list[str]]:

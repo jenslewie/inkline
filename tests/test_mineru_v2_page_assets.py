@@ -3,7 +3,9 @@ from __future__ import annotations
 from inkline.parsers.mineru.normalize import v2_page_assets
 
 
-def test_materialize_v2_page_assets_renders_all_retained_visual_pages(tmp_path, monkeypatch) -> None:
+def test_materialize_v2_page_assets_renders_all_retained_visual_pages(
+    tmp_path, monkeypatch
+) -> None:
     image_path = tmp_path / "images" / "pages" / "page_0001.png"
     second_image_path = tmp_path / "images" / "pages" / "page_0002.png"
     image_path.parent.mkdir(parents=True)
@@ -54,7 +56,7 @@ def test_materialize_v2_page_assets_renders_all_retained_visual_pages(tmp_path, 
             "image_id": "page-0002-review",
             "path": "images/pages/page_0002.png",
             "media_type": "image/png",
-                "role": "text_flow_page",
+            "role": "text_flow_page",
             "source": {"page": 2},
         },
     ]

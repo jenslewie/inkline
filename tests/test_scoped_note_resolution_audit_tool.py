@@ -176,7 +176,10 @@ def test_scoped_note_resolution_audit_cli_writes_json_and_markdown(tmp_path, cap
     assert exit_code == 0
     stdout_report = json.loads(capsys.readouterr().out)
     assert stdout_report["summary"]["scoped_resolved_count"] == 2
-    assert json.loads(output_path.read_text(encoding="utf-8"))["books"][0]["summary"][
-        "high_risk_resolved_count"
-    ] == 1
+    assert (
+        json.loads(output_path.read_text(encoding="utf-8"))["books"][0]["summary"][
+            "high_risk_resolved_count"
+        ]
+        == 1
+    )
     assert "Scoped Note Resolution Audit" in markdown_path.read_text(encoding="utf-8")

@@ -85,7 +85,9 @@ def _toc_image_paths(
 ) -> list[Path]:
     if source_pdf is None or not toc_pages:
         return []
-    output_dir = Path(image_output_dir) if image_output_dir else Path.cwd() / "book_skeleton_toc_llm_pages"
+    output_dir = (
+        Path(image_output_dir) if image_output_dir else Path.cwd() / "book_skeleton_toc_llm_pages"
+    )
     return _render_toc_page_images(Path(source_pdf), toc_pages, output_dir)
 
 
@@ -111,9 +113,7 @@ def _llm_messages(prompt: str, image_paths: list[Path]) -> list[dict[str, Any]]:
     return messages
 
 
-def _render_toc_page_images(
-    pdf_path: Path, toc_pages: list[int], output_dir: Path
-) -> list[Path]:
+def _render_toc_page_images(pdf_path: Path, toc_pages: list[int], output_dir: Path) -> list[Path]:
     try:
         import fitz  # type: ignore
     except ImportError as exc:  # pragma: no cover - depends on optional runtime

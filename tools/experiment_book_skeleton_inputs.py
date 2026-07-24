@@ -25,7 +25,9 @@ VISUAL_KINDS = {"image_region", "table_region"}
 EDGE_PAGE_LIMIT = 24
 MAX_PAGE_TEXT_CHARS = 320
 MAX_PROMPT_JSON_CHARS = 90000
-TOC_ENTRY_RE = re.compile(r"^\s*(?P<title>.+?)\s*(?:[/／.·•…\-\s]+)?(?P<page>[ivxlcdmIVXLCDM\d]+)\s*$")
+TOC_ENTRY_RE = re.compile(
+    r"^\s*(?P<title>.+?)\s*(?:[/／.·•…\-\s]+)?(?P<page>[ivxlcdmIVXLCDM\d]+)\s*$"
+)
 BODY_TITLE_RE = re.compile(r"^(?:第[一二三四五六七八九十百千万\d]+(?:章节|部分|[章节部卷篇])|序章)")
 NUMERIC_BODY_TITLE_RE = re.compile(r"^\d{1,3}\s+\S")
 FRONT_MATTER_TITLE_KEYWORDS = {
@@ -96,7 +98,9 @@ def build_toc_driven_skeleton_plan(document: dict[str, Any]) -> dict[str, Any]:
     toc_text = "\n".join(_observed_page_text(document, page) for page in toc_pages)
     entries = parse_toc_entries(toc_text)
     for entry in entries:
-        entry["candidate_pages"] = locate_title_pages(package, entry["title"], exclude_pages=toc_pages)
+        entry["candidate_pages"] = locate_title_pages(
+            package, entry["title"], exclude_pages=toc_pages
+        )
 
     first_body_entry = _first_body_entry(entries)
     body_start_candidates = (
@@ -135,8 +139,7 @@ def build_toc_llm_input(document: dict[str, Any]) -> dict[str, Any]:
     package = build_skeleton_evidence_package(document)
     toc_pages = detect_toc_pages(package)
     toc_text_pages = [
-        {"page": page, "text": _observed_page_text(document, page)}
-        for page in toc_pages
+        {"page": page, "text": _observed_page_text(document, page)} for page in toc_pages
     ]
     toc_text = "\n".join(item["text"] for item in toc_text_pages)
     entries = parse_toc_entries(toc_text)
@@ -190,7 +193,9 @@ def detect_toc_pages(package: dict[str, Any]) -> list[int]:
             continue
         if page <= front_limit and role_hint_counts.get("toc_text", 0) > 0 and toc_like_lines >= 8:
             toc_pages.add(page)
-    return sorted(_expand_toc_continuation_pages(toc_pages, records_by_page, front_limit, page_count))
+    return sorted(
+        _expand_toc_continuation_pages(toc_pages, records_by_page, front_limit, page_count)
+    )
 
 
 def parse_toc_entries(text: str) -> list[dict[str, Any]]:
@@ -295,7 +300,10 @@ def _first_entry_index(
 
 def _looks_like_body_toc_title(title: str) -> bool:
     stripped = title.strip()
-    return BODY_TITLE_RE.match(stripped) is not None or NUMERIC_BODY_TITLE_RE.match(stripped) is not None
+    return (
+        BODY_TITLE_RE.match(stripped) is not None
+        or NUMERIC_BODY_TITLE_RE.match(stripped) is not None
+    )
 
 
 def locate_title_pages(
@@ -522,7 +530,9 @@ def _expand_toc_continuation_pages(
         while next_page <= front_limit and next_page in records_by_page:
             record = records_by_page[next_page]
             text = str(record.get("text_snippet") or "")
-            if _looks_like_copyright_page(text) or _looks_like_index_page(text, next_page, page_count):
+            if _looks_like_copyright_page(text) or _looks_like_index_page(
+                text, next_page, page_count
+            ):
                 break
             if _toc_like_line_count(text) < 2:
                 break
@@ -722,7 +732,11 @@ def _estimated_last_back_entry_end_page(
             _looks_like_index_page(text_by_page[next_page], next_page, page_count)
             for next_page in sorted_pages[index + 1 : index + 3]
         )
-        if tolerated_gap < 1 and next_page_is_index and not _looks_like_copyright_page(text_by_page[page]):
+        if (
+            tolerated_gap < 1
+            and next_page_is_index
+            and not _looks_like_copyright_page(text_by_page[page])
+        ):
             end_page = page
             tolerated_gap += 1
             continue
@@ -731,11 +745,7 @@ def _estimated_last_back_entry_end_page(
 
 
 def _first_located_entry_page(entries: list[dict[str, Any]]) -> int | None:
-    pages = [
-        int(entry["candidate_pages"][0])
-        for entry in entries
-        if entry.get("candidate_pages")
-    ]
+    pages = [int(entry["candidate_pages"][0]) for entry in entries if entry.get("candidate_pages")]
     return min(pages) if pages else None
 
 
@@ -817,7 +827,9 @@ def _page_record(
         observation for observation in observations if observation.get("kind") in VISUAL_KINDS
     ]
     page_area = float(page["width"]) * float(page["height"])
-    role_hint_counts = Counter(str(observation.get("role_hint") or "") for observation in observations)
+    role_hint_counts = Counter(
+        str(observation.get("role_hint") or "") for observation in observations
+    )
     kind_counts = Counter(str(observation.get("kind") or "") for observation in observations)
     signals = list(edge_pages.get(page_number, []))
     signals.extend(_structural_signals(role_hint_counts, visual_observations, page_area))
@@ -831,7 +843,9 @@ def _page_record(
         "visual_area_ratio": round(_area_ratio(visual_observations, page_area), 4),
         "text_snippet": _page_text_snippet(text_observations),
         "content_text_snippet": _page_text_snippet(_content_text_observations(text_observations)),
-        "title_text_snippet": _page_text_snippet(_role_hint_observations(text_observations, "title_text")),
+        "title_text_snippet": _page_text_snippet(
+            _role_hint_observations(text_observations, "title_text")
+        ),
         "signals": sorted(set(signals)),
     }
 
@@ -881,9 +895,7 @@ def _page_text_snippet(text_observations: list[dict[str, Any]]) -> str:
 
 def _content_text_observations(text_observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
-        observation
-        for observation in text_observations
-        if observation.get("kind") != "page_marker"
+        observation for observation in text_observations if observation.get("kind") != "page_marker"
     ]
 
 
@@ -937,7 +949,13 @@ def _selected_image_pages(package: dict[str, Any]) -> list[int]:
         sparse_visual = "visual_content" in signals and float(record["text_area_ratio"]) < 0.08
         late_reference = "reference_hint" in signals and "late_page" in signals
         early_title = "title_hint" in signals and bool(signals & {"early_page", "late_page"})
-        if edge_or_toc or "visual_dominant" in signals or sparse_visual or late_reference or early_title:
+        if (
+            edge_or_toc
+            or "visual_dominant" in signals
+            or sparse_visual
+            or late_reference
+            or early_title
+        ):
             pages.add(page)
     return sorted(pages)
 
@@ -1056,7 +1074,9 @@ def _hybrid_input(package: dict[str, Any], image_manifest: dict[str, Any]) -> di
     }
 
 
-def _pdf_image_only_input(package: dict[str, Any], image_manifest: dict[str, Any]) -> dict[str, Any]:
+def _pdf_image_only_input(
+    package: dict[str, Any], image_manifest: dict[str, Any]
+) -> dict[str, Any]:
     return {
         "mode": "pdf_image_only",
         "metadata": package["metadata"],

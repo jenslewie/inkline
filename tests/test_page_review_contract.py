@@ -300,7 +300,9 @@ def test_page_review_normalizes_epigraph_and_visual_chart_pages_as_visual_assets
         [
             _decision(3, "text_flow_page", "epigraph_page", "include", "not_needed", "high"),
             _decision(4, "text_flow_page", "plate_page", "include", "not_needed", "high"),
-            _decision(5, "text_flow_page", "chronology_chart_page", "include", "not_needed", "high"),
+            _decision(
+                5, "text_flow_page", "chronology_chart_page", "include", "not_needed", "high"
+            ),
             _decision(6, "text_flow_page", "genealogy_chart_page", "include", "not_needed", "high"),
         ],
         llm_model="qwen-test",
@@ -357,8 +359,12 @@ def test_page_review_normalizes_decorative_preliminary_identities_as_visual_asse
     resolved = resolve_page_review(
         plan,
         [
-            _decision(3, "text_flow_page", "decorative_preliminary_page", "include", "not_needed", "high"),
-            _decision(4, "text_flow_page", "decorative_title_page", "include", "not_needed", "high"),
+            _decision(
+                3, "text_flow_page", "decorative_preliminary_page", "include", "not_needed", "high"
+            ),
+            _decision(
+                4, "text_flow_page", "decorative_title_page", "include", "not_needed", "high"
+            ),
         ],
         llm_model="qwen-test",
         llm_prompt_version="test-prompt-v1",
@@ -738,7 +744,9 @@ def _record(
         "special_page_kind": None,
         "text_flow_action": text_flow_action,
         "visual_asset_action": visual_asset_action,
-        "decision_source": "llm_page_review" if llm_review_status == "pending" else "layout_and_skeleton",
+        "decision_source": "llm_page_review"
+        if llm_review_status == "pending"
+        else "layout_and_skeleton",
         "llm_review_status": llm_review_status,
         "signals": [],
     }

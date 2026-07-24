@@ -19,9 +19,7 @@ def main(argv: list[str] | None = None) -> int:
     graph = build_bookgraph_shadow(canonical)
     validate_bookgraph(graph)
 
-    audit = audit_bookgraph(
-        graph, legacy_canonical=None if args.no_projection_diff else canonical
-    )
+    audit = audit_bookgraph(graph, legacy_canonical=None if args.no_projection_diff else canonical)
     if args.bookgraph_output:
         _write_json(args.bookgraph_output, graph)
     if args.audit_output:
@@ -113,13 +111,11 @@ def _exit_code(args: argparse.Namespace, audit: dict[str, Any]) -> int:
         failed = True
     if args.max_body_like_display_blocks is not None:
         failed = failed or (
-            len(audit.get("body_like_display_blocks", []))
-            > args.max_body_like_display_blocks
+            len(audit.get("body_like_display_blocks", [])) > args.max_body_like_display_blocks
         )
     if args.max_heading_like_display_blocks is not None:
         failed = failed or (
-            len(audit.get("heading_like_display_blocks", []))
-            > args.max_heading_like_display_blocks
+            len(audit.get("heading_like_display_blocks", [])) > args.max_heading_like_display_blocks
         )
     if args.expect_exact_projection:
         projection_diff = audit.get("projection_diff") or {}

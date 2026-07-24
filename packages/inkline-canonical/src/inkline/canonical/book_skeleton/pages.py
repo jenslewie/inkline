@@ -74,7 +74,9 @@ def page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
             if observation.get("kind") in VISUAL_TITLE_KINDS
             and str(observation.get("text") or "").strip()
         ]
-        role_hint_counts = Counter(str(observation.get("role_hint") or "") for observation in observations)
+        role_hint_counts = Counter(
+            str(observation.get("role_hint") or "") for observation in observations
+        )
         records.append(
             {
                 "page": page_number,
@@ -100,17 +102,14 @@ def page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
                     _candidate_title_context_observations(text_observations)
                 ),
                 "_title_location_observations": [
-                    *_title_context_observations(
-                        text_observations, title_location_observations
-                    ),
+                    *_title_context_observations(text_observations, title_location_observations),
                     *visual_title_observations,
                 ],
                 "_candidate_title_context_observations": (
                     _candidate_title_context_observations(text_observations)
                 ),
                 "has_toc_hint": any(
-                    observation.get("role_hint") == "toc_text"
-                    for observation in text_observations
+                    observation.get("role_hint") == "toc_text" for observation in text_observations
                 ),
             }
         )
@@ -177,9 +176,7 @@ def locate_toc_entry_pages(
 ) -> list[int]:
     return [
         int(candidate["page"])
-        for candidate in locate_toc_entry_anchors(
-            page_records_, entry, exclude_pages=exclude_pages
-        )
+        for candidate in locate_toc_entry_anchors(page_records_, entry, exclude_pages=exclude_pages)
     ]
 
 
@@ -210,9 +207,7 @@ def locate_title_pages(
 ) -> list[int]:
     return [
         int(candidate["page"])
-        for candidate in locate_title_anchors(
-            page_records_, title, exclude_pages=exclude_pages
-        )
+        for candidate in locate_title_anchors(page_records_, title, exclude_pages=exclude_pages)
     ]
 
 
@@ -236,9 +231,7 @@ def locate_title_anchors(
         page_key = normalize_title(text)
         if not _title_matches_record(record, title_key, page_key):
             continue
-        if require_exact_observation and not _has_exact_aggregate_title_evidence(
-            record, title_key
-        ):
+        if require_exact_observation and not _has_exact_aggregate_title_evidence(record, title_key):
             continue
         evidence = [
             *record.get("_title_location_observations", []),
@@ -408,7 +401,9 @@ def matching_toc_observation_ids(
 
 def prune_candidate_start_pages_to_toc_intervals(entries: list[dict[str, Any]]) -> None:
     selected_pages = [
-        entry.get("selected_start_page") if isinstance(entry.get("selected_start_page"), int) else None
+        entry.get("selected_start_page")
+        if isinstance(entry.get("selected_start_page"), int)
+        else None
         for entry in entries
     ]
     for index, entry in enumerate(entries):
@@ -504,10 +499,7 @@ def _page_text(observations: list[dict[str, Any]]) -> str:
 
 
 def _toc_like_line_count(text: str) -> int:
-    return sum(
-        len(parse_toc_line_entries(line.strip()))
-        for line in text.splitlines()
-    )
+    return sum(len(parse_toc_line_entries(line.strip())) for line in text.splitlines())
 
 
 def _nearest_selected_page(pages: list[int | None], *, reverse: bool) -> int | None:
@@ -545,9 +537,7 @@ def _neighbor_printed_offset(
     role: Any,
     reverse: bool,
 ) -> int | None:
-    support = _neighbor_printed_offset_support(
-        entries, index, role=role, reverse=reverse
-    )
+    support = _neighbor_printed_offset_support(entries, index, role=role, reverse=reverse)
     return support[0] if support is not None else None
 
 
@@ -594,9 +584,7 @@ def _choose_monotonic_start_pages(
                 if _is_implausible_printed_offset(candidate_offset):
                     continue
                 active_offset = last_offset if last_role == role else None
-                new_cost = cost + rank + _offset_transition_penalty(
-                    candidate_offset, active_offset
-                )
+                new_cost = cost + rank + _offset_transition_penalty(candidate_offset, active_offset)
                 _keep_better_state(
                     next_states,
                     (
@@ -708,9 +696,7 @@ def _title_matches_record(record: dict[str, Any], title_key: str, page_key: str)
     )
 
 
-def _has_exact_aggregate_title_evidence(
-    record: dict[str, Any], title_key: str
-) -> bool:
+def _has_exact_aggregate_title_evidence(record: dict[str, Any], title_key: str) -> bool:
     evidence = [
         *record.get("_title_location_observations", []),
         *record.get("_candidate_title_context_observations", []),

@@ -51,8 +51,7 @@ def validate_book_skeleton_against_observed(
     if skeleton["metadata"]["doc_id"] != document["metadata"]["doc_id"]:
         raise ValidationError("BookSkeleton and ObservedDocument doc_id values differ")
     observations = {
-        str(observation["observation_id"]): observation
-        for observation in document["observations"]
+        str(observation["observation_id"]): observation for observation in document["observations"]
     }
     records = page_records(document)
     toc_page_numbers = skeleton["toc_pages"]
@@ -69,15 +68,11 @@ def validate_book_skeleton_against_observed(
         for observation_id in anchor["title_observation_ids"]:
             observation = _required_anchor_observation(observations, observation_id)
             if observation["page"] != anchor["page"]:
-                raise ValidationError(
-                    f"toc_entries[{index}] title evidence is not on anchor page"
-                )
+                raise ValidationError(f"toc_entries[{index}] title evidence is not on anchor page")
         for observation_id in anchor["toc_observation_ids"]:
             observation = _required_anchor_observation(observations, observation_id)
             if observation["page"] not in toc_pages or observation["role_hint"] != "toc_text":
-                raise ValidationError(
-                    f"toc_entries[{index}] TOC evidence is not on a TOC page"
-                )
+                raise ValidationError(f"toc_entries[{index}] TOC evidence is not on a TOC page")
         _validate_anchor_evidence_semantics(
             document,
             records,
@@ -91,16 +86,12 @@ def validate_book_skeleton_against_observed(
         for supporting_anchor_id in anchor["supporting_anchor_ids"]:
             supporting_entry = entries_by_anchor_id.get(supporting_anchor_id)
             if supporting_entry is None:
-                raise ValidationError(
-                    f"toc_entries[{index}] references unknown supporting anchor"
-                )
+                raise ValidationError(f"toc_entries[{index}] references unknown supporting anchor")
             support.append(supporting_entry)
         support_indexes = [value[0] for value in support]
         support_anchors = [value[1]["selected_start_anchor"] for value in support]
         if not (min(support_indexes) < index < max(support_indexes)):
-            raise ValidationError(
-                f"toc_entries[{index}] offset supports must straddle the entry"
-            )
+            raise ValidationError(f"toc_entries[{index}] offset supports must straddle the entry")
         expected_offset = anchor["printed_page_offset"]
         if any(
             value["resolution_method"] != "observed_title_match"
@@ -142,8 +133,7 @@ def _validate_anchor_evidence_semantics(
         )
         if (
             direct_candidate is None
-            or anchor["title_observation_ids"]
-            != direct_candidate["title_observation_ids"]
+            or anchor["title_observation_ids"] != direct_candidate["title_observation_ids"]
         ):
             raise ValidationError(
                 f"toc_entries[{index}] title evidence does not match direct candidate"
@@ -154,18 +144,14 @@ def _validate_anchor_evidence_semantics(
         toc_pages=toc_pages,
     )
     if anchor["toc_observation_ids"] != expected_toc_observation_ids:
-        raise ValidationError(
-            f"toc_entries[{index}] TOC evidence does not match entry title"
-        )
+        raise ValidationError(f"toc_entries[{index}] TOC evidence does not match entry title")
 
 
 def audit_book_skeleton(skeleton: dict[str, Any]) -> dict[str, Any]:
     entries = [entry for entry in skeleton.get("toc_entries", []) if isinstance(entry, dict)]
     issues = _audit_toc_entry_issues(entries)
     role_counts = Counter(str(entry.get("role") or "") for entry in entries)
-    located_count = sum(
-        1 for entry in entries if isinstance(entry.get("selected_start_page"), int)
-    )
+    located_count = sum(1 for entry in entries if isinstance(entry.get("selected_start_page"), int))
     return {
         "summary": {
             "toc_entry_count": len(entries),
@@ -212,14 +198,10 @@ def _validate_toc_entries(entries: list[dict[str, Any]]) -> None:
             raise ValidationError("toc_entries selected_start_page values must be monotonic")
         if isinstance(selected_start_page, int):
             previous_selected_start_page = selected_start_page
-        previous_known_role_rank = _validate_toc_entry_role_order(
-            entry, previous_known_role_rank
-        )
+        previous_known_role_rank = _validate_toc_entry_role_order(entry, previous_known_role_rank)
 
 
-def _validate_toc_entry_shape(
-    entry: dict[str, Any], index: int, seen: set[int]
-) -> None:
+def _validate_toc_entry_shape(entry: dict[str, Any], index: int, seen: set[int]) -> None:
     if not isinstance(entry, dict):
         raise ValidationError(f"toc_entries[{index}] must be object")
     for field, expected_type in REQUIRED_ENTRY_FIELDS.items():
@@ -245,14 +227,10 @@ def _validate_toc_entry_shape(
             f"toc_entries[{index}].selected_page is ambiguous; use selected_start_page"
         )
     if "printed_start_page" in entry:
-        raise ValidationError(
-            f"toc_entries[{index}].printed_start_page is internal TOC evidence"
-        )
+        raise ValidationError(f"toc_entries[{index}].printed_start_page is internal TOC evidence")
 
 
-def _validate_start_anchor(
-    entry: dict[str, Any], index: int, seen_anchor_ids: set[str]
-) -> None:
+def _validate_start_anchor(entry: dict[str, Any], index: int, seen_anchor_ids: set[str]) -> None:
     anchor = entry["selected_start_anchor"]
     selected_start_page = entry["selected_start_page"]
     if (anchor is None) != (selected_start_page is None):
@@ -264,23 +242,18 @@ def _validate_start_anchor(
         return
     for field, expected_type in REQUIRED_START_ANCHOR_FIELDS.items():
         if field not in anchor or not isinstance(anchor[field], expected_type):
-            raise ValidationError(
-                f"toc_entries[{index}].selected_start_anchor.{field} is invalid"
-            )
+            raise ValidationError(f"toc_entries[{index}].selected_start_anchor.{field} is invalid")
     expected_anchor_id = f"sa{int(entry['entry_index']):06d}"
     anchor_id = anchor["anchor_id"]
     if anchor_id != expected_anchor_id:
         raise ValidationError(
-            f"toc_entries[{index}].selected_start_anchor.anchor_id must be "
-            f"{expected_anchor_id}"
+            f"toc_entries[{index}].selected_start_anchor.anchor_id must be {expected_anchor_id}"
         )
     if anchor_id in seen_anchor_ids:
         raise ValidationError(f"duplicate selected start anchor id: {anchor_id}")
     seen_anchor_ids.add(anchor_id)
     if anchor["page"] != selected_start_page:
-        raise ValidationError(
-            f"toc_entries[{index}] anchor page must equal selected_start_page"
-        )
+        raise ValidationError(f"toc_entries[{index}] anchor page must equal selected_start_page")
     method = anchor["resolution_method"]
     if method not in BOOK_SKELETON_ANCHOR_METHODS:
         raise ValidationError(
@@ -288,9 +261,7 @@ def _validate_start_anchor(
         )
     confidence = anchor["confidence"]
     if confidence not in BOOK_SKELETON_ANCHOR_CONFIDENCES:
-        raise ValidationError(
-            f"toc_entries[{index}].selected_start_anchor.confidence is invalid"
-        )
+        raise ValidationError(f"toc_entries[{index}].selected_start_anchor.confidence is invalid")
     for field in (
         "title_observation_ids",
         "toc_observation_ids",
@@ -324,17 +295,13 @@ def _validate_anchor_observation_namespaces(anchor: dict[str, Any], index: int) 
 
 def _validate_direct_anchor(anchor: dict[str, Any], index: int) -> None:
     if anchor["confidence"] != "high":
-        raise ValidationError(
-            f"toc_entries[{index}] direct anchor confidence must be high"
-        )
+        raise ValidationError(f"toc_entries[{index}] direct anchor confidence must be high")
     if not anchor["title_observation_ids"]:
         raise ValidationError(
             f"toc_entries[{index}] direct anchor requires title observation evidence"
         )
     if anchor["supporting_anchor_ids"]:
-        raise ValidationError(
-            f"toc_entries[{index}] direct anchor cannot have supporting anchors"
-        )
+        raise ValidationError(f"toc_entries[{index}] direct anchor cannot have supporting anchors")
 
 
 def _validate_printed_offset_anchor(anchor: dict[str, Any], index: int) -> None:
@@ -366,14 +333,10 @@ def _validate_toc_entry_pages(entry: dict[str, Any], index: int) -> None:
             f"toc_entries[{index}].selected_start_page must be one of candidate_start_pages"
         )
     if not candidate_start_pages and _looks_like_glued_toc_title(entry["display_title"]):
-        raise ValidationError(
-            f"toc_entries[{index}].display_title looks like glued TOC entries"
-        )
+        raise ValidationError(f"toc_entries[{index}].display_title looks like glued TOC entries")
 
 
-def _validate_toc_entry_role_order(
-    entry: dict[str, Any], previous_known_role_rank: int
-) -> int:
+def _validate_toc_entry_role_order(entry: dict[str, Any], previous_known_role_rank: int) -> int:
     role_rank = BOOK_SKELETON_ENTRY_ROLE_ORDER.get(entry["role"])
     if role_rank is None:
         return previous_known_role_rank
@@ -464,7 +427,11 @@ def _validate_boundaries(boundaries: dict[str, Any], entry_count: int) -> None:
         value = boundaries[field]
         if value is not None and not isinstance(value, int):
             raise ValidationError(f"boundaries.{field} must be integer or null")
-        if field.endswith("_entry_index") and isinstance(value, int) and not 0 <= value < entry_count:
+        if (
+            field.endswith("_entry_index")
+            and isinstance(value, int)
+            and not 0 <= value < entry_count
+        ):
             raise ValidationError(f"boundaries.{field} points to missing toc entry")
 
 

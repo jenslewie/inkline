@@ -147,9 +147,7 @@ def test_normalize_bookgraph_note_sections_promotes_reference_entries_to_notes()
             make_evidence("ev000004", "mineru", "tu000004", source_kind="text_unit", page=90),
             make_evidence("ev000005", "mineru", "tu000005", source_kind="text_unit", page=90),
         ],
-        projections={
-            "reading_order": ["n000001", "n000002", "n000003", "n000004", "n000005"]
-        },
+        projections={"reading_order": ["n000001", "n000002", "n000003", "n000004", "n000005"]},
     )
 
     normalized = normalize_bookgraph_note_sections(graph)
@@ -423,9 +421,7 @@ def test_resolve_bookgraph_note_refs_links_scoped_section_note() -> None:
             make_evidence("ev000004", "mineru", "tu000004", source_kind="text_unit", page=90),
             make_evidence("ev000005", "mineru", "tu000005", source_kind="text_unit", page=90),
         ],
-        projections={
-            "reading_order": ["n000001", "n000002", "n000003", "n000004", "n000005"]
-        },
+        projections={"reading_order": ["n000001", "n000002", "n000003", "n000004", "n000005"]},
     )
 
     resolved = resolve_bookgraph_note_refs(graph)
@@ -503,6 +499,7 @@ def test_resolve_bookgraph_note_refs_promotes_sparse_bottom_reference_text_to_pa
     assert resolved["nodes"][1]["node_type"] == "note"
     assert resolved["nodes"][1]["attrs"]["page_foot_promotion"] == "bottom_reference_text"
     assert resolved["nodes"][0]["inline_runs"][0]["attrs"]["target_note_id"] == "n000002"
-    assert resolved["metadata"]["shadow_note_section_detection"][
-        "promoted_page_foot_reference_count"
-    ] == 1
+    assert (
+        resolved["metadata"]["shadow_note_section_detection"]["promoted_page_foot_reference_count"]
+        == 1
+    )

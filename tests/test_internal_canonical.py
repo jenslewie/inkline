@@ -119,9 +119,6 @@ def test_internal_canonical_groups_public_and_debug_by_node() -> None:
 def test_public_projection_excludes_internal_only_fields() -> None:
     public = build_bookgraph_from_observed(_adjacent_body_document())
 
-    assert all(
-        not (INTERNAL_ONLY_NODE_ATTRS & set(node["attrs"]))
-        for node in public["nodes"]
-    )
+    assert all(not (INTERNAL_ONLY_NODE_ATTRS & set(node["attrs"])) for node in public["nodes"])
     assert all("parser_payload" not in evidence for evidence in public["evidence"])
     assert all(not key.startswith("shadow_") for key in public["metadata"])

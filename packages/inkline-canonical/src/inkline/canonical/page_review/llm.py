@@ -23,6 +23,7 @@ _PROMPT_PROFILES = {
     "general",
 }
 
+
 def page_review_prompt_profile(page_record: dict[str, Any]) -> str:
     """Select one focused visual-review instruction profile from structural evidence."""
 
@@ -43,6 +44,7 @@ def page_review_prompt_profile(page_record: dict[str, Any]) -> str:
     if "visual_verifier_candidate" in signals:
         return "mixed_visual_body"
     return "general"
+
 
 def page_review_llm_prompt(input_data: dict[str, Any], *, profile: str = "general") -> str:
     """Compose a short common contract with one focused visual-review profile."""
@@ -77,7 +79,7 @@ def page_review_llm_prompt(input_data: dict[str, Any], *, profile: str = "genera
         "special_page_kind must be one of: front_exterior_page, back_exterior_page, cover_flap, dust_jacket_spread, half_title_page, "
         "title_page, decorative_preliminary_page, decorative_title_page, epigraph_page, dedication_page, acknowledgments_page, copyright_page, toc_page, blank_page, plate_page, chronology_chart_page, genealogy_chart_page, or null. It describes a special "
         "page identity and must not be used for ordinary body pages. When it is absent, emit the JSON "
-        "literal null without quotes, never the string \\\"null\\\".\n"
+        'literal null without quotes, never the string \\"null\\".\n'
         "text_flow_action must be one of: include, exclude, metadata_only, needs_review.\n"
         "visual_asset_action must be one of: retain, not_needed, needs_review.\n"
         "confidence must be one of: high, medium, low.\n\n"
@@ -187,9 +189,9 @@ def _profile_instruction(profile: str) -> str:
             "front_exterior_page with external_wrap/visual_page/exclude/retain, not title_page merely because it "
             "displays the book title. Use title_page only for a bibliographic title page that presents the title "
             "as internal publication information rather than as a cover-style surface. For that cover-style case, "
-            "return {\"page_role\": \"visual_page\", \"book_block_position\": \"external_wrap\", "
-            "\"special_page_kind\": \"front_exterior_page\", \"text_flow_action\": \"exclude\", "
-            "\"visual_asset_action\": \"retain\"}. Do not infer hardcover or "
+            'return {"page_role": "visual_page", "book_block_position": "external_wrap", '
+            '"special_page_kind": "front_exterior_page", "text_flow_action": "exclude", '
+            '"visual_asset_action": "retain"}. Do not infer hardcover or '
             "paperback material from this sequence."
         ),
         "after_decorative_preliminary": (

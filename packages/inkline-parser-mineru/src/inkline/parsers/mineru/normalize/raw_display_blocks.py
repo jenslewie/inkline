@@ -179,8 +179,7 @@ def _is_set_off_from_body(block: RawBlock, prev: RawBlock, profile: PageLayoutPr
 def _is_global_set_off(block: RawBlock, profile: PageLayoutProfile) -> bool:
     global_indent = block.x0 - profile.body_x0
     return bool(
-        global_indent >= max(58.0, profile.body_w * 0.07)
-        and block.width <= profile.body_w * 0.95
+        global_indent >= max(58.0, profile.body_w * 0.07) and block.width <= profile.body_w * 0.95
     )
 
 

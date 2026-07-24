@@ -75,8 +75,9 @@ def test_page_review_cli_writes_only_page_review_artifact(monkeypatch, tmp_path)
     monkeypatch.setattr(
         page_review_cli,
         "build_page_review_shadow",
-        lambda value, supplied_skeleton, **kwargs: calls.append((value, supplied_skeleton, kwargs))
-        or review,
+        lambda value, supplied_skeleton, **kwargs: (
+            calls.append((value, supplied_skeleton, kwargs)) or review
+        ),
     )
     monkeypatch.setattr(page_review_cli, "validate_observed_document", lambda _: None)
     monkeypatch.setattr(page_review_cli, "validate_book_skeleton", lambda _: None)

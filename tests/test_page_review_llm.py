@@ -7,54 +7,82 @@ from inkline.canonical.page_review.llm import (
 
 
 def test_page_review_prompt_profile_prioritizes_body_section_and_tables() -> None:
-    assert page_review_prompt_profile(
-        {
-            "skeleton_context": {"matter": "pre_body"},
-            "signals": ["visual_content"],
-            "visual_kinds": ["image_region"],
-        }
-    ) == "front_visual_identity"
-    assert page_review_prompt_profile(
-        {
-            "skeleton_context": {"matter": "pre_body"},
-            "signals": ["raster_dark_visual_layout"],
-            "visual_kinds": [],
-        }
-    ) == "front_visual_identity"
-    assert page_review_prompt_profile(
-        {"skeleton_context": {"matter": "body", "is_body_section_start": True}, "signals": []}
-    ) == "body_section_start"
-    assert page_review_prompt_profile(
-        {"skeleton_context": {"matter": "body"}, "signals": ["visual_sparse_text"], "visual_kinds": ["table_region"]}
-    ) == "textual_table"
-    assert page_review_prompt_profile(
-        {
-            "skeleton_context": {"matter": "body"},
-            "signals": ["visual_verifier_candidate"],
-            "visual_kinds": ["table_region"],
-        }
-    ) == "textual_table"
-    assert page_review_prompt_profile(
-        {
-            "skeleton_context": {"matter": "back_matter"},
-            "signals": ["visual_dominant"],
-            "visual_kinds": ["table_region"],
-        }
-    ) == "textual_table"
-    assert page_review_prompt_profile(
-        {
-            "skeleton_context": {"matter": "body"},
-            "signals": ["body_profile"],
-            "visual_kinds": ["image_region"],
-        }
-    ) == "mixed_visual_body"
-    assert page_review_prompt_profile(
-        {
-            "skeleton_context": {"matter": "body"},
-            "signals": ["visual_dominant", "no_body_profile"],
-            "visual_kinds": ["image_region"],
-        }
-    ) == "visual_sparse_text"
+    assert (
+        page_review_prompt_profile(
+            {
+                "skeleton_context": {"matter": "pre_body"},
+                "signals": ["visual_content"],
+                "visual_kinds": ["image_region"],
+            }
+        )
+        == "front_visual_identity"
+    )
+    assert (
+        page_review_prompt_profile(
+            {
+                "skeleton_context": {"matter": "pre_body"},
+                "signals": ["raster_dark_visual_layout"],
+                "visual_kinds": [],
+            }
+        )
+        == "front_visual_identity"
+    )
+    assert (
+        page_review_prompt_profile(
+            {"skeleton_context": {"matter": "body", "is_body_section_start": True}, "signals": []}
+        )
+        == "body_section_start"
+    )
+    assert (
+        page_review_prompt_profile(
+            {
+                "skeleton_context": {"matter": "body"},
+                "signals": ["visual_sparse_text"],
+                "visual_kinds": ["table_region"],
+            }
+        )
+        == "textual_table"
+    )
+    assert (
+        page_review_prompt_profile(
+            {
+                "skeleton_context": {"matter": "body"},
+                "signals": ["visual_verifier_candidate"],
+                "visual_kinds": ["table_region"],
+            }
+        )
+        == "textual_table"
+    )
+    assert (
+        page_review_prompt_profile(
+            {
+                "skeleton_context": {"matter": "back_matter"},
+                "signals": ["visual_dominant"],
+                "visual_kinds": ["table_region"],
+            }
+        )
+        == "textual_table"
+    )
+    assert (
+        page_review_prompt_profile(
+            {
+                "skeleton_context": {"matter": "body"},
+                "signals": ["body_profile"],
+                "visual_kinds": ["image_region"],
+            }
+        )
+        == "mixed_visual_body"
+    )
+    assert (
+        page_review_prompt_profile(
+            {
+                "skeleton_context": {"matter": "body"},
+                "signals": ["visual_dominant", "no_body_profile"],
+                "visual_kinds": ["image_region"],
+            }
+        )
+        == "visual_sparse_text"
+    )
 
 
 def test_page_review_prompt_profiles_define_body_and_table_precedence() -> None:
@@ -70,9 +98,7 @@ def test_page_review_prompt_defines_the_strict_decision_contract() -> None:
     prompt = page_review_llm_prompt(
         {
             "first_body_page": 15,
-            "pages": [
-                {"page": 1, "page_role": "visual_page", "signals": ["visual_dominant"]}
-            ],
+            "pages": [{"page": 1, "page_role": "visual_page", "signals": ["visual_dominant"]}],
         }
     )
 
@@ -88,7 +114,7 @@ def test_page_review_prompt_defines_the_strict_decision_contract() -> None:
     assert "plate_page" in prompt
     assert "chronology_chart_page" in prompt
     assert "genealogy_chart_page" in prompt
-    assert 'literal null without quotes' in prompt
+    assert "literal null without quotes" in prompt
 
     assert "Do not change the front/body/back boundary" in prompt
     assert "Only classify the supplied candidate pages" in prompt
@@ -98,10 +124,7 @@ def test_page_review_prompt_defines_the_strict_decision_contract() -> None:
     assert "The input is structural evidence, not a prior decision" in prompt
     assert "Review profile: general" in prompt
     assert "Return text_flow_page/include for independent body prose" in prompt
-    assert (
-        '"book_block_position": "unknown",\n'
-        '      "special_page_kind": null,'
-    ) in prompt
+    assert ('"book_block_position": "unknown",\n      "special_page_kind": null,') in prompt
 
 
 def test_front_special_prompt_distinguishes_pre_body_from_front_matter() -> None:
@@ -110,15 +133,23 @@ def test_front_special_prompt_distinguishes_pre_body_from_front_matter() -> None
     assert "pre-body physical range" in prompt
     assert "external-wrap pages" in prompt
     assert "both panels are cover_flap" in prompt
-    assert "half_title_page/title_page/decorative_preliminary_page/decorative_title_page/epigraph_page" in prompt
+    assert (
+        "half_title_page/title_page/decorative_preliminary_page/decorative_title_page/epigraph_page"
+        in prompt
+    )
     assert "For copyright_page, use visual_page, front_matter, metadata_only, and retain." in prompt
     assert "not dedication_page" in prompt
     assert "A page headed Acknowledgments, Acknowledgements, 致谢, or 鸣谢" in prompt
     assert "bibliographic title page" in prompt
     assert "is dust_jacket_spread, not cover_flap" in prompt
-    assert "Classify every supplied physical page independently; do not infer a jacket spread from neighboring pages" in prompt
+    assert (
+        "Classify every supplied physical page independently; do not infer a jacket spread from neighboring pages"
+        in prompt
+    )
     assert "verify all four required elements are visibly present in the same image" in prompt
-    assert "front-cover design, back-cover design, book spine, and one or more jacket flaps" in prompt
+    assert (
+        "front-cover design, back-cover design, book spine, and one or more jacket flaps" in prompt
+    )
     assert "If any required element is absent or uncertain, dust_jacket_spread is invalid" in prompt
     assert "A standalone front exterior design is front_exterior_page" in prompt
     assert "back_exterior_page" in prompt
@@ -153,14 +184,18 @@ def test_sequence_profiles_distinguish_exterior_and_title_followups() -> None:
     exterior_prompt = page_review_llm_prompt({"pages": []}, profile="after_front_exterior")
     back_exterior_prompt = page_review_llm_prompt({"pages": []}, profile="after_back_exterior")
     dust_jacket_prompt = page_review_llm_prompt({"pages": []}, profile="after_dust_jacket_spread")
-    preliminary_prompt = page_review_llm_prompt({"pages": []}, profile="after_decorative_preliminary")
+    preliminary_prompt = page_review_llm_prompt(
+        {"pages": []}, profile="after_decorative_preliminary"
+    )
     title_prompt = page_review_llm_prompt({"pages": []}, profile="after_title_page")
 
     assert "another front-facing exterior surface" in exterior_prompt
     assert "book-internal decorative leaf" in exterior_prompt
     assert "decorative_title_page" in exterior_prompt
     assert "Do not call that composition decorative_title_page" in exterior_prompt
-    assert "author biography, publisher details, contact information, or a QR code" in exterior_prompt
+    assert (
+        "author biography, publisher details, contact information, or a QR code" in exterior_prompt
+    )
     assert "Do not infer a dust jacket, hardcover board, or paperback material" in exterior_prompt
     assert "rear cover flap rather than a second back exterior" in back_exterior_prompt
     assert "not merely because it has a QR code or publisher mark" in back_exterior_prompt
@@ -183,4 +218,7 @@ def test_front_visual_prompt_keeps_ambiguous_surface_untyped() -> None:
 
     assert "current-page evidence that it is internal" in prompt
     assert "Image dominance alone is insufficient" in prompt
-    assert "MUST use special_page_kind=null and book_block_position=unknown, never front_matter" in prompt
+    assert (
+        "MUST use special_page_kind=null and book_block_position=unknown, never front_matter"
+        in prompt
+    )

@@ -9,9 +9,7 @@ from typing import Any
 from inkline.canonical.bookgraph.footnote_text import strip_footnote_marker
 from inkline.canonical.bookgraph.schema import make_bookgraph, make_edge, validate_bookgraph
 
-_NOTE_SECTION_HEADING_PATTERN = re.compile(
-    r"^\s*(?:注释|注|notes?|endnotes?)\s*$", re.IGNORECASE
-)
+_NOTE_SECTION_HEADING_PATTERN = re.compile(r"^\s*(?:注释|注|notes?|endnotes?)\s*$", re.IGNORECASE)
 _NOTE_SECTION_STOP_HEADING_PATTERN = re.compile(
     r"^\s*(?:参考文献|参考书目|扩展阅读|索引|出版后记|版权|bibliography|references|index)\s*$",
     re.IGNORECASE,
@@ -72,9 +70,7 @@ def normalize_bookgraph_notes(graph: dict[str, Any]) -> dict[str, Any]:
 def normalize_bookgraph_note_sections(graph: dict[str, Any]) -> dict[str, Any]:
     """Promote explicit note-section entries into note nodes when structure is clear."""
     normalized = normalize_bookgraph_notes(graph)
-    evidence_by_id = {
-        str(record["evidence_id"]): record for record in normalized["evidence"]
-    }
+    evidence_by_id = {str(record["evidence_id"]): record for record in normalized["evidence"]}
     reading_order = list(normalized.get("projections", {}).get("reading_order") or [])
     page_count = _max_page(normalized["evidence"])
     nodes = deepcopy(normalized["nodes"])
@@ -124,12 +120,8 @@ def resolve_page_footnote_refs(graph: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_page_footnote_refs_normalized(graph: dict[str, Any]) -> dict[str, Any]:
-    evidence_by_id = {
-        str(record["evidence_id"]): record for record in graph["evidence"]
-    }
-    notes_by_page_marker = _page_foot_notes_by_page_marker(
-        graph["nodes"], evidence_by_id
-    )
+    evidence_by_id = {str(record["evidence_id"]): record for record in graph["evidence"]}
+    notes_by_page_marker = _page_foot_notes_by_page_marker(graph["nodes"], evidence_by_id)
     nodes = deepcopy(graph["nodes"])
     edges = deepcopy(graph["edges"])
     existing_edges = {
@@ -279,9 +271,7 @@ def _resolve_scoped_note_refs_normalized(graph: dict[str, Any]) -> dict[str, Any
 
 def audit_bookgraph_notes(graph: dict[str, Any]) -> dict[str, Any]:
     validate_bookgraph(graph)
-    note_ids = {
-        str(node["node_id"]) for node in graph["nodes"] if node.get("node_type") == "note"
-    }
+    note_ids = {str(node["node_id"]) for node in graph["nodes"] if node.get("node_type") == "note"}
     referenced_note_ids = {
         str(edge["target"])
         for edge in graph["edges"]
@@ -324,9 +314,7 @@ def _page_foot_notes_by_page_marker(
     return notes
 
 
-def _node_pages(
-    node: dict[str, Any], evidence_by_id: dict[str, dict[str, Any]]
-) -> set[int]:
+def _node_pages(node: dict[str, Any], evidence_by_id: dict[str, dict[str, Any]]) -> set[int]:
     pages: set[int] = set()
     for evidence_id in node.get("evidence_ids") or []:
         evidence = evidence_by_id.get(str(evidence_id))
@@ -431,9 +419,7 @@ def _max_page(evidence: list[dict[str, Any]]) -> int:
     return max(pages) if pages else 0
 
 
-def _first_node_page(
-    node: dict[str, Any], evidence_by_id: dict[str, dict[str, Any]]
-) -> int | None:
+def _first_node_page(node: dict[str, Any], evidence_by_id: dict[str, dict[str, Any]]) -> int | None:
     pages = sorted(_node_pages(node, evidence_by_id))
     return pages[0] if pages else None
 
@@ -476,7 +462,7 @@ def _body_scope_by_node(
 
 
 def _scoped_notes_by_marker(
-    nodes: list[dict[str, Any]]
+    nodes: list[dict[str, Any]],
 ) -> dict[tuple[str, str, str], list[dict[str, Any]]]:
     notes: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     for node in nodes:
@@ -506,9 +492,7 @@ def _scoped_note_candidates(
     return _unique_nodes(notes_by_scope_marker.get(("book", "", marker), []))
 
 
-def _set_scoped_note_ref_target(
-    run: dict[str, Any], marker: str, note: dict[str, Any]
-) -> None:
+def _set_scoped_note_ref_target(run: dict[str, Any], marker: str, note: dict[str, Any]) -> None:
     note_attrs = note.get("attrs") if isinstance(note.get("attrs"), dict) else {}
     attrs = run.setdefault("attrs", {})
     attrs["marker"] = marker
@@ -638,8 +622,10 @@ def _page_sizes_from_metadata(metadata: dict[str, Any]) -> dict[int, dict[str, f
         page = record.get("page")
         width = record.get("width")
         height = record.get("height")
-        if isinstance(page, int) and isinstance(width, int | float) and isinstance(
-            height, int | float
+        if (
+            isinstance(page, int)
+            and isinstance(width, int | float)
+            and isinstance(height, int | float)
         ):
             sizes[page] = {"width": float(width), "height": float(height)}
     return sizes

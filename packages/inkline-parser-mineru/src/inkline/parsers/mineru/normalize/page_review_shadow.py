@@ -67,9 +67,7 @@ def build_page_review_shadow(
     layout_audit = audit_text_unit_layout(text_units, observed["pages"], observed["observations"])
     page_roles = classify_observed_page_roles(observed, layout_audit=layout_audit)
     if source_pdf is not None and Path(source_pdf).is_file():
-        page_roles = _add_pre_body_raster_visual_signals(
-            page_roles, skeleton, Path(source_pdf)
-        )
+        page_roles = _add_pre_body_raster_visual_signals(page_roles, skeleton, Path(source_pdf))
     plan = build_page_review_plan(observed, skeleton, page_roles)
     if not use_llm:
         return plan
@@ -225,8 +223,7 @@ def _prepare_llm_review_pages(
     residual_pages = [
         page
         for page, record in sorted(page_records.items())
-        if page not in initial_pages
-        and _is_pre_body_unknown(record)
+        if page not in initial_pages and _is_pre_body_unknown(record)
     ]
     for page in residual_pages:
         record = page_records[page]
@@ -271,7 +268,9 @@ def _resolve_pending_pages(
 ) -> dict[int, dict[str, Any]]:
     page_decisions = _checkpoint_page_decisions(checkpoint)
     unfinished_pages = [page for page in sorted(request_pages) if page not in page_decisions]
-    image_paths = _render_page_images(runtime.source_pdf, unfinished_pages, runtime.image_output_dir)
+    image_paths = _render_page_images(
+        runtime.source_pdf, unfinished_pages, runtime.image_output_dir
+    )
     for page in unfinished_pages:
         _resolve_request_page(
             plan,
@@ -367,7 +366,10 @@ def _effective_prompt_profile(
         return "after_back_exterior"
     if default_profile == "front_visual_identity" and preceding_kind == "dust_jacket_spread":
         return "after_dust_jacket_spread"
-    if default_profile == "front_visual_identity" and preceding_kind == "decorative_preliminary_page":
+    if (
+        default_profile == "front_visual_identity"
+        and preceding_kind == "decorative_preliminary_page"
+    ):
         return "after_decorative_preliminary"
     if default_profile == "front_visual_identity" and preceding_kind == "title_page":
         return "after_title_page"
@@ -394,7 +396,9 @@ def _load_page_review_checkpoint(
     expected = _checkpoint_fingerprint(plan, request_pages, llm_model)
     if checkpoint.get("fingerprint") != expected:
         _archive_stale_page_review_checkpoint(path)
-        fresh_checkpoint = _checkpoint_payload(plan, request_pages, llm_model, {}, status="in_progress")
+        fresh_checkpoint = _checkpoint_payload(
+            plan, request_pages, llm_model, {}, status="in_progress"
+        )
         _write_page_review_checkpoint(path, fresh_checkpoint)
         return fresh_checkpoint
     return checkpoint
@@ -419,7 +423,11 @@ def _checkpoint_page_decisions(checkpoint: dict[str, Any] | None) -> dict[int, d
         raise ValueError("page review checkpoint page_decisions must be an object")
     decisions: dict[int, dict[str, Any]] = {}
     for raw_page, decision in raw_pages.items():
-        if not isinstance(raw_page, str) or not raw_page.isdigit() or not isinstance(decision, dict):
+        if (
+            not isinstance(raw_page, str)
+            or not raw_page.isdigit()
+            or not isinstance(decision, dict)
+        ):
             raise ValueError("page review checkpoint has invalid page decisions")
         decisions[int(raw_page)] = decision
     return decisions
@@ -435,7 +443,9 @@ def _record_checkpoint_failure(
 ) -> None:
     if checkpoint_path is None or checkpoint is None:
         return
-    decisions = page_decisions if page_decisions is not None else _checkpoint_page_decisions(checkpoint)
+    decisions = (
+        page_decisions if page_decisions is not None else _checkpoint_page_decisions(checkpoint)
+    )
     payload = deepcopy(checkpoint)
     payload["page_decisions"] = {str(key): value for key, value in decisions.items()}
     payload["checkpoint"] = {
@@ -547,9 +557,7 @@ def _llm_page_payload(page_record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _render_page_images(
-    pdf_path: Path, pages: list[int], output_dir: Path
-) -> dict[int, Path]:
+def _render_page_images(pdf_path: Path, pages: list[int], output_dir: Path) -> dict[int, Path]:
     try:
         import fitz  # type: ignore
     except ImportError as exc:  # pragma: no cover - optional runtime

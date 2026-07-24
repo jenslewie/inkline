@@ -86,9 +86,11 @@ def _graph_summary(
     metadata = graph.get("metadata") or {}
     resolved_ignored_counts = ignored_counts
     if resolved_ignored_counts is None:
-        resolved_ignored_counts = metadata.get("shadow_ignored_observation_counts") or metadata.get(
-            "shadow_ignored_block_counts"
-        ) or {}
+        resolved_ignored_counts = (
+            metadata.get("shadow_ignored_observation_counts")
+            or metadata.get("shadow_ignored_block_counts")
+            or {}
+        )
     return {
         "node_counts": node_counts,
         "ignored_counts": dict(sorted(resolved_ignored_counts.items())),

@@ -216,9 +216,7 @@ def _middle_title_observations(
 ) -> list[dict[str, Any]]:
     if not isinstance(middle, dict) or not isinstance(middle.get("pdf_info"), list):
         return []
-    existing_keys = {
-        _observation_dedupe_key(observation) for observation in existing_observations
-    }
+    existing_keys = {_observation_dedupe_key(observation) for observation in existing_observations}
     existing_title_keys = {
         _title_dedupe_key(observation.get("page"), str(observation.get("text") or ""))
         for observation in existing_observations

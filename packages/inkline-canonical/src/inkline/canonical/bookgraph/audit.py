@@ -236,7 +236,9 @@ def _heading_like_reasons(node: dict[str, Any], evidence: dict[str, Any]) -> lis
         reasons.append("short_text")
     if isinstance(bbox, list) and len(bbox) >= 2 and _as_float(bbox[1]) <= 360:
         reasons.append("top_of_page")
-    if text and not text.endswith((".", "!", "?", ";", ":", "\u3002", "\uff01", "\uff1f", "\uff1b", "\uff1a")):
+    if text and not text.endswith(
+        (".", "!", "?", ";", ":", "\u3002", "\uff01", "\uff1f", "\uff1b", "\uff1a")
+    ):
         reasons.append("no_sentence_terminal")
     return reasons
 

@@ -56,12 +56,8 @@ def build_book_skeleton_from_observed(
         infer_toc_levels(entries)
         assign_toc_hierarchy(entries)
     for entry in entries:
-        candidate_anchors = locate_toc_entry_anchors(
-            records, entry, exclude_pages=toc_pages
-        )
-        entry["candidate_start_pages"] = [
-            int(candidate["page"]) for candidate in candidate_anchors
-        ]
+        candidate_anchors = locate_toc_entry_anchors(records, entry, exclude_pages=toc_pages)
+        entry["candidate_start_pages"] = [int(candidate["page"]) for candidate in candidate_anchors]
         entry["_candidate_start_anchors"] = {
             int(candidate["page"]): candidate for candidate in candidate_anchors
         }
@@ -203,9 +199,7 @@ def _matching_parsed_entry(
 
 
 def _apply_structural_roles(entries: list[dict[str, Any]]) -> None:
-    first_body_index = _first_matching_entry_index(
-        entries, looks_like_body_toc_entry
-    )
+    first_body_index = _first_matching_entry_index(entries, looks_like_body_toc_entry)
     if first_body_index is None:
         return
     for entry in entries[:first_body_index]:

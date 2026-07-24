@@ -190,7 +190,9 @@ def _observed_metadata(args: Any, output_path: Path) -> dict[str, Any]:
 def _relative_to_output(value: str, output_dir: Path) -> str:
     if not value:
         return ""
-    return Path(os.path.relpath(Path(value).expanduser().resolve(), output_dir.resolve())).as_posix()
+    return Path(
+        os.path.relpath(Path(value).expanduser().resolve(), output_dir.resolve())
+    ).as_posix()
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
