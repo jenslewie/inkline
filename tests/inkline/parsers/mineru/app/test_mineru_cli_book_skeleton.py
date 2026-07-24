@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+import sys
+from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from inkline.parsers.mineru.app import book_skeleton_cli
 from inkline.parsers.mineru.app import cli as mineru_cli
@@ -66,6 +71,7 @@ def test_book_skeleton_cli_writes_skeleton_without_canonical_output(tmp_path, mo
         title="Sample",
         language="zh-CN",
         output=str(output),
+        observed_output=None,
         llm=True,
         llm_model="qwen-test",
         llm_api_url="http://example.test/api/chat",
@@ -111,6 +117,111 @@ def test_book_skeleton_cli_writes_skeleton_without_canonical_output(tmp_path, mo
         "llm_timeout_seconds": 300,
     }
     assert "source_file" in captured["observed_kwargs"]["metadata"]  # pyright: ignore[reportIndexIssue]
+
+
+def _book_skeleton_cli_args(tmp_path, **overrides):
+    values = {
+        "content_list_v2": "content_list_v2.json",
+        "content_list": None,
+        "middle": "middle.json",
+        "source_pdf": str(tmp_path / "sample.pdf"),
+        "allow_missing_pdf_text": False,
+        "doc_id": "sample",
+        "title": "Sample",
+        "language": "zh-CN",
+        "output": str(tmp_path / "skeleton" / "sample_skeleton.json"),
+        "observed_output": str(tmp_path / "observed" / "sample_observed.json"),
+        "llm": False,
+        "llm_model": "qwen-test",
+        "llm_api_url": "http://example.test/api/chat",
+        "llm_timeout_seconds": 300,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_book_skeleton_cli_parses_optional_observed_output(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mineru-to-book-skeleton",
+            "--content-list-v2",
+            "content_list_v2.json",
+            "--output",
+            "skeleton.json",
+            "--observed-output",
+            "observed.json",
+        ],
+    )
+
+    args = book_skeleton_cli.parse_args()
+
+    assert args.observed_output == "observed.json"
+
+
+def test_book_skeleton_cli_writes_exact_observed_object_before_skeleton(
+    tmp_path, monkeypatch
+) -> None:
+    source_pdf = tmp_path / "sample.pdf"
+    source_pdf.write_bytes(b"%PDF-1.4\n")
+    args = _book_skeleton_cli_args(tmp_path, source_pdf=str(source_pdf))
+    observed_output = Path(args.observed_output)
+    observed = {"metadata": {"doc_id": "sample"}, "pages": [], "observations": []}
+    skeleton = {"metadata": {"doc_id": "sample"}, "toc_entries": []}
+
+    monkeypatch.setattr(book_skeleton_cli, "parse_args", lambda: args)
+    monkeypatch.setattr(
+        book_skeleton_cli,
+        "resolve_source_pdf_path",
+        lambda *_, **__: str(source_pdf),
+    )
+    monkeypatch.setattr(book_skeleton_cli, "load_inputs", lambda _: ({}, {}))
+    monkeypatch.setattr(book_skeleton_cli, "load_json", lambda _: None)
+    monkeypatch.setattr(book_skeleton_cli, "build_observed_document_shadow", lambda **_: observed)
+    monkeypatch.setattr(book_skeleton_cli, "validate_observed_document", lambda _: None)
+
+    def build_skeleton(value, **_):
+        assert value is observed
+        assert json.loads(observed_output.read_text(encoding="utf-8")) == observed
+        return skeleton
+
+    monkeypatch.setattr(book_skeleton_cli, "build_book_skeleton_shadow", build_skeleton)
+    monkeypatch.setattr(book_skeleton_cli, "validate_book_skeleton", lambda _: None)
+
+    book_skeleton_cli.main()
+
+    assert observed_output.parent.is_dir()
+    assert json.loads(observed_output.read_text(encoding="utf-8")) == observed
+
+
+def test_book_skeleton_cli_stops_when_observed_output_cannot_be_written(
+    tmp_path, monkeypatch
+) -> None:
+    args = _book_skeleton_cli_args(tmp_path, source_pdf=None)
+    observed = {"metadata": {}, "pages": [], "observations": []}
+
+    monkeypatch.setattr(book_skeleton_cli, "parse_args", lambda: args)
+    monkeypatch.setattr(book_skeleton_cli, "resolve_source_pdf_path", lambda *_, **__: None)
+    monkeypatch.setattr(book_skeleton_cli, "load_inputs", lambda _: ({}, {}))
+    monkeypatch.setattr(book_skeleton_cli, "load_json", lambda _: None)
+    monkeypatch.setattr(book_skeleton_cli, "build_observed_document_shadow", lambda **_: observed)
+    monkeypatch.setattr(book_skeleton_cli, "validate_observed_document", lambda _: None)
+    monkeypatch.setattr(
+        book_skeleton_cli,
+        "_write_json",
+        lambda *_: (_ for _ in ()).throw(OSError("read-only output")),
+    )
+    monkeypatch.setattr(
+        book_skeleton_cli,
+        "build_book_skeleton_shadow",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Skeleton construction must not start")
+        ),
+    )
+
+    with pytest.raises(OSError, match="read-only output"):
+        book_skeleton_cli.main()
 
 
 def test_book_skeleton_llm_messages_keep_toc_images_separate_and_ordered(tmp_path) -> None:

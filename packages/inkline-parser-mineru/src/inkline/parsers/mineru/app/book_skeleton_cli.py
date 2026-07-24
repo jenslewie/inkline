@@ -44,6 +44,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--language", default="zh-CN")
     parser.add_argument("--output", required=True, help="BookSkeleton JSON output path.")
     parser.add_argument(
+        "--observed-output",
+        help="Optional parser-neutral ObservedDocument JSON output path.",
+    )
+    parser.add_argument(
         "--llm",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -74,6 +78,8 @@ def main() -> None:
         allow_missing_pdf_text=args.allow_missing_pdf_text,
     )
     validate_observed_document(observed)
+    if args.observed_output:
+        _write_json(Path(args.observed_output), observed)
     skeleton = build_book_skeleton_shadow(
         observed,
         use_llm=args.llm,
@@ -85,9 +91,16 @@ def main() -> None:
     )
     validate_book_skeleton(skeleton)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(skeleton, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_json(output_path, skeleton)
     print(f"Wrote {output_path} with {len(skeleton['toc_entries'])} TOC entries")
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def _observed_metadata(args: argparse.Namespace, output_path: Path) -> dict[str, Any]:
