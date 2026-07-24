@@ -15,7 +15,7 @@ from inkline.canonical.bookgraph.from_observed import build_internal_canonical_f
 
 
 def _load_tool() -> Any:
-    path = Path(__file__).resolve().parents[3] / "tools" / "audit_internal_paragraph_boundaries.py"
+    path = Path(__file__).resolve().parents[4] / "tools" / "audit_internal_paragraph_boundaries.py"
     spec = importlib.util.spec_from_file_location("audit_internal_paragraph_boundaries", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

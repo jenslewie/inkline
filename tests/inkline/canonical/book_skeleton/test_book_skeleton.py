@@ -836,7 +836,7 @@ def test_build_book_skeleton_from_observed_supports_topic_and_appendix_labels() 
 
 def test_book_skeleton_rules_do_not_hardcode_sample_specific_titles() -> None:
     canonical_dir = (
-        Path(__file__).resolve().parents[3]
+        Path(__file__).resolve().parents[4]
         / "packages"
         / "inkline-canonical"
         / "src"

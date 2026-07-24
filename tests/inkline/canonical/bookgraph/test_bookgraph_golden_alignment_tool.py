@@ -18,7 +18,7 @@ from inkline.canonical import (
 
 
 def _load_tool() -> Any:
-    path = Path(__file__).resolve().parents[3] / "tools" / "audit_bookgraph_golden_alignment.py"
+    path = Path(__file__).resolve().parents[4] / "tools" / "audit_bookgraph_golden_alignment.py"
     spec = importlib.util.spec_from_file_location("audit_bookgraph_golden_alignment", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

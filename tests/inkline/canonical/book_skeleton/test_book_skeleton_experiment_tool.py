@@ -11,7 +11,7 @@ from inkline.canonical.observed import make_observation, make_observed_document,
 
 
 def _load_tool() -> Any:
-    path = Path(__file__).resolve().parents[3] / "tools" / "experiment_book_skeleton_inputs.py"
+    path = Path(__file__).resolve().parents[4] / "tools" / "experiment_book_skeleton_inputs.py"
     spec = importlib.util.spec_from_file_location("experiment_book_skeleton_inputs", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def _load_checker():
-    path = Path(__file__).resolve().parents[4] / "tools" / "check_display_block_architecture.py"
+    path = Path(__file__).resolve().parents[6] / "tools" / "check_display_block_architecture.py"
     spec = importlib.util.spec_from_file_location("check_display_block_architecture", path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

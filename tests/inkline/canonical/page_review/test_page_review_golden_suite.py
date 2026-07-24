@@ -9,7 +9,7 @@ import pytest
 
 
 def _load_tool():
-    path = Path(__file__).resolve().parents[3] / "tools" / "run_page_review_golden_suite.py"
+    path = Path(__file__).resolve().parents[4] / "tools" / "run_page_review_golden_suite.py"
     spec = importlib.util.spec_from_file_location("run_page_review_golden_suite", path)
     assert spec is not None
     assert spec.loader is not None

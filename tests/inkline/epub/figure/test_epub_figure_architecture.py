@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 
 EPUB_DIR = (
-    Path(__file__).resolve().parents[3] / "packages" / "inkline-epub" / "src" / "inkline" / "epub"
+    Path(__file__).resolve().parents[4] / "packages" / "inkline-epub" / "src" / "inkline" / "epub"
 )
 
 
