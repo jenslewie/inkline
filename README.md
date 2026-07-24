@@ -156,7 +156,9 @@ order. The rendered images are saved next to the skeleton as
 
 When the only requested artifact is a BookSkeleton, use the dedicated command.
 It loads raw MinerU layout evidence into an ObservedDocument and writes the
-skeleton directly; it does not build or write `canonical.json`.
+skeleton directly; it does not build or write `canonical.json`. Pass
+`--observed-output` to persist the exact validated ObservedDocument object that
+the Skeleton builder consumes; observation IDs are preserved for later review.
 
 ```bash
 UV_CACHE_DIR=/tmp/inkline-uv-cache uv run --extra mineru mineru-to-book-skeleton \
@@ -165,8 +167,16 @@ UV_CACHE_DIR=/tmp/inkline-uv-cache uv run --extra mineru mineru-to-book-skeleton
   --source-pdf data/samples/埃及.pdf \
   --doc-id 埃及 \
   --title 埃及 \
-  --output data/outputs/skeleton/埃及_skeleton.json \
+  --output data/outputs/workspace/skeleton/埃及_skeleton.json \
+  --observed-output data/outputs/workspace/observed/埃及_observed.json \
   --llm
+```
+
+To inspect a specific review observation in the paired artifact:
+
+```bash
+rg -n -C 8 '"observation_id": "obs000396"' \
+  data/outputs/workspace/observed/女王与苏丹_observed.json
 ```
 
 `--llm` requires a readable `--source-pdf`; the dedicated command fails rather

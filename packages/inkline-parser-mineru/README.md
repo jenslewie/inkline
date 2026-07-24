@@ -10,6 +10,8 @@ rules.
 - Provides `mineru-to-canonical` for raw artifact reuse and full canonical output.
 - Provides `mineru-to-book-skeleton` for raw artifact reuse when only a
   TOC-driven BookSkeleton is needed.
+- The dedicated BookSkeleton CLI can optionally emit the paired parser-neutral
+  ObservedDocument; observation IDs are not reassigned.
 - Provides `mineru-page-review` when only a Phase 4A PageReview is needed.
 - Loads MinerU raw artifacts and normalizes them into current canonical output.
 - Builds optional shadow artifacts: `ObservedDocument`, BookGraph, internal
@@ -18,6 +20,15 @@ rules.
   marker-locator repair logic.
 - Does not define canonical public contracts; those belong in
   `inkline-canonical`.
+
+## BookSkeleton Only
+
+Use `mineru-to-book-skeleton` when a BookSkeleton is the only requested output.
+The optional `--observed-output PATH` argument emits the parser-neutral
+ObservedDocument consumed by the Skeleton builder alongside the Skeleton JSON.
+It persists the validated object without reassigning observation IDs, so review
+artifacts can be looked up by their original IDs. Omitting the option preserves
+the existing Skeleton-only behavior.
 
 ## Main Areas
 
