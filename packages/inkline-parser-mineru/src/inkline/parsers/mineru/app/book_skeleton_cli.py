@@ -61,6 +61,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    output_path = Path(args.output)
+    if (
+        args.observed_output
+        and output_path.expanduser().resolve() == Path(args.observed_output).expanduser().resolve()
+    ):
+        raise ValueError("--output and --observed-output must refer to different files.")
     args.source_pdf = resolve_source_pdf_path(
         args.source_pdf, allow_missing=args.allow_missing_pdf_text
     )
@@ -68,7 +74,6 @@ def main() -> None:
         raise ValueError("--llm requires a readable --source-pdf to render TOC page images.")
 
     pages, page_sizes = load_inputs(args)
-    output_path = Path(args.output)
     observed = build_observed_document_shadow(
         pages=pages,
         page_sizes=page_sizes,

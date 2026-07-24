@@ -160,6 +160,67 @@ def test_book_skeleton_cli_parses_optional_observed_output(monkeypatch) -> None:
     assert args.observed_output == "observed.json"
 
 
+def test_book_skeleton_cli_rejects_equal_resolved_output_paths(tmp_path, monkeypatch) -> None:
+    output = tmp_path / "artifacts" / "sample.json"
+    args = _book_skeleton_cli_args(
+        tmp_path,
+        source_pdf=None,
+        output=str(output),
+        observed_output=str(output.parent / "." / "sample.json"),
+    )
+    observed = {"metadata": {}, "pages": [], "observations": []}
+    skeleton = {"metadata": {}, "toc_entries": []}
+
+    monkeypatch.setattr(book_skeleton_cli, "parse_args", lambda: args)
+    monkeypatch.setattr(book_skeleton_cli, "resolve_source_pdf_path", lambda *_, **__: None)
+    monkeypatch.setattr(book_skeleton_cli, "load_inputs", lambda _: ({}, {}))
+    monkeypatch.setattr(book_skeleton_cli, "load_json", lambda _: None)
+    monkeypatch.setattr(book_skeleton_cli, "build_observed_document_shadow", lambda **_: observed)
+    monkeypatch.setattr(book_skeleton_cli, "validate_observed_document", lambda _: None)
+    monkeypatch.setattr(
+        book_skeleton_cli, "build_book_skeleton_shadow", lambda *_args, **_kwargs: skeleton
+    )
+    monkeypatch.setattr(book_skeleton_cli, "validate_book_skeleton", lambda _: None)
+
+    with pytest.raises(ValueError, match="different files"):
+        book_skeleton_cli.main()
+
+    assert not output.exists()
+
+
+def test_book_skeleton_cli_validation_failure_writes_no_output_or_skeleton(
+    tmp_path, monkeypatch
+) -> None:
+    args = _book_skeleton_cli_args(tmp_path, source_pdf=None)
+    observed_output = Path(args.observed_output)
+    skeleton_output = Path(args.output)
+    observed = {"metadata": {}, "pages": [], "observations": []}
+
+    monkeypatch.setattr(book_skeleton_cli, "parse_args", lambda: args)
+    monkeypatch.setattr(book_skeleton_cli, "resolve_source_pdf_path", lambda *_, **__: None)
+    monkeypatch.setattr(book_skeleton_cli, "load_inputs", lambda _: ({}, {}))
+    monkeypatch.setattr(book_skeleton_cli, "load_json", lambda _: None)
+    monkeypatch.setattr(book_skeleton_cli, "build_observed_document_shadow", lambda **_: observed)
+    monkeypatch.setattr(
+        book_skeleton_cli,
+        "validate_observed_document",
+        lambda _: (_ for _ in ()).throw(ValueError("invalid observed document")),
+    )
+    monkeypatch.setattr(
+        book_skeleton_cli,
+        "build_book_skeleton_shadow",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Skeleton construction must not start")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="invalid observed document"):
+        book_skeleton_cli.main()
+
+    assert not observed_output.exists()
+    assert not skeleton_output.exists()
+
+
 def test_book_skeleton_cli_writes_exact_observed_object_before_skeleton(
     tmp_path, monkeypatch
 ) -> None:
