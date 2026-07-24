@@ -77,12 +77,16 @@ is `medium` confidence and has exactly two straddling direct anchors that agree
 on the offset. A selected start anchor proves where a section starts and why.
 It does not prove that later pages or resources belong to that section.
 
-The planned internal `SectionMap` maps
-`selected_start_anchor.title_observation_ids` to TextUnits/logical units rather
-than rediscovering observed heading evidence, then owns membership and ranges.
-It must preserve `standalone` and `unresolved` physical pages instead of
-assigning them to the nearest preceding TOC title. Only confirmed membership
-becomes BookGraph `contains` edges and later RAG heading-path context.
+The planned internal `SectionMap` consumes anchors by method. For
+`observed_title_match`, it maps `title_observation_ids` to TextUnits/logical
+units. For `printed_page_offset`, whose title evidence is empty, it uses the
+validated physical `page`, matching `toc_observation_ids`, and two agreeing
+direct `supporting_anchor_ids`; it does not fabricate a title TextUnit or
+rediscover a heading. SectionMap still owns membership and ranges, may leave an
+offset-backed placement unresolved, and must preserve both `standalone` and
+`unresolved` physical pages instead of assigning them to the nearest preceding
+TOC title. Only confirmed membership becomes BookGraph `contains` edges and
+later RAG heading-path context.
 
 ## TOC LLM Boundary
 

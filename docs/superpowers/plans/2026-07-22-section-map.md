@@ -23,10 +23,13 @@ edges and future RAG heading-path context.
 - `PageReview` consumes `selected_start_page` and remains independent of anchor
   provenance; it identifies a page and its consumption policy, not its logical
   section.
-- SectionMap maps `selected_start_anchor.title_observation_ids` to TextUnits/
-  logical units instead of rediscovering observed heading evidence. TextFlow
-  then provides ordering and continuity, not a publication-level boundary by
-  itself.
+- SectionMap consumes anchors by `resolution_method`. For
+  `observed_title_match`, it maps `title_observation_ids` to TextUnits/logical
+  units. For `printed_page_offset`, whose title evidence is empty by contract,
+  it uses the validated physical `page`, matching `toc_observation_ids`, and
+  two agreeing direct `supporting_anchor_ids`; it neither fabricates a title
+  TextUnit nor rediscovers a heading. TextFlow provides ordering and
+  continuity, not a publication-level boundary by itself.
 - The TOC LLM may emit only TOC-structure fields; it must not emit physical
   pages, start anchors, printed-page offsets, or observation ids.
 - SectionMap must preserve `standalone` and `unresolved` physical pages. It may
@@ -54,7 +57,7 @@ The internal SectionMap contract will contain:
 | --- | --- |
 | `sections` | Logical sections, hierarchy, source Skeleton entry, physical ranges, unit membership, attached visual pages, and evidence. |
 | `page_placements` | Explicit `section_member`, `standalone`, or `unresolved` placement for nontrivial physical pages. |
-| `anchor_evidence_ids` | The selected start anchor's TOC/title evidence ids, mapped to TextUnits/logical units to establish a section start. |
+| `anchor_evidence_ids` | Direct anchors map title evidence to units; offset anchors retain TOC evidence and two direct support anchors without inventing a title unit. |
 | `evidence_ids` | Evidence behind range, membership, and exception decisions. |
 | `decision_source` | Deterministic structural rule or bounded LLM boundary verifier. |
 | `confidence` | `high`, `medium`, or `low`, always accompanied by evidence and source. |
@@ -70,10 +73,13 @@ not silently included in the chronology section.
   referenced TextUnit ids, evidence ids, and no dangling section ids.
 
 - [ ] **2. Build anchor and page-identity evidence adapters.**
-  Read `selected_start_anchor` provenance, map its `title_observation_ids` to
-  TextUnits/logical units, and read TextFlow ordering plus resolved PageReview
-  records without importing parser-specific fields. Do not rediscover observed
-  heading evidence or treat the anchor as membership/range evidence.
+  Read `selected_start_anchor` provenance. Map direct-anchor
+  `title_observation_ids` to TextUnits/logical units. For an offset anchor,
+  retain its validated physical page, TOC evidence, and two direct supports;
+  do not invent a title unit or rediscover observed heading evidence. Read
+  TextFlow ordering plus resolved PageReview records without importing
+  parser-specific fields. Do not treat either anchor method as membership/range
+  evidence.
 
 - [ ] **3. Implement deterministic placement.**
   Mark confirmed external wrap, TOC, blank, copyright/title leaves, and other
@@ -81,9 +87,10 @@ not silently included in the chronology section.
   solely because it follows a TOC anchor.
 
 - [ ] **4. Infer high-confidence body section membership.**
-  Use mapped start-anchor units, hierarchy, reading-flow continuity, and next
-  confirmed heading boundaries. Preserve visual assets as explicit attachments
-  only when evidence ties them to the section.
+  Use mapped direct-anchor units or validated offset-page/support provenance,
+  hierarchy, reading-flow continuity, and next confirmed heading boundaries.
+  Preserve visual assets as explicit attachments only when evidence ties them
+  to the section. An offset alone cannot establish membership.
 
 - [ ] **5. Add bounded front/back matter boundary verification.**
   Send only unresolved gaps and existing candidate section ids/pages to the
@@ -114,6 +121,9 @@ not silently included in the chronology section.
    fallback is allowed.
 6. Public BookGraph `contains` edges reference only validated, confirmed
    SectionMap memberships.
+7. An offset-only section start has no title TextUnit; its physical page, TOC
+   evidence, and two direct supports remain traceable, and no page is assigned
+   solely because of the offset.
 
 ## Non-Goals
 

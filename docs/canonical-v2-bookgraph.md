@@ -773,11 +773,15 @@ for this first 4B slice.
 units to the logical document tree. It is **not** a convenience map that
 assigns every page to the closest preceding TOC entry. `BookSkeleton` supplies
 verified start anchors; a TOC omits external wrap, its own pages, some plates,
-and other inserted material. SectionMap maps each
-`selected_start_anchor.title_observation_ids` to TextUnits/logical units rather
-than rediscovering observed heading evidence. A selected start anchor proves
+and other inserted material. SectionMap consumes anchors by resolution method:
+for `observed_title_match`, it maps `title_observation_ids` to TextUnits/logical
+units; for `printed_page_offset`, whose title evidence is empty by contract, it
+uses the validated physical `page`, matching `toc_observation_ids`, and the two
+agreeing direct `supporting_anchor_ids`. It must not fabricate a title TextUnit
+or rediscover a heading for the offset case. A selected start anchor proves
 where a section starts and why; it does not establish a section end page or
-page/resource membership by itself. SectionMap owns membership and ranges.
+page/resource membership by itself. SectionMap owns membership and ranges and
+may leave an offset-backed placement unresolved.
 
 The dependency graph is intentionally a DAG rather than a linear pipeline:
 
@@ -829,9 +833,11 @@ text from an attached visual asset, but this is not a replacement for physical
 
 The initial implementation must:
 
-- map `selected_start_anchor.title_observation_ids` to TextUnits/logical units,
-  then use TextFlow continuity, PageReview identities, and provenance to decide
-  membership and ranges;
+- map direct-anchor `title_observation_ids` to TextUnits/logical units; for an
+  offset-only anchor, retain its validated physical page, TOC evidence, and two
+  direct supports without inventing a title unit;
+- use TextFlow continuity, PageReview identities, and provenance to decide
+  membership and ranges; an offset alone never proves membership;
 - classify `external_wrap`, `toc_page`, `blank_page`, copyright/title leaves,
   and other confirmed standalone pages before considering section membership;
 - leave conflicting or weakly evidenced front/back matter pages unresolved;
@@ -843,8 +849,10 @@ The initial implementation must:
 It must not implement GraphRAG indexing, document metadata extraction,
 image-caption relations, or a new public canonical field for unresolved debug
 state. Its acceptance suite must include a TOC page immediately following a
-chronology anchor, external wrap before the first internal section, and visual
-pages within a body chapter.
+chronology anchor, external wrap before the first internal section, visual
+pages within a body chapter, and an offset-only section start with no title
+TextUnit whose supporting provenance remains traceable without forcing page
+membership.
 
 ### Phase 4 note/ref model
 
