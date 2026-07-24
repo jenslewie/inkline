@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from inkline.canonical import (
     book_skeleton_toc_llm_prompt,
     build_book_skeleton_from_observed,
@@ -13,7 +15,7 @@ from inkline.canonical.book_skeleton.pages import (
 )
 
 
-def _attila_document() -> dict[str, object]:
+def _attila_document() -> dict[str, Any]:
     pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 290)]
     return make_observed_document(
         {
@@ -102,6 +104,19 @@ def test_locate_toc_entry_anchors_keeps_matching_observation_ids() -> None:
     assert anchors[0]["page"] == 6
     assert anchors[0]["title_observation_ids"] == ["obs000002", "obs000003"]
     assert isinstance(anchors[0]["score"], float)
+
+
+def test_locate_toc_entry_anchors_rejects_unidentified_title_evidence() -> None:
+    document = _attila_document()
+    document["observations"][1]["observation_id"] = ""
+
+    anchors = locate_toc_entry_anchors(
+        page_records(document),
+        {"display_title": "第一章 阿提拉在当下"},
+        exclude_pages=[1],
+    )
+
+    assert 6 not in [anchor["page"] for anchor in anchors]
 
 
 def test_locate_toc_entry_anchors_preserves_title_variant_order() -> None:

@@ -78,6 +78,14 @@ def test_duplicate_observation_id_fails() -> None:
         validate_observed_document(document)
 
 
+def test_empty_observation_id_fails() -> None:
+    document = _document()
+    document["observations"][0]["observation_id"] = ""
+
+    with pytest.raises(ValidationError, match="observation_id must be non-empty"):
+        validate_observed_document(document)
+
+
 def test_observation_page_must_exist() -> None:
     document = _document()
     document["observations"][0]["page"] = 99

@@ -181,6 +181,8 @@ def _validate_observations(observations: list[dict[str, Any]], pages: set[int]) 
             if field not in observation:
                 raise ValidationError(f"observations[{index}].{field} is required")
         observation_id = observation["observation_id"]
+        if not observation_id:
+            raise ValidationError(f"observations[{index}].observation_id must be non-empty")
         if observation_id in observation_ids:
             raise ValidationError(f"duplicate observation_id: {observation_id}")
         observation_ids.add(observation_id)

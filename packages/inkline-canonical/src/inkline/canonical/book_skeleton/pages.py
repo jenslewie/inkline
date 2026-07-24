@@ -231,19 +231,28 @@ def locate_title_anchors(
         page_key = normalize_title(text)
         if not _title_matches_record(record, title_key, page_key):
             continue
-        if require_exact_observation and not _has_exact_aggregate_title_evidence(record, title_key):
-            continue
         evidence = [
             *record.get("_title_location_observations", []),
             *record.get("_candidate_title_context_observations", []),
         ]
-        observation_ids = sorted(
-            {
-                str(observation["observation_id"])
-                for observation in evidence
-                if str(observation.get("text") or "").strip()
-            }
-        )
+        if any(
+            str(observation.get("text") or "").strip()
+            and not str(observation.get("observation_id") or "").strip()
+            for observation in evidence
+        ):
+            continue
+        exact_observation_ids = _exact_aggregate_title_observation_ids(record, title_key)
+        if require_exact_observation and exact_observation_ids is None:
+            continue
+        observation_ids = exact_observation_ids
+        if observation_ids is None:
+            observation_ids = sorted(
+                {
+                    str(observation["observation_id"])
+                    for observation in evidence
+                    if str(observation.get("text") or "").strip()
+                }
+            )
         candidates.append(
             {
                 "page": page,
@@ -696,36 +705,35 @@ def _title_matches_record(record: dict[str, Any], title_key: str, page_key: str)
     )
 
 
-def _has_exact_aggregate_title_evidence(record: dict[str, Any], title_key: str) -> bool:
+def _exact_aggregate_title_observation_ids(
+    record: dict[str, Any], title_key: str
+) -> list[str] | None:
     evidence = [
         *record.get("_title_location_observations", []),
         *record.get("_candidate_title_context_observations", []),
     ]
-    seen: set[tuple[str, str | int]] = set()
-    evidence_text_keys = []
+    seen_observation_ids: set[str] = set()
+    normalized_evidence = []
     for observation in evidence:
         observation_id = str(observation.get("observation_id") or "")
-        identity: tuple[str, str | int]
-        if observation_id:
-            identity = ("observation_id", observation_id)
-        else:
-            identity = ("object_id", id(observation))
-        if identity in seen:
+        if not observation_id or observation_id in seen_observation_ids:
             continue
-        seen.add(identity)
+        seen_observation_ids.add(observation_id)
         text_key = normalize_title(str(observation.get("text") or ""))
         if text_key:
-            evidence_text_keys.append(text_key)
+            normalized_evidence.append((text_key, observation_id))
 
-    for start in range(len(evidence_text_keys)):
+    for start in range(len(normalized_evidence)):
         aggregate_key = ""
-        for text_key in evidence_text_keys[start:]:
+        matching_observation_ids = []
+        for text_key, observation_id in normalized_evidence[start:]:
             aggregate_key += text_key
+            matching_observation_ids.append(observation_id)
             if aggregate_key == title_key:
-                return True
+                return sorted(matching_observation_ids)
             if not title_key.startswith(aggregate_key):
                 break
-    return False
+    return None
 
 
 def _requires_title_evidence(title_key: str) -> bool:

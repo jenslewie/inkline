@@ -207,6 +207,26 @@ def test_build_book_skeleton_aggregates_split_derived_title_evidence() -> None:
     assert anchor["title_observation_ids"] == ["obs000002", "obs000003"]
 
 
+def test_build_book_skeleton_excludes_unrelated_context_from_split_title_evidence() -> None:
+    document = _labeled_entry_document("II Great Campaign 1", ["Great", "Campaign"])
+    document["observations"].append(
+        make_observation(
+            "obs000004",
+            "text_region",
+            text="Introduction",
+            page=2,
+            role_hint="body_text",
+        )
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+
+    anchor = skeleton["toc_entries"][0]["selected_start_anchor"]
+    assert anchor is not None
+    assert anchor["resolution_method"] == "observed_title_match"
+    assert anchor["title_observation_ids"] == ["obs000002", "obs000003"]
+
+
 def test_build_book_skeleton_does_not_treat_mixed_case_word_as_roman_label() -> None:
     skeleton = build_book_skeleton_from_observed(_labeled_entry_document("Civil War 1", "War"))
 
