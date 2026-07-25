@@ -133,7 +133,8 @@ def _validate_anchor_evidence_semantics(
         )
         if (
             direct_candidate is None
-            or anchor["title_observation_ids"] != direct_candidate["title_observation_ids"]
+            or direct_candidate["exact_title_observation_ids"] is None
+            or anchor["title_observation_ids"] != direct_candidate["exact_title_observation_ids"]
         ):
             raise ValidationError(
                 f"toc_entries[{index}] title evidence does not match direct candidate"

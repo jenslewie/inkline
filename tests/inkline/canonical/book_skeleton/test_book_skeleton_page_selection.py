@@ -287,6 +287,41 @@ def test_add_printed_page_offset_candidates_fills_ocr_missed_title_page() -> Non
     assert anchor["confidence"] == "medium"
 
 
+def test_build_book_skeleton_uses_printed_offset_for_predicted_page_with_fuzzy_body_text() -> None:
+    skeleton = build_book_skeleton_from_observed(_printed_offset_document())
+
+    anchor = skeleton["toc_entries"][1]["selected_start_anchor"]
+
+    assert anchor == {
+        "anchor_id": "sa000001",
+        "page": 27,
+        "resolution_method": "printed_page_offset",
+        "printed_page_offset": 12,
+        "title_observation_ids": [],
+        "toc_observation_ids": ["obs000001"],
+        "supporting_anchor_ids": ["sa000000", "sa000002"],
+        "confidence": "medium",
+    }
+
+
+def test_validate_book_skeleton_against_observed_rejects_fuzzy_direct_anchor_ids() -> None:
+    document = _printed_offset_document()
+    skeleton = build_book_skeleton_from_observed(document)
+    skeleton["toc_entries"][1]["selected_start_anchor"] = {
+        "anchor_id": "sa000001",
+        "page": 27,
+        "resolution_method": "observed_title_match",
+        "printed_page_offset": 12,
+        "title_observation_ids": ["obs000004", "obs000005"],
+        "toc_observation_ids": ["obs000001"],
+        "supporting_anchor_ids": [],
+        "confidence": "high",
+    }
+
+    with pytest.raises(ValidationError, match="title evidence does not match direct candidate"):
+        canonical_api.validate_book_skeleton_against_observed(skeleton, document)
+
+
 def test_validate_book_skeleton_against_observed_rejects_unknown_offset_support() -> None:
     document = _printed_offset_document()
     skeleton = build_book_skeleton_from_observed(document)
@@ -336,7 +371,7 @@ def _printed_offset_document() -> dict:
             make_observation(
                 "obs000001",
                 "text_region",
-                text="目录\n亚瑟 3\n主教座堂 15\n查理曼 31",
+                text="目录\n亚瑟 3\n主教座堂导览 15\n查理曼 31",
                 page=1,
                 role_hint="toc_text",
             ),
@@ -345,6 +380,20 @@ def _printed_offset_document() -> dict:
             ),
             make_observation(
                 "obs000003", "text_region", text="查理曼", page=43, role_hint="title_text"
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="主教座堂导览的开场正文",
+                page=27,
+                role_hint="body_text",
+            ),
+            make_observation(
+                "obs000005",
+                "text_region",
+                text="无关正文。",
+                page=27,
+                role_hint="body_text",
             ),
         ],
     )

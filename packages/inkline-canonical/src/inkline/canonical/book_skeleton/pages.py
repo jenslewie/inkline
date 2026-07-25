@@ -331,7 +331,11 @@ def _attach_direct_anchors(
         entry["selected_start_anchor"] = None
         selected_page = entry.get("selected_start_page")
         candidate = (entry.get("_candidate_start_anchors") or {}).get(selected_page)
-        if not isinstance(selected_page, int) or not isinstance(candidate, dict):
+        if (
+            not isinstance(selected_page, int)
+            or not isinstance(candidate, dict)
+            or candidate.get("exact_title_observation_ids") is None
+        ):
             continue
         printed_page = entry.get("printed_start_page")
         printed_page_offset = (
