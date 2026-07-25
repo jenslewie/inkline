@@ -21,6 +21,105 @@ from inkline.canonical.book_skeleton.toc import (
 from inkline.canonical.schema import ValidationError
 
 
+def test_build_book_skeleton_prefers_exact_title_over_same_page_fuzzy_candidate() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "fuzzy-title",
+            "title": "Fuzzy Title",
+            "language": "zh-CN",
+            "source_file": "fuzzy-title.pdf",
+            "parser_name": "test-parser",
+            "parser_mode": "structured",
+        },
+        [
+            make_observed_page(1, width=1000, height=1400),
+            make_observed_page(2, width=1000, height=1400),
+        ],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\n第1章 资料来源 2",
+                page=1,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="第1章 资料来源\n本页正文说明",
+                page=2,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000010",
+                "text_region",
+                text="资料",
+                page=2,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="来源",
+                page=2,
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+    entry = skeleton["toc_entries"][0]
+
+    assert entry["selected_start_page"] == 2
+    assert entry["selected_start_anchor"]["title_observation_ids"] == ["obs000010", "obs000003"]
+
+
+def test_build_book_skeleton_preserves_exact_split_anchor_evidence_order() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "split-title",
+            "title": "Split Title",
+            "language": "zh-CN",
+            "source_file": "split-title.pdf",
+            "parser_name": "test-parser",
+            "parser_mode": "structured",
+        },
+        [
+            make_observed_page(1, width=1000, height=1400),
+            make_observed_page(2, width=1000, height=1400),
+        ],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\n资料来源 2",
+                page=1,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000010",
+                "text_region",
+                text="资料",
+                page=2,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="来源",
+                page=2,
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+    anchor = skeleton["toc_entries"][0]["selected_start_anchor"]
+
+    assert anchor is not None
+    assert anchor["title_observation_ids"] == ["obs000010", "obs000002"]
+
+
 def test_parse_toc_entries_keeps_printed_page_as_internal_evidence() -> None:
     entries = parse_toc_entries("亚瑟／3\n主教座堂／15")
 

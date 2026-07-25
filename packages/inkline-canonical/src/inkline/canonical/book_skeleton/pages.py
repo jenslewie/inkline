@@ -154,7 +154,7 @@ def locate_toc_entry_anchors(
     page_records_: list[dict[str, Any]], entry: dict[str, Any], *, exclude_pages: list[int]
 ) -> list[dict[str, Any]]:
     candidates = []
-    seen = set()
+    candidate_indexes_by_page: dict[int, int] = {}
     display_title = str(entry.get("display_title") or "").strip()
     for title in _location_titles_for_entry(entry):
         for candidate in locate_title_anchors(
@@ -164,10 +164,13 @@ def locate_toc_entry_anchors(
             require_exact_observation=title != display_title,
         ):
             page = int(candidate["page"])
-            if page in seen:
+            existing_index = candidate_indexes_by_page.get(page)
+            if existing_index is None:
+                candidate_indexes_by_page[page] = len(candidates)
+                candidates.append(candidate)
                 continue
-            seen.add(page)
-            candidates.append(candidate)
+            if _is_stronger_exact_title_candidate(candidate, candidates[existing_index]):
+                candidates[existing_index] = candidate
     return candidates
 
 
@@ -258,6 +261,7 @@ def locate_title_anchors(
                 "page": page,
                 "score": _title_location_score(record, title_key, text, page_key),
                 "title_observation_ids": observation_ids,
+                "exact_title_observation_ids": exact_observation_ids,
             }
         )
     return sorted(
@@ -730,10 +734,18 @@ def _exact_aggregate_title_observation_ids(
             aggregate_key += text_key
             matching_observation_ids.append(observation_id)
             if aggregate_key == title_key:
-                return sorted(matching_observation_ids)
+                return matching_observation_ids
             if not title_key.startswith(aggregate_key):
                 break
     return None
+
+
+def _is_stronger_exact_title_candidate(candidate: dict[str, Any], existing: dict[str, Any]) -> bool:
+    candidate_is_exact = candidate.get("exact_title_observation_ids") is not None
+    existing_is_exact = existing.get("exact_title_observation_ids") is not None
+    if candidate_is_exact != existing_is_exact:
+        return candidate_is_exact
+    return float(candidate["score"]) > float(existing["score"])
 
 
 def _requires_title_evidence(title_key: str) -> bool:
