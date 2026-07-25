@@ -272,7 +272,10 @@ def locate_title_anchors(
 
 def select_monotonic_start_pages(entries: list[dict[str, Any]]) -> None:
     selections = _choose_monotonic_start_pages(
-        [entry["candidate_start_pages"] for entry in entries],
+        [
+            entry.get("_direct_candidate_start_pages", entry["candidate_start_pages"])
+            for entry in entries
+        ],
         [entry.get("printed_start_page") for entry in entries],
         [entry.get("role") for entry in entries],
     )
@@ -296,9 +299,11 @@ def add_printed_page_offset_candidates(entries: list[dict[str, Any]], *, page_co
         predicted_page = printed_start_page + offset
         if not 1 <= predicted_page <= page_count:
             continue
-        if predicted_page in entry["candidate_start_pages"]:
-            continue
-        entry["candidate_start_pages"].append(predicted_page)
+        if predicted_page not in entry["candidate_start_pages"]:
+            entry["candidate_start_pages"].append(predicted_page)
+        direct_candidates = entry.get("_direct_candidate_start_pages")
+        if isinstance(direct_candidates, list) and predicted_page not in direct_candidates:
+            direct_candidates.append(predicted_page)
         entry["_printed_offset_candidate"] = {
             "page": predicted_page,
             "printed_page_offset": offset,

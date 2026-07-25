@@ -21,6 +21,53 @@ from inkline.canonical.book_skeleton.toc import (
 from inkline.canonical.schema import ValidationError
 
 
+def test_build_book_skeleton_rejects_fuzzy_direct_anchor_without_exact_title_evidence() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "fuzzy-only-title",
+            "title": "Fuzzy Only Title",
+            "language": "zh-CN",
+            "source_file": "fuzzy-only-title.pdf",
+            "parser_name": "test-parser",
+            "parser_mode": "structured",
+        },
+        [
+            make_observed_page(1, width=1000, height=1400),
+            make_observed_page(2, width=1000, height=1400),
+        ],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\n社会研究方法 2",
+                page=1,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="社会研究方珐",
+                page=2,
+                role_hint="body_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="这段不相关正文不能作为标题证据。",
+                page=2,
+                role_hint="body_text",
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+    entry = skeleton["toc_entries"][0]
+
+    assert entry["candidate_start_pages"] == [2]
+    assert entry["selected_start_page"] is None
+    assert entry["selected_start_anchor"] is None
+
+
 def test_build_book_skeleton_prefers_exact_title_over_same_page_fuzzy_candidate() -> None:
     document = make_observed_document(
         {

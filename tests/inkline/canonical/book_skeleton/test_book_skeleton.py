@@ -1163,7 +1163,7 @@ def test_build_book_skeleton_from_observed_preserves_toc_labels_pages_and_hierar
     assert entries[5]["parent_entry_index"] is None
 
 
-def test_build_book_skeleton_from_observed_ignores_note_headers_when_locating_titles() -> None:
+def test_build_book_skeleton_from_observed_keeps_fuzzy_title_candidate_without_direct_anchor() -> None:
     pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 530)]
     document = make_observed_document(
         {
@@ -1219,7 +1219,9 @@ def test_build_book_skeleton_from_observed_ignores_note_headers_when_locating_ti
         entry for entry in skeleton["toc_entries"] if entry["display_title"] == "第八章 大行集结"
     )
 
-    assert entry["selected_start_page"] == 172
+    assert entry["candidate_start_pages"] == [172]
+    assert entry["selected_start_page"] is None
+    assert entry["selected_start_anchor"] is None
     assert 522 not in entry["candidate_start_pages"]
 
 

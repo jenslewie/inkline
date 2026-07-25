@@ -61,6 +61,11 @@ def build_book_skeleton_from_observed(
         entry["_candidate_start_anchors"] = {
             int(candidate["page"]): candidate for candidate in candidate_anchors
         }
+        entry["_direct_candidate_start_pages"] = [
+            int(candidate["page"])
+            for candidate in candidate_anchors
+            if candidate["exact_title_observation_ids"] is not None
+        ]
         entry["selected_start_page"] = None
     if entries_from_llm_toc:
         llm_summary = _llm_toc_summary(
