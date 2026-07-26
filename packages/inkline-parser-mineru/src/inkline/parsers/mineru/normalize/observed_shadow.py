@@ -49,6 +49,13 @@ def build_observed_document_shadow(
                 existing_observations=observations,
             )
         )
+        observations.extend(
+            _visual_caption_observations(
+                pages,
+                middle,
+                start_index=len(observations) + 1,
+            )
+        )
     finally:
         if line_extractor is not None:
             line_extractor.close()
@@ -148,18 +155,21 @@ def _observation_text(block: RawBlock) -> str:
 
 
 def _content_text_list(raw: dict[str, Any], key: str) -> str:
+    return "\n".join(_content_text_items(raw, key))
+
+
+def _content_text_items(raw: dict[str, Any], key: str) -> list[str]:
     content = raw.get("content") if isinstance(raw, dict) else None
     if not isinstance(content, dict):
-        return ""
+        return []
     items = content.get(key)
     if not isinstance(items, list):
-        return ""
-    parts = [
+        return []
+    return [
         str(item.get("content") or "").strip()
         for item in items
         if isinstance(item, dict) and str(item.get("content") or "").strip()
     ]
-    return "\n".join(parts)
 
 
 def _role_hint(raw_type: str, *, page: int, total_pages: int) -> str:
@@ -278,10 +288,7 @@ def _middle_title_location_blocks(page_info: dict[str, Any]) -> list[dict[str, A
     seen = set()
     for collection_name in ("para_blocks", "preproc_blocks"):
         for block in page_info.get(collection_name) or []:
-            if not isinstance(block, dict) or block.get("type") not in {
-                "title",
-                "table_caption",
-            }:
+            if not isinstance(block, dict) or block.get("type") != "title":
                 continue
             key = (_middle_block_text(block), tuple(_middle_block_bbox(block) or []))
             if key in seen:
@@ -289,6 +296,163 @@ def _middle_title_location_blocks(page_info: dict[str, Any]) -> list[dict[str, A
             seen.add(key)
             blocks.append(block)
     return blocks
+
+
+def _visual_caption_observations(
+    pages: dict[int, list[RawBlock]],
+    middle: Any,
+    *,
+    start_index: int,
+) -> list[dict[str, Any]]:
+    middle_locations = _middle_caption_locations(middle)
+    locations_by_caption = _caption_locations_by_key(middle_locations)
+    observations: list[dict[str, Any]] = []
+    raw_observation_index = 0
+    next_index = start_index
+    for page in sorted(pages):
+        for block in pages[page]:
+            raw_observation_index += 1
+            source_kind = _visual_caption_source_kind(block.raw_type)
+            if source_kind is None:
+                continue
+            for caption_text in _content_text_items(block.raw, source_kind):
+                middle_location = _take_middle_caption_location(
+                    locations_by_caption,
+                    page=block.page,
+                    source_kind=source_kind,
+                    text=caption_text,
+                )
+                observations.append(
+                    _visual_caption_observation(
+                        observation_id=f"obs{next_index:06d}",
+                        parent_observation_id=f"obs{raw_observation_index:06d}",
+                        block=block,
+                        source_kind=source_kind,
+                        text=caption_text,
+                        middle_location=middle_location,
+                    )
+                )
+                next_index += 1
+    return observations
+
+
+def _visual_caption_source_kind(raw_type: str) -> str | None:
+    return {
+        "table": "table_caption",
+        "chart": "chart_caption",
+    }.get(raw_type)
+
+
+def _visual_caption_observation(
+    *,
+    observation_id: str,
+    parent_observation_id: str,
+    block: RawBlock,
+    source_kind: str,
+    text: str,
+    middle_location: dict[str, Any] | None,
+) -> dict[str, Any]:
+    precise_geometry = middle_location is not None and middle_location["bbox"] is not None
+    bbox = middle_location["bbox"] if precise_geometry else block.bbox
+    bbox_provenance = "mineru_middle" if precise_geometry else "visual_region"
+    source = "mineru_middle" if precise_geometry else "visual_region"
+    parser_payload: dict[str, Any] = {
+        "raw_type": source_kind,
+        "source": source,
+    }
+    if middle_location is not None:
+        parser_payload["page_idx"] = middle_location["page_idx"]
+        parser_payload["raw"] = deepcopy(middle_location["raw"])
+    else:
+        parser_payload["raw"] = deepcopy(block.raw)
+    return make_observation(
+        observation_id,
+        "text_region",
+        text=text,
+        page=block.page,
+        bbox=deepcopy(bbox),
+        spans=_middle_spans(block.page, bbox, block.index),
+        role_hint="caption_text",
+        attrs={
+            "reading_order": block.index,
+            "visual_parent_observation_id": parent_observation_id,
+            "source_kind": source_kind,
+            "bbox_provenance": bbox_provenance,
+            "direct_anchor_eligible": precise_geometry,
+        },
+        parser_payload=parser_payload,
+    )
+
+
+def _middle_caption_locations(middle: Any) -> list[dict[str, Any]]:
+    if not isinstance(middle, dict) or not isinstance(middle.get("pdf_info"), list):
+        return []
+    locations = []
+    seen = set()
+    for fallback_page, page_info in enumerate(middle["pdf_info"], 1):
+        if not isinstance(page_info, dict):
+            continue
+        raw_page_idx = page_info.get("page_idx")
+        page = int(raw_page_idx) + 1 if isinstance(raw_page_idx, int) else fallback_page
+        for block in _middle_caption_location_blocks(page_info):
+            text = _middle_block_text(block)
+            source_kind = str(block.get("type") or "")
+            if not text or source_kind not in {"table_caption", "chart_caption"}:
+                continue
+            bbox = _middle_block_bbox(block)
+            key = (page, source_kind, text, tuple(bbox) if bbox is not None else None)
+            if key in seen:
+                continue
+            seen.add(key)
+            locations.append(
+                {
+                    "page": page,
+                    "page_idx": raw_page_idx,
+                    "source_kind": source_kind,
+                    "text": text,
+                    "bbox": bbox,
+                    "raw": deepcopy(block),
+                }
+            )
+    return locations
+
+
+def _middle_caption_location_blocks(page_info: dict[str, Any]) -> list[dict[str, Any]]:
+    blocks = []
+    for collection_name in ("para_blocks", "preproc_blocks"):
+        for block in page_info.get(collection_name) or []:
+            blocks.extend(_nested_middle_caption_blocks(block))
+    return blocks
+
+
+def _nested_middle_caption_blocks(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, dict):
+        return []
+    blocks = [value] if value.get("type") in {"table_caption", "chart_caption"} else []
+    for child in value.get("blocks") or []:
+        blocks.extend(_nested_middle_caption_blocks(child))
+    return blocks
+
+
+def _caption_locations_by_key(
+    locations: list[dict[str, Any]],
+) -> dict[tuple[int, str, str], list[dict[str, Any]]]:
+    by_key: dict[tuple[int, str, str], list[dict[str, Any]]] = {}
+    for location in locations:
+        key = (location["page"], location["source_kind"], location["text"])
+        by_key.setdefault(key, []).append(location)
+    return by_key
+
+
+def _take_middle_caption_location(
+    locations_by_caption: dict[tuple[int, str, str], list[dict[str, Any]]],
+    *,
+    page: int,
+    source_kind: str,
+    text: str,
+) -> dict[str, Any] | None:
+    locations = locations_by_caption.get((page, source_kind, text))
+    return locations.pop(0) if locations else None
 
 
 def _middle_block_text(block: dict[str, Any]) -> str:

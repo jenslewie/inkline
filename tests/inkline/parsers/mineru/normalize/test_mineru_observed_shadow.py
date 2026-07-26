@@ -167,26 +167,38 @@ def test_build_observed_document_shadow_adds_middle_title_observation_with_physi
     assert observation["parser_payload"]["page_idx"] == 466
 
 
-def test_build_observed_document_shadow_uses_middle_table_caption_as_title_location() -> None:
+def test_build_observed_document_shadow_appends_table_caption_with_middle_geometry() -> None:
+    table = _raw("table", "", [100, 180, 900, 700], page=347, index=4)
+    table.raw = {
+        "type": "table",
+        "content": {
+            "table_caption": [{"type": "text", "content": "Table A"}],
+            "html": "<table></table>",
+        },
+    }
     middle = {
         "pdf_info": [
             {
                 "page_idx": 346,
-                "para_blocks": [
+                "preproc_blocks": [
                     {
-                        "type": "table_caption",
-                        "bbox": [182, 121, 248, 139],
-                        "lines": [
+                        "blocks": [
                             {
-                                "spans": [
+                                "type": "table_caption",
+                                "bbox": [182, 121, 248, 139],
+                                "lines": [
                                     {
-                                        "type": "text",
-                                        "content": "帝王姓名表",
-                                        "bbox": [182, 121, 248, 139],
+                                        "spans": [
+                                            {
+                                                "type": "text",
+                                                "content": "Table A",
+                                                "bbox": [182, 121, 248, 139],
+                                            }
+                                        ]
                                     }
-                                ]
+                                ],
                             }
-                        ],
+                        ]
                     }
                 ],
             },
@@ -194,20 +206,76 @@ def test_build_observed_document_shadow_uses_middle_table_caption_as_title_locat
     }
 
     document = build_observed_document_shadow(
-        pages={347: []},
+        pages={347: [table, _raw("paragraph", "Body", [100, 720, 900, 760], page=347, index=5)]},
         page_sizes={347: (1000, 1000)},
         metadata=_metadata(),
         middle=middle,
     )
 
     validate_observed_document(document)
-    observation = document["observations"][0]
-    assert observation["kind"] == "text_region"
-    assert observation["text"] == "帝王姓名表"
-    assert observation["page"] == 347
-    assert observation["role_hint"] == "title_text"
-    assert observation["parser_payload"]["raw_type"] == "table_caption"
-    assert "raw_type" not in observation
+    table_observation, body_observation, caption_observation = document["observations"]
+    assert [observation["observation_id"] for observation in document["observations"]] == [
+        "obs000001",
+        "obs000002",
+        "obs000003",
+    ]
+    assert table_observation["kind"] == "table_region"
+    assert table_observation["text"] == "Table A"
+    assert body_observation["text"] == "Body"
+    assert caption_observation["kind"] == "text_region"
+    assert caption_observation["text"] == "Table A"
+    assert caption_observation["page"] == 347
+    assert caption_observation["bbox"] == [182, 121, 248, 139]
+    assert caption_observation["role_hint"] == "caption_text"
+    assert caption_observation["attrs"] == {
+        "reading_order": 4,
+        "visual_parent_observation_id": "obs000001",
+        "source_kind": "table_caption",
+        "bbox_provenance": "mineru_middle",
+        "direct_anchor_eligible": True,
+    }
+    assert caption_observation["parser_payload"]["raw_type"] == "table_caption"
+    assert caption_observation["parser_payload"]["source"] == "mineru_middle"
+
+
+def test_build_observed_document_shadow_appends_chart_caption_with_region_bbox() -> None:
+    chart = _raw("chart", "", [100, 180, 900, 700], page=1, index=4)
+    chart.raw = {
+        "type": "chart",
+        "content": {
+            "chart_caption": [{"type": "text", "content": "Chart A"}],
+        },
+    }
+
+    document = build_observed_document_shadow(
+        pages={1: [chart, _raw("paragraph", "Body", [100, 720, 900, 760], index=5)]},
+        page_sizes={1: (1000, 1000)},
+        metadata=_metadata(),
+    )
+
+    validate_observed_document(document)
+    chart_observation, body_observation, caption_observation = document["observations"]
+    assert [observation["observation_id"] for observation in document["observations"]] == [
+        "obs000001",
+        "obs000002",
+        "obs000003",
+    ]
+    assert chart_observation["kind"] == "image_region"
+    assert chart_observation["text"] == ""
+    assert body_observation["text"] == "Body"
+    assert caption_observation["kind"] == "text_region"
+    assert caption_observation["text"] == "Chart A"
+    assert caption_observation["bbox"] == [100, 180, 900, 700]
+    assert caption_observation["role_hint"] == "caption_text"
+    assert caption_observation["attrs"] == {
+        "reading_order": 4,
+        "visual_parent_observation_id": "obs000001",
+        "source_kind": "chart_caption",
+        "bbox_provenance": "visual_region",
+        "direct_anchor_eligible": False,
+    }
+    assert caption_observation["parser_payload"]["raw_type"] == "chart_caption"
+    assert caption_observation["parser_payload"]["source"] == "visual_region"
 
 
 def test_build_observed_document_shadow_uses_table_caption_as_table_region_text() -> None:
