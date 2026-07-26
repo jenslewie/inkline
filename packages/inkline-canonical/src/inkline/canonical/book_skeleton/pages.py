@@ -68,13 +68,26 @@ def page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
             for observation in text_observations
             if _is_title_location_observation(observation)
         ]
-        ineligible_caption_parent_ids = _ineligible_caption_parent_ids(observations)
-        visual_title_observations = [
+        caption_parent_ids = _caption_parent_ids(observations)
+        eligible_caption_observations = [
             observation
-            for observation in observations
+            for observation in text_observations
+            if _is_direct_anchor_eligible_caption(observation)
+        ]
+        visual_title_observations = [
+            *eligible_caption_observations,
+            *[
+                observation
+                for observation in observations
+                if observation.get("kind") in VISUAL_TITLE_KINDS
+                and str(observation.get("observation_id") or "") not in caption_parent_ids
+                and str(observation.get("text") or "").strip()
+            ],
+        ]
+        unlinked_visual_title_observations = [
+            observation
+            for observation in visual_title_observations
             if observation.get("kind") in VISUAL_TITLE_KINDS
-            and str(observation.get("observation_id") or "") not in ineligible_caption_parent_ids
-            and str(observation.get("text") or "").strip()
         ]
         role_hint_counts = Counter(
             str(observation.get("role_hint") or "") for observation in observations
@@ -89,7 +102,7 @@ def page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
                         *_title_context_observations(
                             text_observations, title_location_observations
                         ),
-                        *visual_title_observations,
+                        *unlinked_visual_title_observations,
                     ]
                 ),
                 "title_text": _page_text(
@@ -105,7 +118,7 @@ def page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
                 ),
                 "_title_location_observations": [
                     *_title_context_observations(text_observations, title_location_observations),
-                    *visual_title_observations,
+                    *unlinked_visual_title_observations,
                 ],
                 "_candidate_title_context_observations": (
                     _candidate_title_context_observations(text_observations)
@@ -118,13 +131,13 @@ def page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
     return records
 
 
-def _ineligible_caption_parent_ids(observations: list[dict[str, Any]]) -> set[str]:
+def _caption_parent_ids(observations: list[dict[str, Any]]) -> set[str]:
     parent_ids = set()
     for observation in observations:
         if observation.get("role_hint") != "caption_text":
             continue
         attrs = observation.get("attrs")
-        if not isinstance(attrs, dict) or attrs.get("direct_anchor_eligible") is True:
+        if not isinstance(attrs, dict):
             continue
         parent_id = attrs.get("visual_parent_observation_id")
         if isinstance(parent_id, str) and parent_id:
@@ -523,9 +536,33 @@ def _is_title_location_observation(observation: dict[str, Any]) -> bool:
     role_hint = str(observation.get("role_hint") or "")
     if observation.get("kind") == "page_marker":
         return False
+    if role_hint == "caption_text":
+        return _is_direct_anchor_eligible_caption(observation)
     if role_hint in TITLE_LOCATION_EXCLUDED_ROLE_HINTS:
         return False
     return role_hint in TITLE_LOCATION_ROLE_HINTS
+
+
+def _is_direct_anchor_eligible_caption(observation: dict[str, Any]) -> bool:
+    if observation.get("role_hint") != "caption_text":
+        return False
+    attrs = observation.get("attrs")
+    return (
+        isinstance(attrs, dict)
+        and attrs.get("direct_anchor_eligible") is True
+        and attrs.get("bbox_provenance") == "mineru_middle"
+        and _is_precise_bbox(observation.get("bbox"))
+    )
+
+
+def _is_precise_bbox(bbox: Any) -> bool:
+    return (
+        isinstance(bbox, list)
+        and len(bbox) == 4
+        and all(isinstance(value, int | float) and not isinstance(value, bool) for value in bbox)
+        and bbox[2] > bbox[0]
+        and bbox[3] > bbox[1]
+    )
 
 
 def _page_text(observations: list[dict[str, Any]]) -> str:

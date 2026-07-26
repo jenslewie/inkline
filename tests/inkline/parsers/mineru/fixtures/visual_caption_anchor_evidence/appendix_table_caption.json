@@ -1,0 +1,72 @@
+{
+  "case_id": "appendix-table-caption",
+  "caption_text": "附录三 正统年号与闽国年号对照表",
+  "resource_kind": "table_region",
+  "retained_resource_text": "附录三 正统年号与闽国年号对照表",
+  "caption_bbox": [240.695, 97.179, 801.489, 120.69],
+  "content_page_sizes": {
+    "1": [1000, 1000],
+    "2": [1000, 1000]
+  },
+  "content_list_v2": [
+    [
+      {
+        "type": "index",
+        "content": {
+          "type": "text",
+          "content": "目录\n附录三 正统年号与闽国年号对照表 2"
+        },
+        "bbox": [100, 100, 900, 800]
+      }
+    ],
+    [
+      {
+        "type": "table",
+        "content": {
+          "image_source": {"path": "images/era-table.jpg"},
+          "table_caption": [
+            {"type": "text", "content": "附录三 正统年号与闽国年号对照表"}
+          ],
+          "table_footnote": [],
+          "html": "<table><tr><td>公元</td><td>唐</td><td>闽</td></tr></table>",
+          "table_type": "complex_table",
+          "table_nest_level": 1
+        },
+        "bbox": [111, 167, 895, 753]
+      }
+    ]
+  ],
+  "middle": {
+    "pdf_info": [
+      {"page_idx": 0, "page_size": [403, 638]},
+      {
+        "page_idx": 1,
+        "page_size": [403, 638],
+        "preproc_blocks": [
+          {
+            "blocks": [
+              {
+                "bbox": [97, 62, 323, 77],
+                "type": "table_caption",
+                "angle": 0,
+                "lines": [
+                  {
+                    "bbox": [97, 62, 323, 77],
+                    "spans": [
+                      {
+                        "bbox": [97, 62, 323, 77],
+                        "type": "text",
+                        "content": "附录三 正统年号与闽国年号对照表"
+                      }
+                    ]
+                  }
+                ],
+                "index": 0
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

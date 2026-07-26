@@ -121,6 +121,110 @@ def test_build_book_skeleton_excludes_ineligible_caption_parent_from_direct_anch
     assert entry["selected_start_anchor"] is None
 
 
+def test_build_book_skeleton_uses_precise_caption_as_direct_anchor_evidence() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "precise-caption",
+            "title": "Precise Caption",
+            "language": "en",
+            "source_file": "precise-caption.pdf",
+            "parser_name": "test-parser",
+            "parser_mode": "structured",
+        },
+        [
+            make_observed_page(1, width=1000, height=1400),
+            make_observed_page(2, width=1000, height=1400),
+        ],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\nCaption Index 2",
+                page=1,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002",
+                "table_region",
+                text="Caption Index",
+                page=2,
+                bbox=[100, 200, 900, 800],
+                role_hint="unknown",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Caption Index",
+                page=2,
+                bbox=[200, 120, 600, 160],
+                role_hint="caption_text",
+                attrs={
+                    "visual_parent_observation_id": "obs000002",
+                    "bbox_provenance": "mineru_middle",
+                    "direct_anchor_eligible": True,
+                },
+            ),
+        ],
+    )
+
+    anchor = build_book_skeleton_from_observed(document)["toc_entries"][0]["selected_start_anchor"]
+
+    assert anchor is not None
+    assert anchor["title_observation_ids"] == ["obs000003"]
+
+
+def test_build_book_skeleton_rejects_caption_eligibility_without_precise_bbox() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "imprecise-caption",
+            "title": "Imprecise Caption",
+            "language": "en",
+            "source_file": "imprecise-caption.pdf",
+            "parser_name": "test-parser",
+            "parser_mode": "structured",
+        },
+        [
+            make_observed_page(1, width=1000, height=1400),
+            make_observed_page(2, width=1000, height=1400),
+        ],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\nCaption Index 2",
+                page=1,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002",
+                "table_region",
+                text="Caption Index",
+                page=2,
+                bbox=[100, 200, 900, 800],
+                role_hint="unknown",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Caption Index",
+                page=2,
+                role_hint="caption_text",
+                attrs={
+                    "visual_parent_observation_id": "obs000002",
+                    "bbox_provenance": "mineru_middle",
+                    "direct_anchor_eligible": True,
+                },
+            ),
+        ],
+    )
+
+    entry = build_book_skeleton_from_observed(document)["toc_entries"][0]
+
+    assert entry["candidate_start_pages"] == []
+    assert entry["selected_start_page"] is None
+    assert entry["selected_start_anchor"] is None
+
+
 def test_build_book_skeleton_prefers_exact_title_over_same_page_fuzzy_candidate() -> None:
     document = make_observed_document(
         {

@@ -1,0 +1,67 @@
+{
+  "case_id": "table-caption-horizontal",
+  "caption_text": "资料来源",
+  "resource_kind": "table_region",
+  "retained_resource_text": "资料来源",
+  "caption_bbox": [435.407, 184.685, 595.694, 213.213],
+  "content_page_sizes": {
+    "1": [1000, 1000],
+    "2": [1000, 1000]
+  },
+  "content_list_v2": [
+    [
+      {
+        "type": "index",
+        "content": {"type": "text", "content": "目录\n资料来源 2"},
+        "bbox": [100, 100, 900, 800]
+      }
+    ],
+    [
+      {
+        "type": "table",
+        "content": {
+          "image_source": {"path": "images/source-table.jpg"},
+          "table_caption": [{"type": "text", "content": "资料来源"}],
+          "table_footnote": [],
+          "html": "<table><tr><td>Agathias</td></tr></table>",
+          "table_type": "simple_table",
+          "table_nest_level": 1
+        },
+        "bbox": [114, 276, 923, 912]
+      }
+    ]
+  ],
+  "middle": {
+    "pdf_info": [
+      {"page_idx": 0, "page_size": [418, 649]},
+      {
+        "page_idx": 1,
+        "page_size": [418, 666],
+        "preproc_blocks": [
+          {
+            "blocks": [
+              {
+                "bbox": [182, 123, 249, 142],
+                "type": "table_caption",
+                "angle": 0,
+                "lines": [
+                  {
+                    "bbox": [182, 123, 249, 142],
+                    "spans": [
+                      {
+                        "bbox": [182, 123, 249, 142],
+                        "type": "text",
+                        "content": "资料来源"
+                      }
+                    ]
+                  }
+                ],
+                "index": 0
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

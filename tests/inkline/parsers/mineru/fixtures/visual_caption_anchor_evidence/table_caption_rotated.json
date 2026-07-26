@@ -1,0 +1,67 @@
+{
+  "case_id": "table-caption-rotated",
+  "caption_text": "帝王姓名表",
+  "resource_kind": "table_region",
+  "retained_resource_text": "帝王姓名表",
+  "caption_bbox": [35.885, 450.45, 71.77, 561.562],
+  "content_page_sizes": {
+    "1": [1000, 1000],
+    "2": [1000, 1000]
+  },
+  "content_list_v2": [
+    [
+      {
+        "type": "index",
+        "content": {"type": "text", "content": "目录\n帝王姓名表 2"},
+        "bbox": [100, 100, 900, 800]
+      }
+    ],
+    [
+      {
+        "type": "table",
+        "content": {
+          "image_source": {"path": "images/ruler-table.jpg"},
+          "table_caption": [{"type": "text", "content": "帝王姓名表"}],
+          "table_footnote": [{"type": "text", "content": "1 纂位者名字为斜体。"}],
+          "html": "<table><tr><td>西罗马皇帝</td></tr></table>",
+          "table_type": "complex_table",
+          "table_nest_level": 1
+        },
+        "bbox": [110, 28, 918, 980]
+      }
+    ]
+  ],
+  "middle": {
+    "pdf_info": [
+      {"page_idx": 0, "page_size": [418, 649]},
+      {
+        "page_idx": 1,
+        "page_size": [418, 666],
+        "preproc_blocks": [
+          {
+            "blocks": [
+              {
+                "bbox": [15, 300, 30, 374],
+                "type": "table_caption",
+                "angle": 270,
+                "lines": [
+                  {
+                    "bbox": [15, 300, 30, 374],
+                    "spans": [
+                      {
+                        "bbox": [15, 300, 30, 374],
+                        "type": "text",
+                        "content": "帝王姓名表"
+                      }
+                    ]
+                  }
+                ],
+                "index": 0
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

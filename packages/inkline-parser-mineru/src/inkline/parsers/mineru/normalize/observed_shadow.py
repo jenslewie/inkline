@@ -158,10 +158,21 @@ def _observation_text(block: RawBlock) -> str:
 
 
 def _content_text_list(raw: dict[str, Any], key: str) -> str:
-    return "\n".join(_content_text_items(raw, key))
+    content = raw.get("content") if isinstance(raw, dict) else None
+    if not isinstance(content, dict):
+        return ""
+    items = content.get(key)
+    if not isinstance(items, list):
+        return ""
+    parts = [
+        str(item.get("content") or "").strip()
+        for item in items
+        if isinstance(item, dict) and str(item.get("content") or "").strip()
+    ]
+    return "\n".join(parts)
 
 
-def _content_text_items(raw: dict[str, Any], key: str) -> list[str]:
+def _caption_text_items(raw: dict[str, Any], key: str) -> list[str]:
     content = raw.get("content") if isinstance(raw, dict) else None
     if isinstance(content, dict) and key in content:
         items = content[key]
@@ -323,7 +334,7 @@ def _visual_caption_observations(
             source_kind = _visual_caption_source_kind(block.raw_type)
             if source_kind is None:
                 continue
-            for caption_text in _content_text_items(block.raw, source_kind):
+            for caption_text in _caption_text_items(block.raw, source_kind):
                 middle_location = _take_middle_caption_location(
                     locations_by_caption,
                     page=block.page,
@@ -362,8 +373,8 @@ def _visual_caption_observation(
     middle_location: dict[str, Any] | None,
 ) -> dict[str, Any]:
     middle_bbox = middle_location["bbox"] if middle_location is not None else None
-    precise_geometry = middle_bbox is not None
-    bbox = middle_bbox if middle_bbox is not None else block.bbox
+    precise_geometry = _precise_bbox(middle_bbox)
+    bbox = middle_bbox if precise_geometry else block.bbox
     bbox_provenance = "mineru_middle" if precise_geometry else "visual_region"
     source = "mineru_middle" if precise_geometry else "visual_region"
     parser_payload: dict[str, Any] = {
@@ -422,7 +433,7 @@ def _middle_caption_locations(
                     middle_page_size,
                     content_page_size=content_page_size,
                 )
-                if source_bbox is not None and middle_page_size and content_page_size
+                if _precise_bbox(source_bbox) and middle_page_size and content_page_size
                 else None
             )
             key = (page, source_kind, text, tuple(bbox) if bbox is not None else None)
@@ -503,7 +514,7 @@ def _caption_parent_geometry_score(
     location: dict[str, Any], parent_bbox: list[float] | None
 ) -> tuple[float, float, float, float]:
     caption_bbox = location.get("bbox")
-    if not _valid_bbox(caption_bbox) or not _valid_bbox(parent_bbox):
+    if not _precise_bbox(caption_bbox) or not _precise_bbox(parent_bbox):
         return (1.0, float("inf"), float("inf"), float("inf"))
     caption_center_x = (caption_bbox[0] + caption_bbox[2]) / 2
     parent_center_x = (parent_bbox[0] + parent_bbox[2]) / 2
@@ -517,11 +528,13 @@ def _caption_parent_geometry_score(
     )
 
 
-def _valid_bbox(bbox: Any) -> TypeGuard[list[int | float]]:
+def _precise_bbox(bbox: Any) -> TypeGuard[list[int | float]]:
     return (
         isinstance(bbox, list)
         and len(bbox) == 4
-        and all(isinstance(value, int | float) for value in bbox)
+        and all(isinstance(value, int | float) and not isinstance(value, bool) for value in bbox)
+        and bbox[2] > bbox[0]
+        and bbox[3] > bbox[1]
     )
 
 

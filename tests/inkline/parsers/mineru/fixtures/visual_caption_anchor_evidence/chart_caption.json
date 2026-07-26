@@ -1,0 +1,68 @@
+{
+  "case_id": "chart-caption",
+  "caption_text": "古代地中海各文明年代图表",
+  "resource_kind": "image_region",
+  "retained_resource_text": "古代地中海各文明年代图表",
+  "caption_bbox": [355.982, 110.855, 639.586, 154.734],
+  "content_page_sizes": {
+    "1": [1000, 1000],
+    "2": [1000, 1000]
+  },
+  "content_list_v2": [
+    [
+      {
+        "type": "index",
+        "content": {"type": "text", "content": "目录\n古代地中海各文明年代图表 2"},
+        "bbox": [100, 100, 900, 800]
+      }
+    ],
+    [
+      {
+        "type": "chart",
+        "content": {
+          "image_source": {"path": "images/civilization-chart.jpg"},
+          "content": "| Civilization | Start | End |",
+          "chart_caption": [
+            {"type": "text", "content": "古代地中海各文明年代图表"}
+          ],
+          "chart_footnote": []
+        },
+        "sub_type": "bar",
+        "bbox": [113, 163, 886, 879]
+      }
+    ]
+  ],
+  "middle": {
+    "pdf_info": [
+      {"page_idx": 0, "page_size": [433, 677]},
+      {
+        "page_idx": 1,
+        "page_size": [677, 433],
+        "preproc_blocks": [
+          {
+            "blocks": [
+              {
+                "bbox": [241, 48, 433, 67],
+                "type": "chart_caption",
+                "angle": 0,
+                "lines": [
+                  {
+                    "bbox": [241, 48, 433, 67],
+                    "spans": [
+                      {
+                        "bbox": [241, 48, 433, 67],
+                        "type": "text",
+                        "content": "古代地中海各文明年代图表"
+                      }
+                    ]
+                  }
+                ],
+                "index": 0
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "case_id": "ordinary-equation-caption",
+  "caption_text": "1592 年 5 月的日本侵朝军",
+  "resource_kind": "table_region",
+  "retained_resource_text": "1592 年 5 月的日本侵朝军\n^{7}",
+  "content_page_sizes": {
+    "1": [1000, 1000],
+    "2": [1000, 1000]
+  },
+  "content_list_v2": [
+    [
+      {
+        "type": "index",
+        "content": {"type": "text", "content": "目录\n第一章 战争 2"},
+        "bbox": [100, 100, 900, 800]
+      }
+    ],
+    [
+      {
+        "type": "title",
+        "content": {"type": "text", "content": "第一章 战争"},
+        "bbox": [100, 100, 500, 150]
+      },
+      {
+        "type": "table",
+        "content": {
+          "image_source": {"path": "images/invasion-table.jpg"},
+          "table_caption": [
+            {"type": "text", "content": "1592 年 5 月的日本侵朝军  "},
+            {"type": "equation_inline", "content": "^{7}"}
+          ],
+          "table_footnote": [
+            {"type": "text", "content": "* 高桥、秋月、伊东和岛津的总兵力"}
+          ],
+          "html": "<table><tr><td>军团长</td><td>兵力</td></tr></table>",
+          "table_type": "complex_table",
+          "table_nest_level": 1
+        },
+        "bbox": [96, 719, 840, 905]
+      }
+    ]
+  ],
+  "middle": {
+    "pdf_info": [
+      {"page_idx": 0, "page_size": [425, 602]},
+      {"page_idx": 1, "page_size": [425, 602]}
+    ]
+  }
+}
