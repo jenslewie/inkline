@@ -1163,7 +1163,9 @@ def test_build_book_skeleton_from_observed_preserves_toc_labels_pages_and_hierar
     assert entries[5]["parent_entry_index"] is None
 
 
-def test_build_book_skeleton_from_observed_keeps_fuzzy_title_candidate_without_direct_anchor() -> None:
+def test_build_book_skeleton_from_observed_keeps_fuzzy_title_candidate_without_direct_anchor() -> (
+    None
+):
     pages = [make_observed_page(page, width=1000, height=1400) for page in range(1, 530)]
     document = make_observed_document(
         {
