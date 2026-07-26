@@ -68,10 +68,12 @@ def page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
             for observation in text_observations
             if _is_title_location_observation(observation)
         ]
+        ineligible_caption_parent_ids = _ineligible_caption_parent_ids(observations)
         visual_title_observations = [
             observation
             for observation in observations
             if observation.get("kind") in VISUAL_TITLE_KINDS
+            and str(observation.get("observation_id") or "") not in ineligible_caption_parent_ids
             and str(observation.get("text") or "").strip()
         ]
         role_hint_counts = Counter(
@@ -114,6 +116,20 @@ def page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return records
+
+
+def _ineligible_caption_parent_ids(observations: list[dict[str, Any]]) -> set[str]:
+    parent_ids = set()
+    for observation in observations:
+        if observation.get("role_hint") != "caption_text":
+            continue
+        attrs = observation.get("attrs")
+        if not isinstance(attrs, dict) or attrs.get("direct_anchor_eligible") is True:
+            continue
+        parent_id = attrs.get("visual_parent_observation_id")
+        if isinstance(parent_id, str) and parent_id:
+            parent_ids.add(parent_id)
+    return parent_ids
 
 
 def detect_toc_pages(page_records_: list[dict[str, Any]]) -> list[int]:

@@ -68,6 +68,59 @@ def test_build_book_skeleton_rejects_fuzzy_direct_anchor_without_exact_title_evi
     assert entry["selected_start_anchor"] is None
 
 
+def test_build_book_skeleton_excludes_ineligible_caption_parent_from_direct_anchor_evidence() -> (
+    None
+):
+    document = make_observed_document(
+        {
+            "doc_id": "ineligible-caption-parent",
+            "title": "Ineligible Caption Parent",
+            "language": "en",
+            "source_file": "ineligible-caption-parent.pdf",
+            "parser_name": "test-parser",
+            "parser_mode": "structured",
+        },
+        [
+            make_observed_page(1, width=1000, height=1400),
+            make_observed_page(2, width=1000, height=1400),
+        ],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="目录\nCaption Index 2",
+                page=1,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002",
+                "table_region",
+                text="Caption Index",
+                page=2,
+                role_hint="unknown",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Caption Index",
+                page=2,
+                role_hint="caption_text",
+                attrs={
+                    "visual_parent_observation_id": "obs000002",
+                    "direct_anchor_eligible": False,
+                },
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(document)
+    entry = skeleton["toc_entries"][0]
+
+    assert entry["candidate_start_pages"] == []
+    assert entry["selected_start_page"] is None
+    assert entry["selected_start_anchor"] is None
+
+
 def test_build_book_skeleton_prefers_exact_title_over_same_page_fuzzy_candidate() -> None:
     document = make_observed_document(
         {

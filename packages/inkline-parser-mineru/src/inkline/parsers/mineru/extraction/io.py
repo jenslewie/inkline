@@ -214,7 +214,7 @@ def footnote_blocks_from_middle(
                     index=index,
                     raw_type=str(block.get("type") or "page_footnote"),
                     text=text,
-                    bbox=_middle_bbox_to_content_bbox(
+                    bbox=middle_bbox_to_content_bbox(
                         block.get("bbox"),
                         page_size,
                         content_page_size=content_page_size,
@@ -272,7 +272,7 @@ def _middle_block_text(block: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _middle_bbox_to_content_bbox(
+def middle_bbox_to_content_bbox(
     bbox: Any,
     page_size: Optional[Tuple[float, float]],
     content_page_size: Optional[Tuple[float, float]] = None,

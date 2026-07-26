@@ -9,6 +9,8 @@ from inkline.canonical.observed import (
     make_observed_page,
 )
 
+from ..extraction.io import middle_bbox_to_content_bbox
+from ..extraction.text import extract_text_and_notes
 from ..schema.models import NoteRef, RawBlock
 
 
@@ -53,6 +55,7 @@ def build_observed_document_shadow(
             _visual_caption_observations(
                 pages,
                 middle,
+                page_sizes=page_sizes,
                 start_index=len(observations) + 1,
             )
         )
@@ -160,16 +163,20 @@ def _content_text_list(raw: dict[str, Any], key: str) -> str:
 
 def _content_text_items(raw: dict[str, Any], key: str) -> list[str]:
     content = raw.get("content") if isinstance(raw, dict) else None
-    if not isinstance(content, dict):
-        return []
-    items = content.get(key)
+    if isinstance(content, dict) and key in content:
+        items = content[key]
+    else:
+        items = raw.get(key) if isinstance(raw, dict) else None
     if not isinstance(items, list):
         return []
-    return [
-        str(item.get("content") or "").strip()
-        for item in items
-        if isinstance(item, dict) and str(item.get("content") or "").strip()
-    ]
+    texts = []
+    seen = set()
+    for item in items:
+        text = item.strip() if isinstance(item, str) else extract_text_and_notes(item)[0]
+        if text and text not in seen:
+            seen.add(text)
+            texts.append(text)
+    return texts
 
 
 def _role_hint(raw_type: str, *, page: int, total_pages: int) -> str:
@@ -302,9 +309,10 @@ def _visual_caption_observations(
     pages: dict[int, list[RawBlock]],
     middle: Any,
     *,
+    page_sizes: dict[int, tuple[float, float]],
     start_index: int,
 ) -> list[dict[str, Any]]:
-    middle_locations = _middle_caption_locations(middle)
+    middle_locations = _middle_caption_locations(middle, page_sizes=page_sizes)
     locations_by_caption = _caption_locations_by_key(middle_locations)
     observations: list[dict[str, Any]] = []
     raw_observation_index = 0
@@ -321,6 +329,7 @@ def _visual_caption_observations(
                     page=block.page,
                     source_kind=source_kind,
                     text=caption_text,
+                    parent_bbox=block.bbox,
                 )
                 observations.append(
                     _visual_caption_observation(
@@ -384,7 +393,11 @@ def _visual_caption_observation(
     )
 
 
-def _middle_caption_locations(middle: Any) -> list[dict[str, Any]]:
+def _middle_caption_locations(
+    middle: Any,
+    *,
+    page_sizes: dict[int, tuple[float, float]],
+) -> list[dict[str, Any]]:
     if not isinstance(middle, dict) or not isinstance(middle.get("pdf_info"), list):
         return []
     locations = []
@@ -394,12 +407,23 @@ def _middle_caption_locations(middle: Any) -> list[dict[str, Any]]:
             continue
         raw_page_idx = page_info.get("page_idx")
         page = int(raw_page_idx) + 1 if isinstance(raw_page_idx, int) else fallback_page
+        middle_page_size = _middle_page_size(page_info)
+        content_page_size = page_sizes.get(page)
         for block in _middle_caption_location_blocks(page_info):
             text = _middle_block_text(block)
             source_kind = str(block.get("type") or "")
             if not text or source_kind not in {"table_caption", "chart_caption"}:
                 continue
-            bbox = _middle_block_bbox(block)
+            source_bbox = _middle_block_bbox(block)
+            bbox = (
+                middle_bbox_to_content_bbox(
+                    source_bbox,
+                    middle_page_size,
+                    content_page_size=content_page_size,
+                )
+                if source_bbox is not None and middle_page_size and content_page_size
+                else None
+            )
             key = (page, source_kind, text, tuple(bbox) if bbox is not None else None)
             if key in seen:
                 continue
@@ -411,10 +435,22 @@ def _middle_caption_locations(middle: Any) -> list[dict[str, Any]]:
                     "source_kind": source_kind,
                     "text": text,
                     "bbox": bbox,
+                    "source_bbox": source_bbox,
                     "raw": deepcopy(block),
                 }
             )
     return locations
+
+
+def _middle_page_size(page_info: dict[str, Any]) -> tuple[float, float] | None:
+    page_size = page_info.get("page_size")
+    if (
+        not isinstance(page_size, list | tuple)
+        or len(page_size) < 2
+        or not all(isinstance(value, int | float) and value > 0 for value in page_size[:2])
+    ):
+        return None
+    return (float(page_size[0]), float(page_size[1]))
 
 
 def _middle_caption_location_blocks(page_info: dict[str, Any]) -> list[dict[str, Any]]:
@@ -450,9 +486,42 @@ def _take_middle_caption_location(
     page: int,
     source_kind: str,
     text: str,
+    parent_bbox: list[float] | None,
 ) -> dict[str, Any] | None:
     locations = locations_by_caption.get((page, source_kind, text))
-    return locations.pop(0) if locations else None
+    if not locations:
+        return None
+    location_index = min(
+        range(len(locations)),
+        key=lambda index: _caption_parent_geometry_score(locations[index], parent_bbox),
+    )
+    return locations.pop(location_index)
+
+
+def _caption_parent_geometry_score(
+    location: dict[str, Any], parent_bbox: list[float] | None
+) -> tuple[float, float, float, float]:
+    caption_bbox = location.get("bbox")
+    if not _valid_bbox(caption_bbox) or not _valid_bbox(parent_bbox):
+        return (1.0, float("inf"), float("inf"), float("inf"))
+    caption_center_x = (caption_bbox[0] + caption_bbox[2]) / 2
+    parent_center_x = (parent_bbox[0] + parent_bbox[2]) / 2
+    horizontal_gap = max(parent_bbox[0] - caption_center_x, 0, caption_center_x - parent_bbox[2])
+    vertical_gap = max(parent_bbox[1] - caption_bbox[3], 0, caption_bbox[1] - parent_bbox[3])
+    return (
+        0.0 if horizontal_gap == 0 else 1.0,
+        horizontal_gap,
+        vertical_gap,
+        abs(parent_center_x - caption_center_x),
+    )
+
+
+def _valid_bbox(bbox: Any) -> bool:
+    return (
+        isinstance(bbox, list)
+        and len(bbox) == 4
+        and all(isinstance(value, int | float) for value in bbox)
+    )
 
 
 def _middle_block_text(block: dict[str, Any]) -> str:

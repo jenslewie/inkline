@@ -180,6 +180,7 @@ def test_build_observed_document_shadow_appends_table_caption_with_middle_geomet
         "pdf_info": [
             {
                 "page_idx": 346,
+                "page_size": [1000, 1000],
                 "preproc_blocks": [
                     {
                         "blocks": [
@@ -276,6 +277,149 @@ def test_build_observed_document_shadow_appends_chart_caption_with_region_bbox()
     }
     assert caption_observation["parser_payload"]["raw_type"] == "chart_caption"
     assert caption_observation["parser_payload"]["source"] == "visual_region"
+
+
+def test_build_observed_document_shadow_scales_real_egypt_middle_caption_geometry() -> None:
+    chart = _raw("chart", "", [113, 163, 886, 879], page=939, index=0)
+    chart.raw = {
+        "type": "chart",
+        "content": {"chart_caption": [{"type": "text", "content": "Chart Caption"}]},
+    }
+    middle = {
+        "pdf_info": [
+            {
+                "page_idx": 938,
+                "page_size": [677, 433],
+                "preproc_blocks": [
+                    {
+                        "blocks": [
+                            {
+                                "type": "chart_caption",
+                                "bbox": [241, 48, 433, 67],
+                                "lines": [
+                                    {"spans": [{"type": "text", "content": "Chart Caption"}]}
+                                ],
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    document = build_observed_document_shadow(
+        pages={939: [chart]},
+        page_sizes={939: (1000, 1000)},
+        metadata=_metadata(),
+        middle=middle,
+    )
+
+    caption_observation = document["observations"][1]
+    assert caption_observation["bbox"] == [355.982, 110.855, 639.586, 154.734]
+    assert caption_observation["attrs"]["bbox_provenance"] == "mineru_middle"
+    assert caption_observation["attrs"]["direct_anchor_eligible"] is True
+
+
+def test_build_observed_document_shadow_supports_legacy_top_level_string_caption_list() -> None:
+    table = _raw("table", "", [100, 180, 900, 700], page=1, index=4)
+    table.raw = {
+        "type": "table",
+        "table_caption": ["Legacy Caption"],
+    }
+
+    document = build_observed_document_shadow(
+        pages={1: [table]},
+        page_sizes={1: (1000, 1000)},
+        metadata=_metadata(),
+    )
+
+    table_observation, caption_observation = document["observations"]
+    assert table_observation["text"] == "Legacy Caption"
+    assert caption_observation["text"] == "Legacy Caption"
+    assert caption_observation["attrs"]["visual_parent_observation_id"] == "obs000001"
+    assert caption_observation["attrs"]["direct_anchor_eligible"] is False
+
+
+def test_build_observed_document_shadow_matches_identical_captions_to_enclosing_visuals() -> None:
+    left_table = _raw("table", "", [100, 100, 400, 300], page=1, index=0)
+    left_table.raw = {
+        "type": "table",
+        "content": {"table_caption": [{"type": "text", "content": "Shared Caption"}]},
+    }
+    right_table = _raw("table", "", [600, 100, 900, 300], page=1, index=1)
+    right_table.raw = {
+        "type": "table",
+        "content": {"table_caption": [{"type": "text", "content": "Shared Caption"}]},
+    }
+    middle = {
+        "pdf_info": [
+            {
+                "page_idx": 0,
+                "page_size": [1000, 1000],
+                "preproc_blocks": [
+                    {
+                        "blocks": [
+                            {
+                                "type": "table_caption",
+                                "bbox": [650, 320, 850, 340],
+                                "lines": [
+                                    {"spans": [{"type": "text", "content": "Shared Caption"}]}
+                                ],
+                            },
+                            {
+                                "type": "table_caption",
+                                "bbox": [150, 320, 350, 340],
+                                "lines": [
+                                    {"spans": [{"type": "text", "content": "Shared Caption"}]}
+                                ],
+                            },
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    document = build_observed_document_shadow(
+        pages={1: [left_table, right_table]},
+        page_sizes={1: (1000, 1000)},
+        metadata=_metadata(),
+        middle=middle,
+    )
+
+    left_caption, right_caption = document["observations"][2:]
+    assert left_caption["attrs"]["visual_parent_observation_id"] == "obs000001"
+    assert left_caption["bbox"] == [150, 320, 350, 340]
+    assert right_caption["attrs"]["visual_parent_observation_id"] == "obs000002"
+    assert right_caption["bbox"] == [650, 320, 850, 340]
+
+
+def test_build_observed_document_shadow_deduplicates_identical_caption_items_per_visual() -> None:
+    table = _raw("table", "", [100, 180, 900, 700], page=1, index=4)
+    table.raw = {
+        "type": "table",
+        "content": {
+            "table_caption": [
+                {"type": "text", "content": "Repeated Caption"},
+                {"type": "text", "content": "Repeated Caption"},
+            ]
+        },
+    }
+
+    document = build_observed_document_shadow(
+        pages={1: [table]},
+        page_sizes={1: (1000, 1000)},
+        metadata=_metadata(),
+    )
+
+    assert [observation["text"] for observation in document["observations"]] == [
+        "Repeated Caption",
+        "Repeated Caption",
+    ]
+    assert [observation["observation_id"] for observation in document["observations"]] == [
+        "obs000001",
+        "obs000002",
+    ]
 
 
 def test_build_observed_document_shadow_uses_table_caption_as_table_region_text() -> None:
