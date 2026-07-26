@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any
+from typing import Any, TypeGuard
 
 from inkline.canonical.observed import (
     make_observation,
@@ -361,8 +361,9 @@ def _visual_caption_observation(
     text: str,
     middle_location: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    precise_geometry = middle_location is not None and middle_location["bbox"] is not None
-    bbox = middle_location["bbox"] if precise_geometry else block.bbox
+    middle_bbox = middle_location["bbox"] if middle_location is not None else None
+    precise_geometry = middle_bbox is not None
+    bbox = middle_bbox if middle_bbox is not None else block.bbox
     bbox_provenance = "mineru_middle" if precise_geometry else "visual_region"
     source = "mineru_middle" if precise_geometry else "visual_region"
     parser_payload: dict[str, Any] = {
@@ -516,7 +517,7 @@ def _caption_parent_geometry_score(
     )
 
 
-def _valid_bbox(bbox: Any) -> bool:
+def _valid_bbox(bbox: Any) -> TypeGuard[list[int | float]]:
     return (
         isinstance(bbox, list)
         and len(bbox) == 4
