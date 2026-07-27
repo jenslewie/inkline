@@ -67,18 +67,6 @@ uv run --extra mineru mineru-page-review \
   --output /tmp/inkline-page-review/丝绸之路新史_page_review.json
 ```
 
-```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run --extra mineru python \
-  tools/run_page_review_golden_suite.py \
-  --book 四君主
-```
-
-The runner stages output under
-`data/outputs/workspace/page-review/.staging/<run-id>/`, compares it with
-`data/outputs/golden/page-review/`, and publishes only an all-green run. Omit
-`--book` to evaluate all thirteen golden books. It never updates golden output;
-updating that baseline requires explicit human review.
-
 Re-run the same command after an LLM failure. Completed physical pages are reused
 from `/tmp/inkline-page-review/page_review.checkpoint.json`. A checkpoint is
 bound to the review-plan schema and prompt version. When either changes, the

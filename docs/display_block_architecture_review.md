@@ -12,36 +12,30 @@ Use this checklist for any MinerU `display_block` refactor or regression review.
 
 ## Required Checks
 
-Run the architecture checker:
+Run the architecture test, which scans the live production source tree:
 
 ```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/check_display_block_architecture.py
-```
-
-Run the checker tests:
-
-```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run pytest tests/test_display_block_architecture.py -q
+UV_CACHE_DIR=/private/tmp/inkline-uv-cache uv run pytest \
+  tests/inkline/parsers/mineru/reconcile/display_block/test_display_block_architecture.py -q
 ```
 
 Run the display-focused regression suite:
 
 ```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run pytest \
-  tests/test_display_block_architecture.py \
-  tests/test_display_block_reconciliation.py \
-  tests/test_display_geometry.py \
-  tests/test_mineru_text_extraction.py \
-  tests/test_mineru_normalize.py \
-  tests/test_silk_road_acceptance_checker.py \
+UV_CACHE_DIR=/private/tmp/inkline-uv-cache uv run pytest \
+  tests/inkline/parsers/mineru/reconcile/display_block/test_display_block_architecture.py \
+  tests/inkline/parsers/mineru/reconcile/display_block/test_display_block_reconciliation.py \
+  tests/inkline/parsers/mineru/normalize/test_display_geometry.py \
+  tests/inkline/parsers/mineru/extraction/test_mineru_text_extraction.py \
+  tests/inkline/parsers/mineru/normalize/test_mineru_normalize.py \
   -q
 ```
 
 Run the normal repo gates:
 
 ```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run pytest -q
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run ruff check .
+UV_CACHE_DIR=/private/tmp/inkline-uv-cache uv run pytest -q
+UV_CACHE_DIR=/private/tmp/inkline-uv-cache uv run ruff check .
 git diff --check
 ```
 
@@ -55,7 +49,8 @@ git diff --check
    - every module under `reconcile/display_block/`
    - cross-page code that sets display-boundary attrs consumed by display
      reconciliation, such as `display_boundary_after_float_body_resume`
-2. Confirm every display-producing module is covered by `tools/check_display_block_architecture.py`.
+2. Confirm every display-producing module is covered by the adjacent
+   `architecture_rules.py` test helper.
 3. Search display-producing files for text gates:
    - `_ends_with_terminal(...)`
    - `ends_with_terminal_punctuation(...)`

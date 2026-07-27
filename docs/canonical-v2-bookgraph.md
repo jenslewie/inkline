@@ -238,38 +238,6 @@ Phase 1.5 使用 `inkline canonical audit-bookgraph` 审计 `canonical_v2.json`�
 
 这个审计工具应该先服务真实书回归和 Phase 2 设计，而不是变成新的业务输出格式。
 
-### Real-book replay helper
-
-`tools/audit_bookgraph_shadow.py` 可以从现有 v1 `canonical.json` 直接构建 shadow BookGraph 并生成 audit，不需要重新跑 MinerU：
-
-```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_shadow.py \
-  data/outputs/golden/丝绸之路新史/canonical.json \
-  --bookgraph-output /tmp/inkline-silk-canonical_v2.json \
-  --audit-output /tmp/inkline-silk-bookgraph-audit.json \
-  --expect-exact-projection
-```
-
-它也可以作为诊断 gate 使用：
-
-```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_shadow.py \
-  data/outputs/archive/壬辰战争_20260629_134600/canonical.json \
-  --fail-on-structure-warnings \
-  --max-body-like-display-blocks 80 \
-  --expect-exact-projection
-```
-
-2026-07-01 的真实书 shadow audit baseline：
-
-| canonical | status | display_block | paragraph | heading_like_display | body_like_display | structure_warnings | exact_projection |
-| --- | --- | ---: | ---: | ---: | ---: | --- | --- |
-| `data/outputs/golden/丝绸之路新史/canonical.json` | verified oracle for `display_block` / `heading` | 47 | 837 | 1 | 19 | none | true |
-| `data/outputs/golden/壬辰战争/canonical.json` | smoke reference; known issues remain | 79 | 1522 | 8 | 35 | none | true |
-| `data/outputs/archive/壬辰战争_20260629_134600/canonical.json` | known-bad regression sample | 236 | 10 | 6 | 216 | `display_blocks_outnumber_paragraphs` | true |
-
-这个 baseline 不表示这些数字永远不应变化，也不表示所有 `golden/` 文件都已经达到同等可信度。当前只有 `data/outputs/golden/丝绸之路新史/canonical.json` 的 `display_block` 和 `heading` 可以作为 Phase 3 golden parity 的硬 oracle。`data/outputs/golden/壬辰战争/canonical.json` 仍有已知问题，只能用于 smoke diagnostics 和结构趋势观察，不能作为 strict pass/fail oracle。archive 异常能被 audit 抓住，则说明 BookGraph shadow pipeline 已经开始承担架构诊断职责。
-
 ### Phase 2 ObservedDocument replay
 
 Phase 2 新增 ObservedDocument shadow path：
@@ -302,15 +270,6 @@ uv run --extra mineru mineru-to-canonical \
   --output /tmp/inkline-phase2-canonical.json \
   --observed-output /tmp/inkline-phase2-observed_document.json \
   --bookgraph-from-observed-output /tmp/inkline-phase2-canonical_v2_observed.json
-```
-
-比较 v1-shadow path 和 observed-shadow path：
-
-```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/compare_bookgraph_shadow_paths.py \
-  /tmp/inkline-phase2-canonical.json \
-  /tmp/inkline-phase2-observed_document.json \
-  --output /tmp/inkline-phase2-bookgraph-path-compare.json
 ```
 
 ### Phase 3.1 TextUnit aggregation
@@ -359,26 +318,6 @@ ObservedDocument observations
 
 Phase 3.2 仍然不改变 v1 `canonical.json`、EPUB 或 RAG 默认消费路径。它只是让 observed shadow BookGraph 从“段落候选级 node”前进到“版面分类后的文本 node”。
 
-### Phase 3.3 Layout audit harness
-
-Phase 3.3 为 TextUnit layout classification 增加审计和验收工具：
-
-```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_text_unit_layout.py \
-  /tmp/inkline-phase3-observed.json \
-  --output /tmp/inkline-phase3-layout-audit.json
-```
-
-audit report 只包含 parser-neutral 的结构和几何证据：
-
-- `book_layout_profile`: 全书级 body lane、缩进、行高和段落间距基线。
-- `page_layout_profiles`: 每页 body lane、page size、参考 TextUnit 数，以及相对全书基线的漂移。
-- `unit_records`: 每个 paragraph TextUnit 的 bbox、width ratio、left/right inset、signals、decision。
-- `summary`: profile 覆盖数、paragraph 数、classified display block 数、跳过原因计数。
-- `ignored_observation_counts`: image/table/page marker 等未进入 TextUnit 的 observation 计数。
-
-report 不保存正文文本，也不把 parser-specific raw label 暴露为顶层字段。observed shadow BookGraph 只保留 `metadata.shadow_text_unit_layout_audit_summary`，完整 audit JSON 是开发期验收 artifact，不是 release canonical contract。
-
 ### Phase 3.4 Span-first body lane profiles
 
 Phase 3.4 改进 TextUnit layout classification 的 body lane 建模：
@@ -413,117 +352,6 @@ Phase 3.6 为 TextUnit aggregation 增加保守的跨页段落续接：
 - 合并原因进入 `attrs.merge_reasons = ["cross_page_boundary_continuation"]`，BookGraph node attrs 透传该审计信息。
 
 这一层仍然不读取文本含义，也不基于标点、词语或句意判断段落是否连续。它只表达页边界处排版连续的几何事实。
-
-### Phase 3.7 Multi-book shadow acceptance
-
-Phase 3.7 增加多书 shadow acceptance 报告工具：
-
-```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/check_phase3_shadow_acceptance.py \
-  /tmp/book-a-canonical_v2_observed.json \
-  /tmp/book-b-canonical_v2_observed.json \
-  --output /tmp/inkline-phase3-shadow-acceptance.json
-```
-
-acceptance report 只统计 BookGraph 的结构信号：
-
-- 每本书的 `node_counts`、`evidence_count`、`reading_order_count` 和 `projection_keys`。
-- ignored observation counts，例如 `image_region`、`table_region`、`page_marker`。
-- `merge_counts`，例如跨页聚合产生的 `cross_page_boundary_continuation`。
-- `multi_page_evidence_count`，用于确认跨页 evidence 是否被保留。
-- `shadow_text_unit_layout_audit_summary` 和 `shadow_text_unit_layout_profile_quality`。
-
-它不读取正文文本，不做语义判断，也不是 release canonical contract。它的作用是在 Phase 3 期间把“单书 smoke”升级为“多书结构验收”，帮助判断 ObservedDocument -> TextUnit -> BookGraph 的路径是否足够稳定，可以进入后续真实 canonical 切换阶段。
-
-### Phase 3.8 Cross-page merge audit
-
-Phase 3.8 为跨页 TextUnit aggregation 增加专门审计工具：
-
-```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_cross_page_text_units.py \
-  /tmp/inkline-phase3-observed.json \
-  --summary-only \
-  --output /tmp/inkline-phase3-cross-page-audit.json
-```
-
-audit report 只记录跨页合并的通用几何信号：
-
-- `from_page` / `to_page`、`previous_bbox` / `next_bbox`。
-- `previous_bottom_ratio` 和 `next_top_ratio`，用于复盘页底/页顶条件。
-- `left_delta` 和 `horizontal_overlap_ratio`，用于复盘左右对齐和水平重叠。
-- `observation_ids`、`unit_pages`、`span_count`，用于追溯来源，但不保存正文文本。
-
-`--summary-only` 只在 stdout 打印 metadata 和 summary；`--output` 始终写出完整 records。这个工具用于解释 Phase 3.7 暴露的多书差异，例如某本书跨页 merge 数明显偏高时，先审计几何分布，再决定是否收紧阈值或引入额外 layout guard。
-
-### Phase 3 acceptance correction: golden parity
-
-Phase 3 的 shadow acceptance 不能只验证 BookGraph 自身结构闭环。对于已经人工验证过的 golden canonical，ObservedDocument -> TextUnit -> BookGraph 还必须做 golden parity audit：
-
-```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/check_bookgraph_golden_parity.py \
-  data/outputs/golden/丝绸之路新史/canonical.json \
-  /tmp/inkline-phase3-canonical_v2_observed.json \
-  --min-display-text-char-recall 0.5 \
-  --output /tmp/inkline-phase3-golden-parity.json
-```
-
-这个 audit 不用于训练分类规则，也不基于文本语义做判断。它只把 verified canonical 中已经确认正确的类型当作回归 oracle，检查 supported text classes 的结构性偏差。当前 `data/outputs/golden/丝绸之路新史/canonical.json` 的 `display_block` 和 `heading` 已可承担这个角色；`data/outputs/golden/壬辰战争/canonical.json` 仍有已知问题，不能作为同等级 oracle：
-
-- `display_block` recall 不能塌到 0。
-- `display_block` text character recall 不能塌到 0；只看 node 数量会漏掉“少量短块命中、大量 display 文本丢失”的问题。
-- `heading` 数量不能相对 golden 大幅膨胀。
-- text character deltas 用来定位文本流被吸收到哪个 node type。
-
-`丝绸之路新史` 曾经的 observed shadow path 暴露出两个 Phase 3 质量缺口：
-
-- golden `display_block = 47`，observed BookGraph `display_block = 0`。
-- golden `heading = 24`，observed BookGraph `heading = 77`。
-
-修正后的 `/tmp/inkline-phase3-display-fix-silk-canonical_v2_observed.json` 仍然不是 release canonical，但 golden parity 已能捕获并量化这个维度：
-
-- golden `display_block = 47`，observed BookGraph `display_block = 43`，net count delta `-4`，count recall `0.9149`。
-- `display_block` text character recall `0.7464`。
-- golden `heading = 24`，observed BookGraph `heading = 36`，net count delta `+12`，count ratio `1.5`。
-
-这些 net count deltas 只能说明结构健康风险，不能证明具体内容差异。例如 observed `display_block` 比 golden 少 4 个，可能是少识别 4 个，也可能是误把 2 个 paragraph 识别成 display_block、同时漏掉 6 个真正 display_block。`heading` 同理。因此 Phase 3 不能只按 schema/reading_order/evidence 或总量统计 pass 判定完成。进入 Phase 4 前还需要 golden-guided content alignment audit，把 matched、false positive、false negative 和 type mismatch 分开统计；最终修复仍只能使用 bbox、spans、page、reading_order、role_hint、page profile、observation kind 和 provenance 等结构信号，不能引入文本语义规则。
-
-### Phase 3.10 Golden-guided content alignment audit
-
-Phase 3.10 增加 `tools/audit_bookgraph_golden_alignment.py`，用于把 verified golden canonical 和 observed BookGraph 做内容级对齐审计：
-
-```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_golden_alignment.py \
-  data/outputs/golden/丝绸之路新史/canonical.json \
-  /tmp/inkline-phase3-display-fix-silk-canonical_v2_observed.json \
-  --observed-document /tmp/inkline-phase3-display-fix-silk-observed.json \
-  --summary-only \
-  --output /tmp/inkline-phase3-display-fix-silk-golden-alignment.json
-```
-
-这个工具允许用 normalized text 做审计对齐，因为它只服务人工定位和报告，不参与 runtime 分类。报告会按 target type 输出：
-
-- `matched`: golden 和 observed 内容对齐且类型一致。
-- `false_negative`: golden 是 target type，但 observed 没有同类型对齐。
-- `false_positive`: observed 是 target type，但 golden 没有同类型对齐。
-- `type_mismatch`: 内容能对齐，但类型不同。
-- `observed_candidates` / `golden_candidates`: exact alignment 失败时的近似候选，用于识别 split/merge，而不是训练语义规则。
-- `--observed-document`: 可选输入 ObservedDocument，用来把 TextUnit layout audit record 附加到 observed 记录上，解释 `skipped_no_profile`、`width_ratio`、`left_inset`、`right_inset` 等版面原因。
-
-在 `/tmp/inkline-phase3-display-fix-silk-canonical_v2_observed.json` 上的当前摘要：
-
-| target type | golden | observed | net delta | matched | false negative | false positive | type mismatch |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `display_block` | 47 | 43 | -4 | 21 | 26 | 22 | 9 |
-| `heading` | 24 | 36 | +12 | 14 | 10 | 22 | 2 |
-
-这说明 Phase 3 的剩余问题不是简单的“补 4 个 display”或“删 12 个 heading”。目前看到的主要结构模式包括：
-
-- front matter / copyright / CIP 页存在 split/merge 差异，exact alignment 失败但 candidate similarity 较高。
-- 章节标题常被 observed path 拆成章号、主标题、副标题等多个节点，导致 heading false positive 和 false negative 同时出现。
-- 一批长引文 exact 对齐成功，但 observed 仍为 `paragraph`，属于明确的 `display_block -> paragraph` type mismatch。
-- `display_block -> paragraph` 的 9 个 exact type mismatch 中，当前 layout audit 显示 5 个是 `skipped_no_profile`，3 个有 profile 但只呈现约 3% 左缩进、未触发现有 5% inset 阈值，1 个基本贴合 body lane。这说明下一步不能简单放宽阈值；需要先区分“profile 覆盖不足”和“轻微整体内缩 set-off block”两个结构问题。
-
-这些发现只能指导下一轮结构规则设计；最终修复仍必须回到版面和 provenance 信号，不能把正文含义或特定文本写入分类逻辑。
 
 ### Page role candidates
 

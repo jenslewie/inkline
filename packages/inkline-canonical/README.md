@@ -182,23 +182,6 @@ and for `toc_page`. PageReview then closes the remaining pre-body `unknown`
 pages with a bounded second LLM pass, so ordinary internal front prose does not
 silently remain unresolved.
 
-PageReview changes must be evaluated against the verified golden corpus at
-`data/outputs/golden/page-review/`. The golden runner stages output below
-`data/outputs/workspace/page-review/.staging/<run-id>/`, compares every stable
-page field, and publishes into `workspace/page-review` only when every requested
-book passes. It never updates golden artifacts.
-
-```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run --extra mineru python \
-  tools/run_page_review_golden_suite.py \
-  --book 四君主
-```
-
-Omit `--book` for a full evaluation of every book in the golden corpus. Use a
-focused run only for a profile-specific prompt change; changes to the common
-prompt, model, schema, resolver, candidate selection, or rendering require the
-full corpus. On failure, inspect the retained staging report rather than
-overwriting the golden artifact. Golden changes require explicit human review.
 The LLM can identify an outer cover, back cover, or cover flap as
 `external_wrap`. A book without those pages simply produces no such decision.
 

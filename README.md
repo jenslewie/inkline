@@ -101,25 +101,6 @@ uv run inkline canonical audit-bookgraph \
   --output data/outputs/丝绸之路新史/bookgraph_audit.json
 ```
 
-For an existing `canonical.json`, the development helper can build the shadow
-BookGraph and audit it in one step without rerunning MinerU:
-
-```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/audit_bookgraph_shadow.py \
-  data/outputs/golden/壬辰战争/canonical.json \
-  --bookgraph-output /tmp/inkline-imjin-canonical_v2.json \
-  --audit-output /tmp/inkline-imjin-bookgraph-audit.json \
-  --expect-exact-projection \
-  --fail-on-structure-warnings
-```
-
-Use this as a pre-release diagnostic gate. For example, the known-bad archived
-`壬辰战争_20260629_134600` canonical trips the structure warning because
-`display_block` nodes outnumber paragraphs. The `丝绸之路新史` golden canonical is
-the current verified oracle for `display_block` and `heading`; the `壬辰战争`
-golden canonical remains useful for smoke diagnostics, but still has known
-content/classification issues and should not be used as a strict oracle yet.
-
 Phase 2 also supports an ObservedDocument shadow path. This path records
 parser-neutral observations first, then builds an experimental BookGraph from
 those observations:
@@ -196,15 +177,6 @@ The generated skeleton records the LLM input path in `llm.source`:
 - `toc_llm_entries`: the model received observed TOC text only, because no source PDF
   or TOC images were available. This is a legacy-pipeline fallback, not the
   recommended audit mode.
-
-To compare the v1-shadow and ObservedDocument-shadow BookGraph paths:
-
-```bash
-UV_CACHE_DIR=/tmp/inkline-uv-cache uv run python tools/compare_bookgraph_shadow_paths.py \
-  data/outputs/丝绸之路新史/canonical.json \
-  data/outputs/丝绸之路新史/observed_document.json \
-  --output data/outputs/丝绸之路新史/bookgraph_shadow_path_compare.json
-```
 
 RAG chunking, embedding, indexing, and search live in `inkline-rag`. Future
 answer-generation code should use `inkline-llm` for the local model call and

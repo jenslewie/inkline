@@ -222,6 +222,8 @@ __marimo__/
 .idea/
 .venv/
 data/
+# Local-only development, experiment, and private acceptance scripts.
+# Public commands belong in package APIs and declared project entry points.
 scripts/
 .superpowers/
 docs/superpowers/

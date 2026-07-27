@@ -8,13 +8,12 @@ classification rules.
 
 from __future__ import annotations
 
-import argparse
 import ast
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[6]
 DISPLAY_BLOCK_RECONCILE_DIR = (
     REPO_ROOT / "packages/inkline-parser-mineru/src/inkline/parsers/mineru/reconcile/display_block"
 )
@@ -221,24 +220,3 @@ def default_paths(root: Path = REPO_ROOT) -> list[Path]:
     )
     extra_paths = [root / rel for rel in DISPLAY_ARCH_EXTRA_FILES]
     return [*extra_paths, *display_reconcile_paths]
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "paths",
-        nargs="*",
-        type=Path,
-        help="Optional files to check. Defaults to display_block architecture files.",
-    )
-    args = parser.parse_args(argv)
-
-    paths = args.paths or default_paths()
-    findings = check_paths(paths)
-    for finding in findings:
-        print(finding.format())
-    return 1 if findings else 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
