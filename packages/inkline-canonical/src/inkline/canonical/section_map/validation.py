@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from inkline.canonical.book_skeleton import validate_book_skeleton_against_observed
-from inkline.canonical.observed import validate_observed_document
+from inkline.canonical.observed import TEXT_UNIT_TYPES, validate_observed_document
 from inkline.canonical.page_review import validate_resolved_page_review
 from inkline.canonical.schema import ValidationError
 from inkline.canonical.section_map.contract import (
@@ -49,13 +49,13 @@ def validate_section_map_against_sources(
     entries_by_index = {entry["entry_index"]: entry for entry in skeleton["toc_entries"]}
     units_by_id = _validate_text_units(text_units, observed_document)
     page_numbers = {page["page"] for page in observed_document["pages"]}
+    review_pages = _page_review_pages(page_review, page_numbers)
     known_evidence = _known_evidence_ids(
         skeleton,
         {observation["observation_id"] for observation in observed_document["observations"]},
         set(units_by_id),
-        _page_review_pages(page_review),
+        review_pages,
     )
-    review_pages = _page_review_pages(page_review)
     for section in sections_by_id.values():
         _validate_section_against_sources(
             section,
@@ -116,8 +116,10 @@ def _validate_sections(sections: list[Any]) -> dict[str, dict[str, Any]]:
         )
 
     for section in sections_by_id.values():
-        _validate_parent(section, sections_by_id)
+        _validate_parent_reference(section, sections_by_id)
     _validate_section_cycles(sections_by_id)
+    for section in sections_by_id.values():
+        _validate_parent_level(section, sections_by_id)
     return sections_by_id
 
 
@@ -189,13 +191,23 @@ def _validate_unique_assignment(
         owners[value] = section_id
 
 
-def _validate_parent(section: dict[str, Any], sections_by_id: dict[str, dict[str, Any]]) -> None:
+def _validate_parent_reference(
+    section: dict[str, Any], sections_by_id: dict[str, dict[str, Any]]
+) -> None:
     parent_id = section["parent_section_id"]
     if parent_id is None:
         return
-    parent = sections_by_id.get(parent_id)
-    if parent is None:
+    if parent_id not in sections_by_id:
         raise ValidationError(f"section {section['section_id']} has dangling parent")
+
+
+def _validate_parent_level(
+    section: dict[str, Any], sections_by_id: dict[str, dict[str, Any]]
+) -> None:
+    parent_id = section["parent_section_id"]
+    if parent_id is None:
+        return
+    parent = sections_by_id[parent_id]
     if parent["level"] >= section["level"]:
         raise ValidationError(f"section {section['section_id']} parent level must be lower")
 
@@ -269,10 +281,13 @@ def _validate_placement(
         section = sections_by_id[section_id]
         if not _page_in_ranges(placement["page"], section["physical_ranges"]):
             raise ValidationError(f"{path}.page is outside section physical ranges")
-        if not (
-            set(placement["evidence_ids"]) & set(section["text_unit_ids"])
-            or placement["page"] in section["attached_visual_pages"]
-        ):
+        evidence_ids = set(placement["evidence_ids"])
+        has_section_text_evidence = bool(evidence_ids & set(section["text_unit_ids"]))
+        has_visual_evidence = (
+            placement["page"] in section["attached_visual_pages"]
+            and f"page_review:{placement['page']}" in evidence_ids
+        )
+        if not has_section_text_evidence and not has_visual_evidence:
             raise ValidationError(f"{path} cannot be supported by range containment alone")
     elif section_id is not None:
         raise ValidationError(f"{path}.section_id must be null for non-member placement")
@@ -341,7 +356,7 @@ def _validate_text_units(
             raise ValidationError(f"{path}.unit_id is invalid")
         if unit_id in units_by_id:
             raise ValidationError(f"duplicate TextUnit id: {unit_id}")
-        if not isinstance(unit_type, str) or not unit_type:
+        if unit_type not in TEXT_UNIT_TYPES:
             raise ValidationError(f"{path}.unit_type is invalid")
         if (
             not isinstance(pages, list)
@@ -361,15 +376,21 @@ def _validate_text_units(
     return units_by_id
 
 
-def _page_review_pages(review: dict[str, Any]) -> set[int]:
+def _page_review_pages(review: dict[str, Any], document_pages: set[int]) -> set[int]:
     records = review.get("pages")
     if not isinstance(records, list):
         raise ValidationError("page_review.pages must be a list")
-    return {
-        record["page"]
-        for record in records
-        if isinstance(record, dict) and isinstance(record.get("page"), int)
-    }
+    review_pages: set[int] = set()
+    for index, record in enumerate(records):
+        page = record.get("page") if isinstance(record, dict) else None
+        if not isinstance(page, int) or isinstance(page, bool) or page <= 0:
+            raise ValidationError(f"page_review.pages[{index}].page must be a positive integer")
+        if page in review_pages:
+            raise ValidationError(f"duplicate page_review page: {page}")
+        if page not in document_pages:
+            raise ValidationError(f"page_review page is outside ObservedDocument: {page}")
+        review_pages.add(page)
+    return review_pages
 
 
 def _known_evidence_ids(
@@ -511,6 +532,17 @@ def _validate_placements_against_sources(
         }
         for section_id, section in sections_by_id.items()
     }
+    page_local_unit_ids_by_section = {
+        section_id: {
+            page: {
+                unit_id
+                for unit_id in section["text_unit_ids"]
+                if page in units_by_id[unit_id]["pages"]
+            }
+            for page in unit_pages_by_section[section_id]
+        }
+        for section_id, section in sections_by_id.items()
+    }
     assigned_pages = set().union(*unit_pages_by_section.values()) if sections_by_id else set()
     assigned_pages.update(
         page for section in sections_by_id.values() for page in section["attached_visual_pages"]
@@ -522,10 +554,21 @@ def _validate_placements_against_sources(
         _validate_known_evidence(placement["evidence_ids"], known_evidence, "placement evidence")
         if placement["placement"] == "section_member":
             section = sections_by_id[placement["section_id"]]
-            if page not in unit_pages_by_section[section["section_id"]] and page not in section[
-                "attached_visual_pages"
-            ]:
+            page_local_unit_ids = page_local_unit_ids_by_section[section["section_id"]].get(
+                page, set()
+            )
+            evidence_ids = set(placement["evidence_ids"])
+            if evidence_ids & page_local_unit_ids:
+                continue
+            if page in section["attached_visual_pages"]:
+                if f"page_review:{page}" in evidence_ids:
+                    continue
+                raise ValidationError(f"section member placement lacks page-local visual evidence: {page}")
+            if page_local_unit_ids:
+                raise ValidationError(f"section member placement lacks page-local TextUnit evidence: {page}")
+            if page not in unit_pages_by_section[section["section_id"]]:
                 raise ValidationError(f"section member placement has no page-local support: {page}")
+            raise ValidationError(f"section member placement lacks page-local TextUnit evidence: {page}")
         elif page in assigned_pages:
             raise ValidationError(
                 f"standalone or unresolved placement conflicts with section assignment: {page}"

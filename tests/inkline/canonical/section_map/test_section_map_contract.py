@@ -75,6 +75,14 @@ def test_validate_section_map_rejects_invalid_section_tree() -> None:
     dangling_parent["sections"][0]["parent_section_id"] = "s000001"
     cases.append(dangling_parent)
 
+    wrong_canonical_id = _section_map()
+    wrong_canonical_id["sections"][0]["section_id"] = "s000001"
+    cases.append(wrong_canonical_id)
+
+    for section_map in cases:
+        with pytest.raises(ValidationError):
+            validate_section_map(section_map)
+
     cycle = _section_map()
     cycle["sections"].append(
         {
@@ -83,10 +91,14 @@ def test_validate_section_map_rejects_invalid_section_tree() -> None:
             "skeleton_entry_index": 1,
             "parent_section_id": "s000000",
             "level": 2,
+            "title_text_unit_ids": [],
+            "text_unit_ids": [],
+            "attached_visual_pages": [],
         }
     )
     cycle["sections"][0]["parent_section_id"] = "s000001"
-    cases.append(cycle)
+    with pytest.raises(ValidationError, match="section parent graph must be acyclic"):
+        validate_section_map(cycle)
 
     invalid_parent_level = _section_map()
     invalid_parent_level["sections"].append(
@@ -96,17 +108,13 @@ def test_validate_section_map_rejects_invalid_section_tree() -> None:
             "skeleton_entry_index": 1,
             "parent_section_id": "s000000",
             "level": 1,
+            "title_text_unit_ids": [],
+            "text_unit_ids": [],
+            "attached_visual_pages": [],
         }
     )
-    cases.append(invalid_parent_level)
-
-    wrong_canonical_id = _section_map()
-    wrong_canonical_id["sections"][0]["section_id"] = "s000001"
-    cases.append(wrong_canonical_id)
-
-    for section_map in cases:
-        with pytest.raises(ValidationError):
-            validate_section_map(section_map)
+    with pytest.raises(ValidationError, match="parent level must be lower"):
+        validate_section_map(invalid_parent_level)
 
 
 def test_validate_section_map_rejects_invalid_physical_ranges() -> None:
@@ -477,6 +485,80 @@ def test_validate_section_map_against_sources_rejects_range_only_membership() ->
 
     with pytest.raises(ValidationError):
         validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)
+
+
+def test_validate_section_map_against_sources_rejects_wrong_page_text_unit_evidence() -> None:
+    skeleton, text_units, document, page_review = _direct_sources()
+    section_map = _map_for_entry(skeleton, text_units)
+    body_unit = next(unit for unit in text_units if unit["page"] == 3)
+    section_map["sections"][0]["text_unit_ids"].append(body_unit["unit_id"])
+    section_map["page_placements"][0]["evidence_ids"] = [body_unit["unit_id"]]
+
+    with pytest.raises(ValidationError, match="page-local TextUnit evidence"):
+        validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)
+
+
+def test_validate_section_map_against_sources_rejects_unrelated_visual_evidence() -> None:
+    skeleton, text_units, document, page_review = _direct_sources()
+    section_map = _map_for_entry(skeleton, text_units)
+    section_map["sections"][0]["attached_visual_pages"] = [3]
+    section_map["page_placements"] = [
+        {
+            "page": 3,
+            "placement": "section_member",
+            "section_id": "s000000",
+            "reason": "confirmed_visual_page",
+            "evidence_ids": ["obs000003"],
+            "decision_source": "structural_rule",
+            "confidence": "high",
+        }
+    ]
+
+    with pytest.raises(ValidationError, match="range containment alone"):
+        validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)
+
+
+@pytest.mark.parametrize("invalid_page", [None, "3", True])
+def test_validate_section_map_against_sources_rejects_invalid_page_review_page(
+    invalid_page: object,
+) -> None:
+    skeleton, text_units, document, page_review = _direct_sources()
+    page_review["pages"][0]["page"] = invalid_page
+
+    with pytest.raises(ValidationError, match=r"page_review.pages\[0\].page"):
+        validate_section_map_against_sources(
+            _map_for_entry(skeleton, text_units), skeleton, text_units, document, page_review
+        )
+
+
+def test_validate_section_map_against_sources_rejects_duplicate_page_review_page() -> None:
+    skeleton, text_units, document, page_review = _direct_sources()
+    page_review["pages"].append(deepcopy(page_review["pages"][0]))
+
+    with pytest.raises(ValidationError, match="duplicate page_review page"):
+        validate_section_map_against_sources(
+            _map_for_entry(skeleton, text_units), skeleton, text_units, document, page_review
+        )
+
+
+def test_validate_section_map_against_sources_rejects_out_of_document_page_review_page() -> None:
+    skeleton, text_units, document, page_review = _direct_sources()
+    page_review["pages"].append({**deepcopy(page_review["pages"][0]), "page": 999})
+    section_map = _map_for_entry(skeleton, text_units)
+    section_map["sections"][0]["evidence_ids"].append("page_review:999")
+
+    with pytest.raises(ValidationError, match="page_review page is outside ObservedDocument"):
+        validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)
+
+
+def test_validate_section_map_against_sources_rejects_unknown_text_unit_type() -> None:
+    skeleton, text_units, document, page_review = _direct_sources()
+    text_units[0]["unit_type"] = "unrecognized_unit_type"
+
+    with pytest.raises(ValidationError, match=r"text_units\[0\].unit_type"):
+        validate_section_map_against_sources(
+            _map_for_entry(skeleton, text_units), skeleton, text_units, document, page_review
+        )
 
 
 def test_validate_section_map_against_sources_allows_standalone_exception_inside_range() -> None:
