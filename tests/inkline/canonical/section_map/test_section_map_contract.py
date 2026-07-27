@@ -262,7 +262,7 @@ def _page_review(doc_id: str, pages: list[int]) -> dict:
     return {
         "metadata": {
             "schema_name": "inkline_page_review",
-            "schema_version": "0.1-shadow",
+            "schema_version": "1.4-shadow",
             "doc_id": doc_id,
         },
         "candidate_pages": [],
@@ -387,6 +387,26 @@ def test_validate_section_map_against_sources_accepts_direct_anchor_mapping() ->
     validate_section_map_against_sources(
         _map_for_entry(skeleton, text_units), skeleton, text_units, document, page_review
     )
+
+
+def test_validate_section_map_against_sources_rejects_wrong_page_review_schema_name() -> None:
+    skeleton, text_units, document, page_review = _direct_sources()
+    page_review["metadata"]["schema_name"] = "legacy_page_review"
+
+    with pytest.raises(ValidationError, match="page_review metadata schema_name"):
+        validate_section_map_against_sources(
+            _map_for_entry(skeleton, text_units), skeleton, text_units, document, page_review
+        )
+
+
+def test_validate_section_map_against_sources_rejects_wrong_page_review_schema_version() -> None:
+    skeleton, text_units, document, page_review = _direct_sources()
+    page_review["metadata"]["schema_version"] = "0.1-shadow"
+
+    with pytest.raises(ValidationError, match="page_review metadata schema_version"):
+        validate_section_map_against_sources(
+            _map_for_entry(skeleton, text_units), skeleton, text_units, document, page_review
+        )
 
 
 def test_validate_section_map_against_sources_rejects_dangling_skeleton_entry() -> None:

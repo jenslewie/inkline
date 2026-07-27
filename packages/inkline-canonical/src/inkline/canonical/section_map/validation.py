@@ -42,6 +42,7 @@ def validate_section_map_against_sources(
     validate_book_skeleton_against_observed(skeleton, observed_document)
     validate_observed_document(observed_document)
     validate_resolved_page_review(page_review)
+    _validate_page_review_metadata(page_review)
     _validate_matching_doc_ids(section_map, skeleton, observed_document, page_review)
 
     sections_by_id = {section["section_id"]: section for section in section_map["sections"]}
@@ -308,6 +309,16 @@ def _validate_matching_doc_ids(
     }
     if None in doc_ids or len(doc_ids) != 1:
         raise ValidationError("SectionMap source doc_id values differ")
+
+
+def _validate_page_review_metadata(page_review: dict[str, Any]) -> None:
+    metadata = page_review.get("metadata")
+    if not isinstance(metadata, dict):
+        raise ValidationError("page_review metadata must be object")
+    if metadata.get("schema_name") != "inkline_page_review":
+        raise ValidationError("page_review metadata schema_name is invalid")
+    if metadata.get("schema_version") != "1.4-shadow":
+        raise ValidationError("page_review metadata schema_version is invalid")
 
 
 def _validate_text_units(
