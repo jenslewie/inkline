@@ -296,9 +296,7 @@ def _map_for_entry(skeleton: dict, text_units: list[dict], entry_index: int = 0)
     anchor = entry["selected_start_anchor"]
     assert anchor is not None
     title_unit = next(
-        unit
-        for unit in text_units
-        if unit["observation_ids"] == anchor["title_observation_ids"]
+        unit for unit in text_units if unit["observation_ids"] == anchor["title_observation_ids"]
     )
     return {
         "metadata": {
@@ -425,7 +423,9 @@ def test_validate_section_map_against_sources_rejects_dangling_skeleton_entry() 
     section_map["page_placements"][0]["section_id"] = "s000001"
 
     with pytest.raises(ValidationError):
-        validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)
+        validate_section_map_against_sources(
+            section_map, skeleton, text_units, document, page_review
+        )
 
 
 def test_validate_section_map_against_sources_rejects_unknown_text_unit() -> None:
@@ -437,7 +437,9 @@ def test_validate_section_map_against_sources_rejects_unknown_text_unit() -> Non
     section_map["page_placements"][0]["evidence_ids"] = ["tu999999"]
 
     with pytest.raises(ValidationError):
-        validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)
+        validate_section_map_against_sources(
+            section_map, skeleton, text_units, document, page_review
+        )
 
 
 def test_validate_section_map_against_sources_rejects_unknown_evidence() -> None:
@@ -446,7 +448,9 @@ def test_validate_section_map_against_sources_rejects_unknown_evidence() -> None
     section_map["sections"][0]["evidence_ids"].append("unknown-evidence")
 
     with pytest.raises(ValidationError):
-        validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)
+        validate_section_map_against_sources(
+            section_map, skeleton, text_units, document, page_review
+        )
 
 
 def test_validate_section_map_against_sources_rejects_fabricated_direct_title_unit() -> None:
@@ -457,7 +461,9 @@ def test_validate_section_map_against_sources_rejects_fabricated_direct_title_un
     section_map["sections"][0]["text_unit_ids"].append(body_unit["unit_id"])
 
     with pytest.raises(ValidationError):
-        validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)
+        validate_section_map_against_sources(
+            section_map, skeleton, text_units, document, page_review
+        )
 
 
 def test_validate_section_map_against_sources_accepts_offset_anchor_without_title_unit() -> None:
@@ -475,7 +481,9 @@ def test_validate_section_map_against_sources_rejects_offset_anchor_title_unit()
     section_map["sections"][0]["title_text_unit_ids"] = [body_unit]
 
     with pytest.raises(ValidationError):
-        validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)
+        validate_section_map_against_sources(
+            section_map, skeleton, text_units, document, page_review
+        )
 
 
 def test_validate_section_map_against_sources_rejects_range_only_membership() -> None:
@@ -484,7 +492,9 @@ def test_validate_section_map_against_sources_rejects_range_only_membership() ->
     section_map["page_placements"][0]["page"] = 3
 
     with pytest.raises(ValidationError):
-        validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)
+        validate_section_map_against_sources(
+            section_map, skeleton, text_units, document, page_review
+        )
 
 
 def test_validate_section_map_against_sources_rejects_wrong_page_text_unit_evidence() -> None:
@@ -495,7 +505,9 @@ def test_validate_section_map_against_sources_rejects_wrong_page_text_unit_evide
     section_map["page_placements"][0]["evidence_ids"] = [body_unit["unit_id"]]
 
     with pytest.raises(ValidationError, match="page-local TextUnit evidence"):
-        validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)
+        validate_section_map_against_sources(
+            section_map, skeleton, text_units, document, page_review
+        )
 
 
 def test_validate_section_map_against_sources_rejects_unrelated_visual_evidence() -> None:
@@ -515,7 +527,9 @@ def test_validate_section_map_against_sources_rejects_unrelated_visual_evidence(
     ]
 
     with pytest.raises(ValidationError, match="range containment alone"):
-        validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)
+        validate_section_map_against_sources(
+            section_map, skeleton, text_units, document, page_review
+        )
 
 
 @pytest.mark.parametrize("invalid_page", [None, "3", True])
@@ -548,7 +562,9 @@ def test_validate_section_map_against_sources_rejects_out_of_document_page_revie
     section_map["sections"][0]["evidence_ids"].append("page_review:999")
 
     with pytest.raises(ValidationError, match="page_review page is outside ObservedDocument"):
-        validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)
+        validate_section_map_against_sources(
+            section_map, skeleton, text_units, document, page_review
+        )
 
 
 def test_validate_section_map_against_sources_rejects_unknown_text_unit_type() -> None:
@@ -586,6 +602,4 @@ def test_validate_section_map_against_sources_allows_standalone_exception_inside
         }
     )
 
-    validate_section_map_against_sources(
-        section_map, skeleton, text_units, document, page_review
-    )
+    validate_section_map_against_sources(section_map, skeleton, text_units, document, page_review)

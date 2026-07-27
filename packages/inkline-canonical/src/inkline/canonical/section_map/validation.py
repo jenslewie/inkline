@@ -142,9 +142,7 @@ def _validate_section_shape(section: dict[str, Any], index: int) -> None:
     _validate_positive_unique_pages(
         section["attached_visual_pages"], f"sections[{index}].attached_visual_pages"
     )
-    _validate_id_list(
-        section["evidence_ids"], f"sections[{index}].evidence_ids", required=True
-    )
+    _validate_id_list(section["evidence_ids"], f"sections[{index}].evidence_ids", required=True)
     _validate_decision(section, f"sections[{index}]")
 
 
@@ -158,7 +156,9 @@ def _validate_id_list(values: list[Any], path: str, *, required: bool = False) -
 
 
 def _validate_positive_unique_pages(values: list[Any], path: str) -> None:
-    if not all(isinstance(value, int) and not isinstance(value, bool) and value > 0 for value in values):
+    if not all(
+        isinstance(value, int) and not isinstance(value, bool) and value > 0 for value in values
+    ):
         raise ValidationError(f"{path} must contain positive pages")
     if len(values) != len(set(values)):
         raise ValidationError(f"{path} must contain unique pages")
@@ -249,7 +249,11 @@ def _is_ancestor(ancestor: str, descendant: str, sections_by_id: dict[str, dict[
 
 
 def _ranges_overlap(first: list[Any], second: list[Any]) -> bool:
-    return any(start <= other_end and other_start <= end for start, end in first for other_start, other_end in second)
+    return any(
+        start <= other_end and other_start <= end
+        for start, end in first
+        for other_start, other_end in second
+    )
 
 
 def _validate_page_placements(
@@ -404,9 +408,12 @@ def _known_evidence_ids(
         for entry in skeleton["toc_entries"]
         if entry["selected_start_anchor"] is not None
     }
-    return anchor_ids | observation_ids | text_unit_ids | {
-        f"page_review:{page}" for page in review_pages
-    }
+    return (
+        anchor_ids
+        | observation_ids
+        | text_unit_ids
+        | {f"page_review:{page}" for page in review_pages}
+    )
 
 
 def _validate_section_against_sources(
@@ -444,7 +451,9 @@ def _validate_section_pages(
     for start_page, end_page in section["physical_ranges"]:
         range_pages = set(range(start_page, end_page + 1))
         if not range_pages <= page_numbers & review_pages:
-            raise ValidationError(f"section {section['section_id']} references unknown physical page")
+            raise ValidationError(
+                f"section {section['section_id']} references unknown physical page"
+            )
     if not set(section["attached_visual_pages"]) <= page_numbers & review_pages:
         raise ValidationError(f"section {section['section_id']} references unknown visual page")
 
@@ -457,7 +466,9 @@ def _validate_section_text_unit_references(
     if not unit_ids <= set(units_by_id):
         raise ValidationError(f"section {section['section_id']} references unknown TextUnit")
     if not title_unit_ids <= unit_ids:
-        raise ValidationError(f"section {section['section_id']} title TextUnit is not a section member")
+        raise ValidationError(
+            f"section {section['section_id']} title TextUnit is not a section member"
+        )
 
 
 def _validate_known_evidence(values: list[str], known: set[str], path: str) -> None:
@@ -471,7 +482,9 @@ def _validate_anchor_mapping(
     anchor = entry["selected_start_anchor"]
     if anchor is None:
         if section["anchor_evidence_ids"] or section["title_text_unit_ids"]:
-            raise ValidationError(f"section {section['section_id']} has evidence for unlocated anchor")
+            raise ValidationError(
+                f"section {section['section_id']} has evidence for unlocated anchor"
+            )
         return
     if anchor["resolution_method"] == "observed_title_match":
         expected_ids = [
@@ -480,7 +493,9 @@ def _validate_anchor_mapping(
             *anchor["toc_observation_ids"],
         ]
         if section["anchor_evidence_ids"] != expected_ids:
-            raise ValidationError(f"section {section['section_id']} direct anchor evidence is invalid")
+            raise ValidationError(
+                f"section {section['section_id']} direct anchor evidence is invalid"
+            )
         _validate_direct_title_units(section, anchor, units_by_id)
         return
     expected_ids = [
@@ -491,10 +506,14 @@ def _validate_anchor_mapping(
     if section["anchor_evidence_ids"] != expected_ids:
         raise ValidationError(f"section {section['section_id']} offset anchor evidence is invalid")
     if section["title_text_unit_ids"]:
-        raise ValidationError(f"section {section['section_id']} offset anchor cannot have title TextUnit")
+        raise ValidationError(
+            f"section {section['section_id']} offset anchor cannot have title TextUnit"
+        )
     ranges = section["physical_ranges"]
     if ranges and ranges[0][0] != anchor["page"]:
-        raise ValidationError(f"section {section['section_id']} offset range must start on anchor page")
+        raise ValidationError(
+            f"section {section['section_id']} offset range must start on anchor page"
+        )
 
 
 def _validate_direct_title_units(
@@ -502,18 +521,21 @@ def _validate_direct_title_units(
 ) -> None:
     title_unit_ids = section["title_text_unit_ids"]
     if not title_unit_ids:
-        raise ValidationError(f"section {section['section_id']} direct anchor requires title TextUnit")
+        raise ValidationError(
+            f"section {section['section_id']} direct anchor requires title TextUnit"
+        )
     title_units = [units_by_id[unit_id] for unit_id in title_unit_ids]
-    if any(
-        anchor["page"] not in unit["pages"]
-        for unit in title_units
-    ):
-        raise ValidationError(f"section {section['section_id']} title TextUnit is not on anchor page")
+    if any(anchor["page"] not in unit["pages"] for unit in title_units):
+        raise ValidationError(
+            f"section {section['section_id']} title TextUnit is not on anchor page"
+        )
     observation_ids = [
         observation_id for unit in title_units for observation_id in unit["observation_ids"]
     ]
     if observation_ids != anchor["title_observation_ids"]:
-        raise ValidationError(f"section {section['section_id']} title TextUnits do not cover anchor evidence")
+        raise ValidationError(
+            f"section {section['section_id']} title TextUnits do not cover anchor evidence"
+        )
 
 
 def _validate_placements_against_sources(
@@ -526,9 +548,7 @@ def _validate_placements_against_sources(
 ) -> None:
     unit_pages_by_section = {
         section_id: {
-            page
-            for unit_id in section["text_unit_ids"]
-            for page in units_by_id[unit_id]["pages"]
+            page for unit_id in section["text_unit_ids"] for page in units_by_id[unit_id]["pages"]
         }
         for section_id, section in sections_by_id.items()
     }
@@ -563,12 +583,18 @@ def _validate_placements_against_sources(
             if page in section["attached_visual_pages"]:
                 if f"page_review:{page}" in evidence_ids:
                     continue
-                raise ValidationError(f"section member placement lacks page-local visual evidence: {page}")
+                raise ValidationError(
+                    f"section member placement lacks page-local visual evidence: {page}"
+                )
             if page_local_unit_ids:
-                raise ValidationError(f"section member placement lacks page-local TextUnit evidence: {page}")
+                raise ValidationError(
+                    f"section member placement lacks page-local TextUnit evidence: {page}"
+                )
             if page not in unit_pages_by_section[section["section_id"]]:
                 raise ValidationError(f"section member placement has no page-local support: {page}")
-            raise ValidationError(f"section member placement lacks page-local TextUnit evidence: {page}")
+            raise ValidationError(
+                f"section member placement lacks page-local TextUnit evidence: {page}"
+            )
         elif page in assigned_pages:
             raise ValidationError(
                 f"standalone or unresolved placement conflicts with section assignment: {page}"
