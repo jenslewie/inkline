@@ -12,6 +12,8 @@ CHECKED_CANONICAL_FILES = [
     ROOT / "packages/inkline-canonical/src/inkline/canonical/observed/schema.py",
     ROOT / "packages/inkline-canonical/src/inkline/canonical/observed/text_unit_layout.py",
     ROOT / "packages/inkline-canonical/src/inkline/canonical/observed/text_units.py",
+    ROOT / "packages/inkline-canonical/src/inkline/canonical/section_map/contract.py",
+    ROOT / "packages/inkline-canonical/src/inkline/canonical/section_map/validation.py",
 ]
 
 

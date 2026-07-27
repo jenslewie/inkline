@@ -61,6 +61,12 @@ from inkline.canonical.schema import (
     sample_document,
     validate_document,
 )
+from inkline.canonical.section_map import (
+    SECTION_MAP_SCHEMA_NAME,
+    SECTION_MAP_SCHEMA_VERSION,
+    validate_section_map,
+    validate_section_map_against_sources,
+)
 from inkline.canonical.types import CanonicalBlock, CanonicalSource, NoteRef
 
 __all__ = [
@@ -74,6 +80,8 @@ __all__ = [
     "OBSERVED_SCHEMA_NAME",
     "OBSERVED_SCHEMA_VERSION",
     "SCHEMA_VERSION",
+    "SECTION_MAP_SCHEMA_NAME",
+    "SECTION_MAP_SCHEMA_VERSION",
     "TEXT_UNIT_TYPES",
     "CanonicalBlock",
     "CanonicalSource",
@@ -120,4 +128,6 @@ __all__ = [
     "validate_observed_document",
     "validate_page_review_decisions",
     "validate_resolved_page_review",
+    "validate_section_map",
+    "validate_section_map_against_sources",
 ]
