@@ -85,7 +85,7 @@ def test_exact_visual_caption_anchor_owns_its_evidence(fixture_name: str) -> Non
     assert parent["observation_id"] not in anchor["title_observation_ids"]
 
 
-def test_ordinary_imprecise_caption_and_parent_are_not_promoted() -> None:
+def test_ordinary_precise_caption_and_parent_are_not_promoted() -> None:
     fixture = _load_fixture("ordinary_equation_caption.json")
     observed, skeleton = _build_pair(fixture)
     caption, parent = _caption_and_parent(observed, fixture)
@@ -93,9 +93,12 @@ def test_ordinary_imprecise_caption_and_parent_are_not_promoted() -> None:
 
     assert parent["text"] == fixture["retained_resource_text"]
     assert caption["text"] == fixture["caption_text"]
-    assert caption["attrs"]["bbox_provenance"] == "visual_region"
-    assert caption["attrs"]["direct_anchor_eligible"] is False
+    assert caption["bbox"] == fixture["caption_bbox"]
+    assert caption["attrs"]["bbox_provenance"] == "mineru_middle"
+    assert caption["attrs"]["direct_anchor_eligible"] is True
+    assert skeleton["toc_entries"][0]["candidate_start_pages"] == [3]
     assert anchor is not None
-    assert anchor["title_observation_ids"] == ["obs000002"]
+    assert anchor["page"] == 3
+    assert anchor["title_observation_ids"] == ["obs000003"]
     assert caption["observation_id"] not in anchor["title_observation_ids"]
     assert parent["observation_id"] not in anchor["title_observation_ids"]

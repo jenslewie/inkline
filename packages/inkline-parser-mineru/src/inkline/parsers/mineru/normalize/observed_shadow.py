@@ -158,28 +158,24 @@ def _observation_text(block: RawBlock) -> str:
 
 
 def _content_text_list(raw: dict[str, Any], key: str) -> str:
-    content = raw.get("content") if isinstance(raw, dict) else None
-    if not isinstance(content, dict):
-        return ""
-    items = content.get(key)
-    if not isinstance(items, list):
-        return ""
-    parts = [
-        str(item.get("content") or "").strip()
-        for item in items
-        if isinstance(item, dict) and str(item.get("content") or "").strip()
-    ]
+    parts = []
+    seen = set()
+    for item in _caption_items(raw, key):
+        if isinstance(item, str):
+            text = item.strip()
+        elif isinstance(item, dict):
+            text = str(item.get("content") or "").strip()
+        else:
+            continue
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        parts.append(text)
     return "\n".join(parts)
 
 
 def _caption_text_items(raw: dict[str, Any], key: str) -> list[str]:
-    content = raw.get("content") if isinstance(raw, dict) else None
-    if isinstance(content, dict) and key in content:
-        items = content[key]
-    else:
-        items = raw.get(key) if isinstance(raw, dict) else None
-    if not isinstance(items, list):
-        return []
+    items = _caption_items(raw, key)
     texts = []
     seen = set()
     for item in items:
@@ -188,6 +184,15 @@ def _caption_text_items(raw: dict[str, Any], key: str) -> list[str]:
             seen.add(text)
             texts.append(text)
     return texts
+
+
+def _caption_items(raw: dict[str, Any], key: str) -> list[Any]:
+    content = raw.get("content") if isinstance(raw, dict) else None
+    if isinstance(content, dict) and key in content:
+        items = content[key]
+    else:
+        items = raw.get(key) if isinstance(raw, dict) else None
+    return items if isinstance(items, list) else []
 
 
 def _role_hint(raw_type: str, *, page: int, total_pages: int) -> str:

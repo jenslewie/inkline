@@ -3,24 +3,21 @@
   "caption_text": "1592 年 5 月的日本侵朝军",
   "resource_kind": "table_region",
   "retained_resource_text": "1592 年 5 月的日本侵朝军\n^{7}",
+  "caption_bbox": [120, 650, 700, 690],
   "content_page_sizes": {
     "1": [1000, 1000],
-    "2": [1000, 1000]
+    "2": [1000, 1000],
+    "3": [1000, 1000]
   },
   "content_list_v2": [
     [
       {
         "type": "index",
-        "content": {"type": "text", "content": "目录\n第一章 战争 2"},
+        "content": {"type": "text", "content": "目录\n第一章 战争 3"},
         "bbox": [100, 100, 900, 800]
       }
     ],
     [
-      {
-        "type": "title",
-        "content": {"type": "text", "content": "第一章 战争"},
-        "bbox": [100, 100, 500, 150]
-      },
       {
         "type": "table",
         "content": {
@@ -38,12 +35,47 @@
         },
         "bbox": [96, 719, 840, 905]
       }
+    ],
+    [
+      {
+        "type": "title",
+        "content": {"type": "text", "content": "第一章 战争"},
+        "bbox": [100, 100, 500, 150]
+      }
     ]
   ],
   "middle": {
     "pdf_info": [
       {"page_idx": 0, "page_size": [425, 602]},
-      {"page_idx": 1, "page_size": [425, 602]}
+      {
+        "page_idx": 1,
+        "page_size": [1000, 1000],
+        "preproc_blocks": [
+          {
+            "blocks": [
+              {
+                "bbox": [120, 650, 700, 690],
+                "type": "table_caption",
+                "angle": 0,
+                "lines": [
+                  {
+                    "bbox": [120, 650, 700, 690],
+                    "spans": [
+                      {
+                        "bbox": [120, 650, 700, 690],
+                        "type": "text",
+                        "content": "1592 年 5 月的日本侵朝军"
+                      }
+                    ]
+                  }
+                ],
+                "index": 0
+              }
+            ]
+          }
+        ]
+      },
+      {"page_idx": 2, "page_size": [425, 602]}
     ]
   }
 }

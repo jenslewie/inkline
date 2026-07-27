@@ -334,7 +334,7 @@ def test_build_observed_document_shadow_supports_legacy_top_level_string_caption
     )
 
     table_observation, caption_observation = document["observations"]
-    assert table_observation["text"] == ""
+    assert table_observation["text"] == "Legacy Caption"
     assert caption_observation["text"] == "Legacy Caption"
     assert caption_observation["attrs"]["visual_parent_observation_id"] == "obs000001"
     assert caption_observation["attrs"]["direct_anchor_eligible"] is False
@@ -413,7 +413,7 @@ def test_build_observed_document_shadow_deduplicates_identical_caption_items_per
     )
 
     assert [observation["text"] for observation in document["observations"]] == [
-        "Repeated Caption\nRepeated Caption",
+        "Repeated Caption",
         "Repeated Caption",
     ]
     assert [observation["observation_id"] for observation in document["observations"]] == [
