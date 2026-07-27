@@ -356,7 +356,7 @@ def _validate_text_units(
             raise ValidationError(f"{path}.unit_id is invalid")
         if unit_id in units_by_id:
             raise ValidationError(f"duplicate TextUnit id: {unit_id}")
-        if unit_type not in TEXT_UNIT_TYPES:
+        if not isinstance(unit_type, str) or unit_type not in TEXT_UNIT_TYPES:
             raise ValidationError(f"{path}.unit_type is invalid")
         if (
             not isinstance(pages, list)

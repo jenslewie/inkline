@@ -561,6 +561,16 @@ def test_validate_section_map_against_sources_rejects_unknown_text_unit_type() -
         )
 
 
+def test_validate_section_map_against_sources_rejects_unhashable_text_unit_type() -> None:
+    skeleton, text_units, document, page_review = _direct_sources()
+    text_units[0]["unit_type"] = []
+
+    with pytest.raises(ValidationError, match=r"text_units\[0\].unit_type"):
+        validate_section_map_against_sources(
+            _map_for_entry(skeleton, text_units), skeleton, text_units, document, page_review
+        )
+
+
 def test_validate_section_map_against_sources_allows_standalone_exception_inside_range() -> None:
     skeleton, text_units, document, page_review = _direct_sources()
     section_map = _map_for_entry(skeleton, text_units)
