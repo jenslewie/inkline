@@ -4,6 +4,16 @@ from typing import Any
 
 SECTION_MAP_SCHEMA_NAME = "inkline_section_map"
 SECTION_MAP_SCHEMA_VERSION = "0.1-shadow"
+SECTION_MAP_EVIDENCE_SCHEMA_NAME = "inkline_section_map_evidence"
+SECTION_MAP_EVIDENCE_SCHEMA_VERSION = "0.1-shadow"
+
+SECTION_MAP_START_METHODS = {"observed_title_match", "printed_page_offset", "unlocated"}
+SECTION_MAP_TEXT_FLOW_STATUSES = {
+    "mapped",
+    "excluded_by_page_review",
+    "not_applicable",
+    "unlocated",
+}
 
 SECTION_MAP_PLACEMENTS = {"section_member", "standalone", "unresolved"}
 SECTION_MAP_CONFIDENCES = {"high", "medium", "low"}

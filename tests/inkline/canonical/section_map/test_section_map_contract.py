@@ -15,7 +15,25 @@ from inkline.canonical import (
 from inkline.canonical.section_map import (
     validate_section_map,
     validate_section_map_against_sources,
+    validate_section_map_evidence,
 )
+
+
+def test_validate_section_map_evidence_rejects_membership_fields() -> None:
+    evidence = {
+        "metadata": {
+            "schema_name": "inkline_section_map_evidence",
+            "schema_version": "0.1-shadow",
+            "doc_id": "sample",
+        },
+        "sections": [],
+        "text_flow_order": [],
+        "page_review_pages": [],
+        "text_unit_ids": [],
+    }
+
+    with pytest.raises(ValidationError, match="top-level fields"):
+        validate_section_map_evidence(evidence)
 
 
 def _section_map() -> dict:
