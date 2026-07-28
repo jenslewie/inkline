@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import Any
+from typing import Any, cast
 
 from inkline.canonical.book_skeleton.contract import (
     BOOK_SKELETON_SCHEMA_NAME,
@@ -12,6 +12,7 @@ from inkline.canonical.book_skeleton.toc import (
     normalize_title,
     parse_toc_line_entries,
 )
+from inkline.canonical.observed.index import ObservedIndex, build_observed_index
 
 TEXT_KINDS = {"text_region", "footnote_region", "page_marker"}
 VISUAL_TITLE_KINDS = {"image_region", "table_region"}
@@ -36,29 +37,35 @@ DISPLAY_TITLE_PREFIX_RE = re.compile(
 )
 
 
-def metadata(document: dict[str, Any]) -> dict[str, Any]:
-    source = document["metadata"]
+def metadata(source: dict[str, Any] | ObservedIndex) -> dict[str, Any]:
+    source_metadata = source.metadata if isinstance(source, ObservedIndex) else source["metadata"]
     return {
         "schema_name": BOOK_SKELETON_SCHEMA_NAME,
         "schema_version": BOOK_SKELETON_SCHEMA_VERSION,
-        "doc_id": str(source.get("doc_id") or ""),
-        "title": str(source.get("title") or ""),
-        "language": str(source.get("language") or ""),
-        "source_file": str(source.get("source_file") or ""),
-        "parser_name": str(source.get("parser_name") or ""),
-        "parser_mode": str(source.get("parser_mode") or ""),
-        "shadow_source_schema_name": str(source.get("schema_name") or ""),
-        "shadow_source_schema_version": str(source.get("schema_version") or ""),
+        "doc_id": str(source_metadata.get("doc_id") or ""),
+        "title": str(source_metadata.get("title") or ""),
+        "language": str(source_metadata.get("language") or ""),
+        "source_file": str(source_metadata.get("source_file") or ""),
+        "parser_name": str(source_metadata.get("parser_name") or ""),
+        "parser_mode": str(source_metadata.get("parser_mode") or ""),
+        "shadow_source_schema_name": str(source_metadata.get("schema_name") or ""),
+        "shadow_source_schema_version": str(source_metadata.get("schema_version") or ""),
     }
 
 
-def page_records(document: dict[str, Any]) -> list[dict[str, Any]]:
+def page_records(source: dict[str, Any] | ObservedIndex) -> list[dict[str, Any]]:
+    if isinstance(source, ObservedIndex):
+        observations = source.observations_by_id.values()
+        page_numbers = source.page_numbers
+    else:
+        observations = source["observations"]
+        page_numbers = tuple(sorted(int(page["page"]) for page in source["pages"]))
     observations_by_page: dict[int, list[dict[str, Any]]] = {}
-    for observation in document["observations"]:
+    for observation in observations:
+        observation = cast(dict[str, Any], observation)
         observations_by_page.setdefault(int(observation["page"]), []).append(observation)
     records = []
-    for page in sorted(document["pages"], key=lambda item: int(item["page"])):
-        page_number = int(page["page"])
+    for page_number in page_numbers:
         observations = observations_by_page.get(page_number, [])
         text_observations = [
             observation for observation in observations if observation.get("kind") in TEXT_KINDS
@@ -169,10 +176,12 @@ def detect_toc_pages(page_records_: list[dict[str, Any]]) -> list[int]:
     return sorted(pages)
 
 
-def observed_page_text(document: dict[str, Any], page_number: int) -> str:
+def observed_page_text(source: dict[str, Any] | ObservedIndex, page_number: int) -> str:
+    observed_index = _as_observed_index(source)
     return "\n".join(
-        str(observation.get("text") or "").strip()
-        for observation in document["observations"]
+        str(observed_index.observations_by_id[observation_id].get("text") or "").strip()
+        for observation_id in observed_index.observation_ids_by_page.get(page_number, ())
+        for observation in (observed_index.observations_by_id[observation_id],)
         if int(observation.get("page") or 0) == page_number
         and observation.get("kind") in TEXT_KINDS
         and str(observation.get("text") or "").strip()
@@ -342,17 +351,18 @@ def add_printed_page_offset_candidates(entries: list[dict[str, Any]], *, page_co
 
 def attach_selected_start_anchors(
     entries: list[dict[str, Any]],
-    document: dict[str, Any],
+    source: dict[str, Any] | ObservedIndex,
     *,
     toc_pages: list[int],
 ) -> None:
-    _attach_direct_anchors(entries, document, toc_pages=toc_pages)
-    _attach_printed_offset_anchors(entries, document, toc_pages=toc_pages)
+    observed_index = _as_observed_index(source)
+    _attach_direct_anchors(entries, observed_index, toc_pages=toc_pages)
+    _attach_printed_offset_anchors(entries, observed_index, toc_pages=toc_pages)
 
 
 def _attach_direct_anchors(
     entries: list[dict[str, Any]],
-    document: dict[str, Any],
+    observed_index: ObservedIndex,
     *,
     toc_pages: list[int],
 ) -> None:
@@ -377,7 +387,7 @@ def _attach_direct_anchors(
             "printed_page_offset": printed_page_offset,
             "title_observation_ids": list(candidate["title_observation_ids"]),
             "toc_observation_ids": matching_toc_observation_ids(
-                document, entry, toc_pages=toc_pages
+                observed_index, entry, toc_pages=toc_pages
             ),
             "supporting_anchor_ids": [],
             "confidence": "high",
@@ -386,7 +396,7 @@ def _attach_direct_anchors(
 
 def _attach_printed_offset_anchors(
     entries: list[dict[str, Any]],
-    document: dict[str, Any],
+    observed_index: ObservedIndex,
     *,
     toc_pages: list[int],
 ) -> None:
@@ -413,7 +423,7 @@ def _attach_printed_offset_anchors(
             "printed_page_offset": candidate["printed_page_offset"],
             "title_observation_ids": [],
             "toc_observation_ids": matching_toc_observation_ids(
-                document, entry, toc_pages=toc_pages
+                observed_index, entry, toc_pages=toc_pages
             ),
             "supporting_anchor_ids": supporting_anchor_ids,
             "confidence": "medium",
@@ -425,18 +435,19 @@ def _start_anchor_id(entry: dict[str, Any]) -> str:
 
 
 def matching_toc_observation_ids(
-    document: dict[str, Any],
+    source: dict[str, Any] | ObservedIndex,
     entry: dict[str, Any],
     *,
     toc_pages: list[int],
 ) -> list[str]:
+    observed_index = _as_observed_index(source)
     title_key = normalize_title(str(entry.get("display_title") or ""))
     if not title_key:
         return []
     toc_page_set = set(toc_pages)
     observation_ids = []
     seen = set()
-    for observation in document["observations"]:
+    for observation in observed_index.observations_by_id.values():
         if (
             int(observation["page"]) not in toc_page_set
             or observation.get("role_hint") != "toc_text"
@@ -448,6 +459,10 @@ def matching_toc_observation_ids(
             seen.add(observation_id)
             observation_ids.append(observation_id)
     return observation_ids
+
+
+def _as_observed_index(source: dict[str, Any] | ObservedIndex) -> ObservedIndex:
+    return source if isinstance(source, ObservedIndex) else build_observed_index(source)
 
 
 def prune_candidate_start_pages_to_toc_intervals(entries: list[dict[str, Any]]) -> None:

@@ -1,3 +1,4 @@
+from inkline.canonical.observed.index import ObservedIndex, build_observed_index
 from inkline.canonical.observed.page_roles import classify_observed_page_roles
 from inkline.canonical.observed.schema import (
     OBSERVED_SCHEMA_NAME,
@@ -17,7 +18,9 @@ __all__ = [
     "OBSERVED_SCHEMA_NAME",
     "OBSERVED_SCHEMA_VERSION",
     "TEXT_UNIT_TYPES",
+    "ObservedIndex",
     "audit_text_unit_layout",
+    "build_observed_index",
     "build_text_units",
     "classify_observed_page_roles",
     "classify_text_units_by_layout",

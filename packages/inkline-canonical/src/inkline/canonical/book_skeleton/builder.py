@@ -28,13 +28,37 @@ from inkline.canonical.book_skeleton.toc import (
 )
 from inkline.canonical.book_skeleton.toc_llm import normalize_llm_toc_entries
 from inkline.canonical.book_skeleton.validation import (
-    validate_book_skeleton_against_observed,
+    validate_book_skeleton_against_index,
 )
-from inkline.canonical.observed.schema import validate_observed_document
+from inkline.canonical.observed.index import ObservedIndex, build_observed_index
+from inkline.canonical.schema import ValidationError
 
 
 def build_book_skeleton_from_observed(
     document: dict[str, Any],
+    *,
+    observed_index: ObservedIndex | None = None,
+    llm_toc_entries: list[dict[str, Any]] | None = None,
+    llm_classification: dict[str, Any] | None = None,
+    llm_uncertain_entries: list[dict[str, Any]] | None = None,
+    llm_model: str | None = None,
+    llm_source: str | None = None,
+) -> dict[str, Any]:
+    index = observed_index or build_observed_index(document)
+    if str(document.get("metadata", {}).get("doc_id") or "") != index.doc_id:
+        raise ValidationError("ObservedDocument and ObservedIndex doc_id values differ")
+    return build_book_skeleton_from_index(
+        index,
+        llm_toc_entries=llm_toc_entries,
+        llm_classification=llm_classification,
+        llm_uncertain_entries=llm_uncertain_entries,
+        llm_model=llm_model,
+        llm_source=llm_source,
+    )
+
+
+def build_book_skeleton_from_index(
+    observed_index: ObservedIndex,
     *,
     llm_toc_entries: list[dict[str, Any]] | None = None,
     llm_classification: dict[str, Any] | None = None,
@@ -42,10 +66,9 @@ def build_book_skeleton_from_observed(
     llm_model: str | None = None,
     llm_source: str | None = None,
 ) -> dict[str, Any]:
-    validate_observed_document(document)
-    records = page_records(document)
+    records = page_records(observed_index)
     toc_pages = detect_toc_pages(records)
-    toc_text = "\n".join(observed_page_text(document, page) for page in toc_pages)
+    toc_text = "\n".join(observed_page_text(observed_index, page) for page in toc_pages)
     parsed_entries = parse_toc_entries(toc_text)
     entries_from_llm_toc = llm_toc_entries is not None
     if entries_from_llm_toc:
@@ -87,24 +110,24 @@ def build_book_skeleton_from_observed(
     add_printed_page_offset_candidates(entries, page_count=len(records))
     select_monotonic_start_pages(entries)
     prune_candidate_start_pages_to_toc_intervals(entries)
-    attach_selected_start_anchors(entries, document, toc_pages=toc_pages)
+    attach_selected_start_anchors(entries, observed_index, toc_pages=toc_pages)
     public_entries = [_public_toc_entry(entry) for entry in entries]
     skeleton = {
-        "metadata": metadata(document),
+        "metadata": metadata(observed_index),
         "toc_pages": toc_pages,
         "toc_entries": public_entries,
         "boundaries": boundaries(public_entries),
         "llm": llm_summary,
     }
-    validate_book_skeleton_against_observed(skeleton, document)
+    validate_book_skeleton_against_index(skeleton, observed_index)
     return skeleton
 
 
 def build_book_skeleton_toc_llm_input(document: dict[str, Any]) -> dict[str, Any]:
-    validate_observed_document(document)
-    records = page_records(document)
+    observed_index = build_observed_index(document)
+    records = page_records(observed_index)
     toc_pages = detect_toc_pages(records)
-    toc_text = "\n".join(observed_page_text(document, page) for page in toc_pages)
+    toc_text = "\n".join(observed_page_text(observed_index, page) for page in toc_pages)
     entries = parse_toc_entries(toc_text)
     infer_toc_levels(entries)
     assign_toc_hierarchy(entries)

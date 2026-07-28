@@ -10,7 +10,9 @@ from inkline.canonical import (
     BOOK_SKELETON_SCHEMA_VERSION,
     audit_book_skeleton,
     book_skeleton_toc_llm_prompt,
+    build_book_skeleton_from_index,
     build_book_skeleton_from_observed,
+    build_observed_index,
     make_observation,
     make_observed_document,
     make_observed_page,
@@ -18,6 +20,11 @@ from inkline.canonical import (
 )
 from inkline.canonical.book_skeleton.toc_llm import normalize_llm_toc_entries
 from inkline.canonical.schema import ValidationError
+
+
+class _ForbiddenIteration(list):
+    def __iter__(self):
+        raise AssertionError("ObservedDocument evidence was rescanned after indexing")
 
 
 def _document() -> dict:
@@ -106,6 +113,36 @@ def _document() -> dict:
         pages,
         observations,
     )
+
+
+def test_build_book_skeleton_from_index_matches_observed_wrapper() -> None:
+    document = _document()
+    observed_index = build_observed_index(document)
+
+    assert build_book_skeleton_from_index(observed_index) == build_book_skeleton_from_observed(
+        document
+    )
+
+
+def test_build_book_skeleton_from_observed_does_not_rescan_a_supplied_index() -> None:
+    document = _document()
+    observed_index = build_observed_index(document)
+    expected = build_book_skeleton_from_index(observed_index)
+    document["pages"] = _ForbiddenIteration(document["pages"])
+    document["observations"] = _ForbiddenIteration(document["observations"])
+
+    actual = build_book_skeleton_from_observed(document, observed_index=observed_index)
+
+    assert actual == expected
+
+
+def test_build_book_skeleton_rejects_an_index_for_another_document() -> None:
+    document = _document()
+    observed_index = build_observed_index(document)
+    document["metadata"]["doc_id"] = "another-book"
+
+    with pytest.raises(ValidationError, match="doc_id values differ"):
+        build_book_skeleton_from_observed(document, observed_index=observed_index)
 
 
 def _labeled_entry_document(toc_entry: str, body_titles: str | list[str]) -> dict:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
@@ -23,7 +24,7 @@ from inkline.canonical.book_skeleton.pages import (
     matching_toc_observation_ids,
     page_records,
 )
-from inkline.canonical.observed.schema import validate_observed_document
+from inkline.canonical.observed.index import ObservedIndex, build_observed_index
 from inkline.canonical.schema import ValidationError
 
 GLUED_TOC_ENTRY_PART_RE = re.compile(
@@ -46,14 +47,17 @@ def validate_book_skeleton(skeleton: dict[str, Any]) -> None:
 def validate_book_skeleton_against_observed(
     skeleton: dict[str, Any], document: dict[str, Any]
 ) -> None:
+    validate_book_skeleton_against_index(skeleton, build_observed_index(document))
+
+
+def validate_book_skeleton_against_index(
+    skeleton: dict[str, Any], observed_index: ObservedIndex
+) -> None:
     validate_book_skeleton(skeleton)
-    validate_observed_document(document)
-    if skeleton["metadata"]["doc_id"] != document["metadata"]["doc_id"]:
+    if skeleton["metadata"]["doc_id"] != observed_index.doc_id:
         raise ValidationError("BookSkeleton and ObservedDocument doc_id values differ")
-    observations = {
-        str(observation["observation_id"]): observation for observation in document["observations"]
-    }
-    records = page_records(document)
+    observations = observed_index.observations_by_id
+    records = page_records(observed_index)
     toc_page_numbers = skeleton["toc_pages"]
     toc_pages = set(toc_page_numbers)
     entries_by_anchor_id = {
@@ -74,7 +78,7 @@ def validate_book_skeleton_against_observed(
             if observation["page"] not in toc_pages or observation["role_hint"] != "toc_text":
                 raise ValidationError(f"toc_entries[{index}] TOC evidence is not on a TOC page")
         _validate_anchor_evidence_semantics(
-            document,
+            observed_index,
             records,
             toc_page_numbers,
             entry,
@@ -102,8 +106,8 @@ def validate_book_skeleton_against_observed(
 
 
 def _required_anchor_observation(
-    observations: dict[str, dict[str, Any]], observation_id: str
-) -> dict[str, Any]:
+    observations: Mapping[str, Mapping[str, Any]], observation_id: str
+) -> Mapping[str, Any]:
     observation = observations.get(observation_id)
     if observation is None:
         raise ValidationError(f"anchor references unknown observation: {observation_id}")
@@ -111,7 +115,7 @@ def _required_anchor_observation(
 
 
 def _validate_anchor_evidence_semantics(
-    document: dict[str, Any],
+    observed_index: ObservedIndex,
     records: list[dict[str, Any]],
     toc_pages: list[int],
     entry: dict[str, Any],
@@ -140,7 +144,7 @@ def _validate_anchor_evidence_semantics(
                 f"toc_entries[{index}] title evidence does not match direct candidate"
             )
     expected_toc_observation_ids = matching_toc_observation_ids(
-        document,
+        observed_index,
         entry,
         toc_pages=toc_pages,
     )
