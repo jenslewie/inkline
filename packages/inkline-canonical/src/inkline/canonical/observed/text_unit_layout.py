@@ -6,6 +6,8 @@ from itertools import pairwise
 from statistics import median
 from typing import Any, TypeGuard
 
+from inkline.canonical.page_layout.validation import validate_page_layout_analysis
+
 MIN_BODY_WIDTH_RATIO = 0.2
 MAX_BODY_WIDTH_RATIO = 0.92
 MIN_LOCAL_PROFILE_REFERENCES = 2
@@ -17,9 +19,17 @@ def audit_text_unit_layout(
     units: list[dict[str, Any]],
     pages: list[dict[str, Any]],
     observations: list[dict[str, Any]] | None = None,
+    *,
+    page_layout: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    page_layout_profile_map, profile_quality = _page_layout_profile_map(units, pages)
-    book_layout_profile = _book_layout_profile(page_layout_profile_map, units)
+    if page_layout is None:
+        page_layout_profile_map, profile_quality = _page_layout_profile_map(units, pages)
+        book_layout_profile = _book_layout_profile(page_layout_profile_map, units)
+    else:
+        validate_page_layout_analysis(page_layout)
+        page_layout_profile_map = _analysis_page_layout_profile_map(page_layout)
+        profile_quality = dict(page_layout["audit"]["profile_quality"])
+        book_layout_profile = dict(page_layout["book_layout_profile"])
     page_sizes = _page_sizes(pages)
     page_coverage = _page_coverage(pages, units, page_layout_profile_map, observations or [])
     unit_contexts = _unit_layout_contexts(units, book_layout_profile)
@@ -69,9 +79,12 @@ def audit_text_unit_layout(
 
 
 def classify_text_units_by_layout(
-    units: list[dict[str, Any]], pages: list[dict[str, Any]]
+    units: list[dict[str, Any]],
+    pages: list[dict[str, Any]],
+    *,
+    page_layout: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    audit = audit_text_unit_layout(units, pages)
+    audit = audit_text_unit_layout(units, pages, page_layout=page_layout)
     records_by_unit_id = {record["unit_id"]: record for record in audit["unit_records"]}
     classified = deepcopy(units)
     for unit in classified:
@@ -89,6 +102,23 @@ def classify_text_units_by_layout(
                 "signals": list(record["signals"]),
             }
     return classified
+
+
+def _analysis_page_layout_profile_map(
+    page_layout: dict[str, Any],
+) -> dict[int, dict[str, Any]]:
+    profiles: dict[int, dict[str, Any]] = {}
+    for page_record in page_layout["pages"]:
+        body_lane = page_record.get("body_lane")
+        if not isinstance(body_lane, dict):
+            continue
+        profile = dict(body_lane)
+        profile.pop("profile_scope", None)
+        profile["reference_unit_count"] = int(profile.pop("reference_fragment_count"))
+        if profile.get("profile_source") == "local":
+            profile.pop("profile_source")
+        profiles[int(page_record["page"])] = profile
+    return profiles
 
 
 def _page_layout_profile_map(

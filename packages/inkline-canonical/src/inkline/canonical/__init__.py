@@ -47,6 +47,12 @@ from inkline.canonical.observed import (
     make_observed_page,
     validate_observed_document,
 )
+from inkline.canonical.page_layout import (
+    PAGE_LAYOUT_ANALYSIS_SCHEMA_NAME,
+    PAGE_LAYOUT_ANALYSIS_SCHEMA_VERSION,
+    build_page_layout_analysis,
+    validate_page_layout_analysis,
+)
 from inkline.canonical.page_review import (
     build_page_review_plan,
     resolve_page_review,
@@ -83,6 +89,8 @@ __all__ = [
     "INTERNAL_CANONICAL_SCHEMA_VERSION",
     "OBSERVED_SCHEMA_NAME",
     "OBSERVED_SCHEMA_VERSION",
+    "PAGE_LAYOUT_ANALYSIS_SCHEMA_NAME",
+    "PAGE_LAYOUT_ANALYSIS_SCHEMA_VERSION",
     "SCHEMA_VERSION",
     "SECTION_MAP_SCHEMA_NAME",
     "SECTION_MAP_SCHEMA_VERSION",
@@ -104,6 +112,7 @@ __all__ = [
     "build_bookgraph_from_observed",
     "build_internal_canonical_from_observed",
     "build_observed_index",
+    "build_page_layout_analysis",
     "build_page_review_plan",
     "build_text_units",
     "classify_observed_page_roles",
@@ -134,6 +143,7 @@ __all__ = [
     "validate_document",
     "validate_internal_canonical",
     "validate_observed_document",
+    "validate_page_layout_analysis",
     "validate_page_review_decisions",
     "validate_resolved_page_review",
     "validate_section_map",

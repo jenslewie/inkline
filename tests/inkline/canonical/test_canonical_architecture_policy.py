@@ -13,6 +13,9 @@ CHECKED_CANONICAL_FILES = [
     ROOT / "packages/inkline-canonical/src/inkline/canonical/observed/index.py",
     ROOT / "packages/inkline-canonical/src/inkline/canonical/observed/text_unit_layout.py",
     ROOT / "packages/inkline-canonical/src/inkline/canonical/observed/text_units.py",
+    ROOT / "packages/inkline-canonical/src/inkline/canonical/page_layout/builder.py",
+    ROOT / "packages/inkline-canonical/src/inkline/canonical/page_layout/contract.py",
+    ROOT / "packages/inkline-canonical/src/inkline/canonical/page_layout/validation.py",
     ROOT / "packages/inkline-canonical/src/inkline/canonical/section_map/contract.py",
     ROOT / "packages/inkline-canonical/src/inkline/canonical/section_map/validation.py",
 ]
@@ -40,3 +43,16 @@ def test_canonical_construction_policy_is_non_semantic() -> None:
     }
 
     assert leaks == {str(path.relative_to(ROOT)): [] for path in checked}
+
+
+def test_page_layout_analysis_does_not_depend_on_text_unit_construction() -> None:
+    checked = list(
+        (ROOT / "packages/inkline-canonical/src/inkline/canonical/page_layout").glob("*.py")
+    )
+
+    leaks = {
+        str(path.relative_to(ROOT)): "inkline.canonical.observed.text_units" in path.read_text()
+        for path in checked
+    }
+
+    assert leaks == {str(path.relative_to(ROOT)): False for path in checked}
