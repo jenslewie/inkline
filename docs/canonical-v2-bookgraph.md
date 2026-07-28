@@ -19,21 +19,21 @@ Phase 1 新增 `canonical_v2.json` 作为 pre-release shadow artifact。它与�
 
 Canonical v2 的目标不是让各 builder 相互隔离后重复计算，也不是让一个可变大对象沿严格线性步骤不断改写。目标是显式依赖的可物化 DAG：每个阶段消费具名、已验证的上游 artifact，产生新的不可变 artifact；共享确定性计算在一次 run 中只执行一次。
 
-```text
-parser adapter -> ObservedDocument -> ObservedIndex
-  -> BookSkeleton + PageLayoutAnalysis
-  -> PageReview
-  -> TextFlow
-  -> SectionMap + VisualRelationReview + NoteResolution
-  -> BookGraph assembler
-  -> public BookGraph + internal canonical
+```mermaid
+flowchart LR
+    ingest["1. Input<br/>ObservedDocument"] --> evidence["2. Evidence<br/>ObservedIndex and PageLayoutAnalysis"]
+    evidence --> structure["3. Structure<br/>BookSkeleton and PageReview"]
+    structure --> text["4. Text<br/>TextFlow and SectionMap"]
+    text --> relations["5. Relations<br/>VisualRelationReview and NoteResolution"]
+    relations --> graph["6. Assembly<br/>BookGraph"]
 ```
 
 - `PageLayoutAnalysis` 提供 PageReview 与 TextFlow 共享的页面几何、版心和 observation-level layout evidence；PageReview 不应为了页面特征生成最终 TextUnits。
 - `TextFlow` 在 Skeleton 与 resolved PageReview 之后生成一次，是唯一创建 TextUnits 的阶段。
 - `SectionMap` 只负责 section/page/TextUnit membership 与 ranges，不负责把 observations 分类为 heading/paragraph 等类型，也不修补错误 TextUnit。
 - public BookGraph 与 internal canonical 必须从同一个 assembled artifact bundle 投射，不能分别重跑 observed pipeline。
-- orchestration 负责 DAG 调度、写盘、恢复和 golden 发布；domain builders 不选择输出路径。未来可以把调度迁移给 agent，但 agent 仍调用相同的 builders 与 validators，不把 domain contract 搬进 prompt。
+- `inkline-parse` 只负责 parser protocol、registry、run state，并在 ObservedDocument 边界结束。
+- `inkline-workflow` 负责 canonical DAG 调度、写盘、恢复和 golden 发布；domain builders 不选择输出路径。未来 LangChain/LangGraph adapter 仍调用相同的 framework-neutral stages、builders 与 validators，不把 domain contract 搬进 prompt。
 
 开发期 artifact 可以使用 `0.x-shadow` 等临时 schema version，并允许不兼容变化。pre-release 阶段不为旧 shadow artifact 编写 migration/compatibility code；contract 变化后直接重建 artifacts 与 goldens。首次发布前统一冻结一个 release schema version，之后只在发布边界升级 schema 并处理必要迁移。
 
@@ -643,24 +643,30 @@ page/resource membership by itself. SectionMap owns membership and ranges and
 may leave an offset-backed placement unresolved.
 
 The dependency graph is intentionally a materialized DAG rather than isolated rebuilds
-or a mutable linear pipeline:
+or a mutable linear pipeline. The project-wide architecture uses a stage overview plus
+an authoritative I/O table instead of one full graph with crossing fan-in edges. The
+local dependency relevant to SectionMap is:
 
-```text
-ObservedDocument ─> ObservedIndex ─> BookSkeleton ─────┐
-                  └> PageLayoutAnalysis ─> PageReview ─┼─> TextFlow ─┐
-BookSkeleton ──────────────────────────────────────────┘             ├─> SectionMap
-BookSkeleton ────────────────────────────────────────────────────────┤
-PageReview ──────────────────────────────────────────────────────────┘
-
-ObservedIndex + PageReview ─> VisualRelationReview
-TextFlow + SectionMap ───────> NoteResolution
-all confirmed artifacts ─────> BookGraph assembler
+```mermaid
+flowchart LR
+    skeleton["BookSkeleton"] --> section["SectionMap"]
+    review["PageReview"] --> section
+    flow["TextFlow"] --> section
+    section --> notes["NoteResolution"]
+    section --> graph["BookGraph assembler"]
 ```
+
+| Stage | Required inputs | Output |
+| --- | --- | --- |
+| TextFlow | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, `PageReview` | One authoritative TextFlow artifact |
+| SectionMap | `BookSkeleton`, `PageReview`, `TextFlow` | Section membership, ranges, standalone pages, and unresolved pages |
+| NoteResolution | `TextFlow`, `SectionMap` | Normalized notes and resolved references |
 
 The SectionMap business builder consumes `BookSkeleton`, resolved `PageReview`, and
 validated `TextFlow`; it does not need the entire ObservedDocument to rediscover facts.
-A separate cross-source validator may consume `ObservedIndex` or ObservedDocument to
-prove that referenced observation ids, pages, assets, and provenance exist.
+A separate cross-source validator consumes `ObservedIndex` to prove that referenced
+observation ids, pages, assets, and provenance exist. ObservedDocument is used once to
+construct the index upstream and is not passed into SectionMap.
 
 The planned internal contract has two complementary views:
 

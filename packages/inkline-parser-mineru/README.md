@@ -33,14 +33,16 @@ ObservedDocument -> parser-neutral canonical DAG
 
 `BookSkeleton`, `PageLayoutAnalysis`, `PageReview`, `TextFlow`, `SectionMap`, visual
 relations, note resolution, and BookGraph assembly belong to parser-neutral canonical
-builders and orchestration. MinerU fields may remain in explicit parser payloads for
-provenance, but they cannot control downstream contracts.
+builders in `inkline-canonical` and scheduling in the planned `inkline-workflow`
+package. `inkline-parse` owns the parser protocol/registry but not this canonical DAG.
+MinerU fields may remain in explicit parser payloads for provenance, but they cannot
+control downstream contracts.
 
 The current CLIs still orchestrate several shadow stages inside this package while the
 DAG is under construction. That is current runtime behavior, not the final ownership
 boundary. The migration must preserve the existing narrow Skeleton-only and
 PageReview-only commands while moving reusable stage builders out of MinerU-specific
-control flow.
+control flow and delegating their scheduling to `inkline-workflow`.
 
 ## BookSkeleton Only
 

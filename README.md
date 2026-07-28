@@ -9,16 +9,20 @@ already runs. The current release path still uses `canonical.json` for EPUB and 
 BookGraph remains the pre-release migration path.
 
 The target BookGraph path is an explicit artifact DAG rather than a collection of
-isolated rebuilds or a mutable linear document:
+isolated rebuilds or a mutable linear document. The overview deliberately shows only
+stage order; the architecture document contains the authoritative per-artifact input
+and output table.
 
-```text
-parser adapter -> ObservedDocument
-  -> BookSkeleton + PageLayoutAnalysis
-  -> PageReview
-  -> TextFlow (the single TextUnit artifact)
-  -> SectionMap + VisualRelationReview + NoteResolution
-  -> BookGraph assembler
-  -> public BookGraph + internal canonical
+```mermaid
+flowchart LR
+    ingest["1. Input normalization<br/>Parser to ObservedDocument"]
+    evidence["2. Evidence preparation<br/>ObservedIndex and PageLayoutAnalysis"]
+    structure["3. Book interpretation<br/>BookSkeleton and PageReview"]
+    text["4. Text structure<br/>TextFlow and SectionMap"]
+    relations["5. Relation resolution<br/>VisualRelationReview and NoteResolution"]
+    assembly["6. Assembly<br/>BookGraph assembler to BookGraph"]
+
+    ingest --> evidence --> structure --> text --> relations --> assembly
 ```
 
 Each stage consumes named upstream artifacts, validates its output, and may be
@@ -38,7 +42,8 @@ for the target DAG and the separately documented current runtime.
 | Path | Responsibility |
 | --- | --- |
 | [packages/inkline-canonical](packages/inkline-canonical/README.md) | Stable document contract, parser-neutral shadow contracts, validation, and IO. |
-| [packages/inkline-parse](packages/inkline-parse/README.md) | Parser protocol, registry, orchestration state, and non-PDF importers. |
+| [packages/inkline-parse](packages/inkline-parse/README.md) | Parser protocol, registry, parser run state, and non-PDF importers. |
+| `packages/inkline-workflow` (planned) | Framework-neutral canonical DAG scheduling, artifact materialization, and resume policy. |
 | [packages/inkline-parser-mineru](packages/inkline-parser-mineru/README.md) | MinerU adapter, raw artifact loading, MinerU normalization, and parser-specific repairs. |
 | [packages/inkline-epub](packages/inkline-epub/README.md) | `CanonicalDocument` to reflowable EPUB rendering. |
 | [packages/inkline-rag](packages/inkline-rag/README.md) | Canonical chunking, embeddings, FAISS indexing, and search. |

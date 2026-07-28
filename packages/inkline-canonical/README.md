@@ -75,22 +75,22 @@ inkline/canonical/
     footnote_text.py       Footnote text normalization utilities.
 ```
 
-The target development data flow is an explicit materialized DAG:
+The target development data flow is an explicit materialized DAG. The compact view
+shows stage order; exact fan-in remains explicit in the architecture I/O table.
 
-```text
-parser output -> ObservedDocument -> ObservedIndex
-  -> BookSkeleton + PageLayoutAnalysis
-  -> PageReview
-  -> TextFlow
-  -> SectionMap + VisualRelationReview + NoteResolution
-  -> BookGraph assembler
-  -> public BookGraph + internal canonical -> projections
+```mermaid
+flowchart LR
+    observed["ObservedDocument"] --> evidence["Evidence<br/>ObservedIndex and PageLayoutAnalysis"]
+    evidence --> structure["Structure<br/>BookSkeleton and PageReview"]
+    structure --> text["Text<br/>TextFlow and SectionMap"]
+    text --> relations["Relations<br/>VisualRelationReview and NoteResolution"]
+    relations --> graph["BookGraph assembly and projections"]
 ```
 
 `ObservedDocument`, `BookSkeleton`, `PageLayoutAnalysis`, `PageReview`, `TextFlow`,
 `SectionMap`, `BookGraph`, and `internal_canonical` are pre-release development
 artifacts. Each has a validator and may be materialized independently by the
-`inkline-parse` orchestration layer for golden review, resume, or debugging. Builders
+planned `inkline-workflow` layer for golden review, resume, or debugging. Builders
 do not choose output paths and do not mutate upstream artifacts. Existing EPUB/RAG
 flows still consume the current canonical contract until the BookGraph projection
 switch is complete.
@@ -108,6 +108,13 @@ During pre-release development, temporary schema versions such as `0.1-shadow` m
 change incompatibly. Do not add migration or backward-compatibility code for superseded
 shadow artifacts; regenerate them and their goldens. Freeze one release schema version
 before the first release, then handle future migrations only at release boundaries.
+
+`inkline-canonical` owns domain contracts, builders, validators, and the immutable
+artifact-bundle contract. It does not own execution order. The planned
+`inkline-workflow` package consumes those APIs and provides a deterministic scheduler,
+artifact store, and resume policy. A future LangChain/LangGraph adapter may invoke the
+same workflow stages without introducing agent-framework dependencies into canonical
+builders.
 
 `BookSkeleton` schema `0.2-shadow` records a `selected_start_anchor` exactly
 when `selected_start_page` is non-null. Its exact fields are `anchor_id`,
@@ -132,8 +139,9 @@ TOC title. Only confirmed membership becomes BookGraph `contains` edges and
 later RAG heading-path context.
 
 The SectionMap business builder should not require the full ObservedDocument. A
-separate cross-source validator may use `ObservedIndex` or ObservedDocument to prove
-that referenced observations, pages, assets, and provenance exist. This keeps raw
+separate cross-source validator consumes `ObservedIndex` to prove that referenced
+observations, pages, assets, and provenance exist. ObservedDocument is used once to
+construct that index upstream and is not passed into SectionMap. This keeps raw
 evidence auditing separate from section-assignment decisions.
 
 ## TOC LLM Boundary

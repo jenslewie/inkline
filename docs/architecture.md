@@ -10,73 +10,52 @@ set of isolated builders that rediscover the same facts nor a mutable document p
 through a rigid linear pipeline. Each builder consumes named upstream artifacts,
 returns a new immutable artifact, and performs each deterministic computation once.
 
-Solid arrows below are target data dependencies. The implementation-status notes
-after the diagram distinguish current code from the target architecture.
+One overview diagram cannot legibly show both stage order and every fan-in edge. The
+overview therefore shows only the six execution phases; the I/O table is the
+authoritative dependency definition.
 
 ```mermaid
-flowchart TD
-    source["PDF / EPUB / Word"] --> adapter["Parser adapter"]
+flowchart LR
+    ingest["1. Input normalization<br/>Parser to ObservedDocument"]
+    evidence["2. Evidence preparation<br/>ObservedIndex, PageLayoutAnalysis, PageAssets"]
+    structure["3. Book interpretation<br/>BookSkeleton and PageReview"]
+    text["4. Text structure<br/>TextFlow and SectionMap"]
+    relations["5. Relation resolution<br/>VisualRelationReview and NoteResolution"]
+    assembly["6. Assembly<br/>BookGraph assembler to public and internal views"]
 
-    subgraph release_v1["Current release path"]
-        legacy_builder["Legacy canonical builder"] --> canonical_v1["canonical.json"]
-        canonical_v1 --> release_products["EPUB and RAG"]
-    end
-    adapter --> legacy_builder
+    ingest --> evidence --> structure --> text --> relations --> assembly
+```
 
-    subgraph evidence["Parser-neutral evidence"]
-        observed["ObservedDocument"]
-        observed_index["ObservedIndex: in-memory lookup"]
-    end
-    adapter -->|"MinerU v2 path"| observed
-    observed --> observed_index
+| Builder or stage | Required inputs | Output | Acceptance gate |
+| --- | --- | --- | --- |
+| Parser adapter | Parser-specific source artifacts | `ObservedDocument` | ObservedDocument contract validation |
+| Observed index | `ObservedDocument` | `ObservedIndex` | Contract tests plus regenerated 13-book Skeleton golden comparison after Skeleton adopts the index |
+| Book skeleton | `ObservedIndex` | `BookSkeleton` | 13-book Skeleton golden comparison |
+| Page layout | `ObservedIndex` | `PageLayoutAnalysis` | Contract and geometry characterization tests |
+| Page review | `BookSkeleton`, `PageLayoutAnalysis` | `PageReview` | Staged regeneration and 13-book PageReview golden comparison |
+| Page assets | `ObservedDocument`, `PageReview` | `PageAssets` | Asset provenance and page-action validation |
+| Text flow | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, `PageReview` | `TextFlow` | 13-book smoke; one TextFlow build per workflow run |
+| Section map | `BookSkeleton`, `PageReview`, `TextFlow` | `SectionMap` | Task 2/3 automated gates; Task 4 manual acceptance |
+| Visual relations | `ObservedIndex`, `PageReview`, `PageAssets` | `VisualRelationReview` | Relation and unpaired-endpoint validation |
+| Note resolution | `TextFlow`, `SectionMap` | `NoteResolution` | Reference, scope, and unresolved-case validation |
+| BookGraph assembler | Validated `CanonicalArtifactBundle` | Public `BookGraph` and internal canonical view | Projection parity; no upstream recomputation |
 
-    subgraph interpretation["Book and page interpretation"]
-        skeleton["BookSkeleton: hierarchy and page anchors"]
-        page_layout["PageLayoutAnalysis: page geometry"]
-        page_review["PageReview: page identity and consumption"]
-        page_assets["Retained whole-page assets"]
-    end
-    observed_index --> skeleton
-    observed_index --> page_layout
-    skeleton --> page_review
-    page_layout --> page_review
-    observed --> page_assets
-    page_review --> page_assets
+Use small local diagrams when a fan-in deserves explanation. For example, the core
+page/text/section dependencies are:
 
-    subgraph text_structure["Text and relation artifacts"]
-        text_flow["TextFlow: the single TextUnit artifact"]
-        section_map["SectionMap"]
-        visual_review["VisualRelationReview"]
-        note_resolution["NoteResolution"]
-    end
-    observed_index --> text_flow
-    page_layout --> text_flow
-    skeleton --> text_flow
-    page_review --> text_flow
-    skeleton --> section_map
-    page_review --> section_map
-    text_flow --> section_map
-    observed_index --> visual_review
-    page_review --> visual_review
-    page_assets --> visual_review
-    text_flow --> note_resolution
-    section_map --> note_resolution
+```mermaid
+flowchart LR
+    skeleton["BookSkeleton"] --> review["PageReview"]
+    layout["PageLayoutAnalysis"] --> review
 
-    subgraph graph_projection["Graph assembly and projection"]
-        graph_assembler["BookGraph assembler"]
-        public_graph["Public BookGraph"]
-        internal_canonical["Internal canonical"]
-        graph_assembler --> public_graph
-        graph_assembler --> internal_canonical
-    end
-    skeleton --> graph_assembler
-    page_review --> graph_assembler
-    text_flow --> graph_assembler
-    section_map --> graph_assembler
-    visual_review --> graph_assembler
-    note_resolution --> graph_assembler
-    page_assets --> graph_assembler
-    public_graph -.->|"release migration target"| release_products
+    index["ObservedIndex"] --> flow["TextFlow"]
+    layout --> flow
+    skeleton --> flow
+    review --> flow
+
+    skeleton --> section["SectionMap"]
+    review --> section
+    flow --> section
 ```
 
 The important boundaries are:
@@ -173,10 +152,11 @@ affected development artifacts and goldens are regenerated. Before the first rel
 the selected contracts are frozen under one release schema version. After release,
 schema changes and migrations are handled at release boundaries.
 
-The explicit dependency graph is also the future agent boundary. A deterministic
-orchestrator owns scheduling and materialization now. A later agent may select, resume,
-or verify DAG nodes, but it must call the same builders and validators rather than move
-domain decisions into prompts.
+The explicit dependency graph is also the future agent boundary. The planned
+`inkline-workflow` package owns deterministic scheduling and materialization. A later
+LangChain/LangGraph adapter may select, resume, or verify DAG nodes, but it must call
+the same framework-neutral stages, builders, and validators rather than move domain
+decisions into prompts.
 
 ## Package Boundaries
 
@@ -184,7 +164,11 @@ domain decisions into prompts.
 - `inkline-llm` owns local model clients such as Ollama chat/vision helpers. It
   must not know about canonical documents, parser internals, RAG records, or note
   repair semantics.
-- `inkline-parse` owns the parser protocol, registry, task state, and orchestration.
+- `inkline-parse` owns the parser protocol, registry, and ingestion run state. It ends
+  at the parser-produced `ObservedDocument` and does not schedule canonical artifacts.
+- The planned `inkline-workflow` package owns canonical DAG stage declarations,
+  deterministic scheduling, artifact storage, materialization, and resume policy. It
+  contains no parser-specific or canonical domain decisions.
 - `inkline-parser-mineru` implements the protocol and owns MinerU-specific extraction,
   normalization, layout repair, note recovery, marker-locator prompts/evidence,
   and raw outputs. It may use `inkline-llm` for Qwen calls.
@@ -192,29 +176,32 @@ domain decisions into prompts.
 - `inkline-epub` consumes canonical JSON only.
 - `inkline-rag` consumes canonical JSON or chunk JSONL only. Answer-generation
   features may use `inkline-llm`, but must not import parser adapters.
-- `inkline-cli` wires packages together without owning parser behavior.
+- `inkline-cli` composes parsing with workflow execution without owning either parser
+  behavior or canonical domain decisions.
 
 ## Dependency Direction
 
 ```text
-inkline-canonical
-       ^
-       |
-inkline-parse <--- inkline-parser-mineru
-       ^
-       |
-inkline-cli ---> inkline-epub
+inkline-parser-mineru ---> inkline-parse ---> inkline-canonical
+inkline-workflow -------------------------> inkline-canonical
+
+inkline-cli ---> inkline-parse
+       |------> inkline-workflow
+       |------> inkline-epub
        \------> inkline-rag
 
-inkline-llm <--- inkline-parser-mineru
-      ^
-      \------ inkline-rag
+inkline-parser-mineru ---> inkline-llm <--- inkline-rag
 ```
 
 Parser adapters may depend on `inkline-parse` and `inkline-canonical`.
 The common packages must never import a concrete parser adapter.
 Installed adapters register themselves through the `inkline.parsers` entry-point
 group, so the CLI does not maintain a hard-coded parser list.
+
+`inkline-workflow` accepts an already validated `ObservedDocument`; it does not need
+to import `inkline-parse`. The CLI is the composition root that invokes a parser and
+then hands its output to the workflow. A future agent integration depends on
+`inkline-workflow`, not the reverse, so LangChain/LangGraph remains replaceable.
 
 `inkline-llm` is a shared service package, not a document contract. It provides
 transport and response-shaping helpers for local LLMs; domain-specific prompts,
