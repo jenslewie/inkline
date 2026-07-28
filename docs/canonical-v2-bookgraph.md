@@ -15,6 +15,28 @@
 
 Phase 1 新增 `canonical_v2.json` 作为 pre-release shadow artifact。它与现有 `canonical.json` 并行生成，只用于验证 BookGraph 的结构、证据链和 projection，不改变默认 EPUB/RAG 流程。
 
+## Target artifact DAG
+
+Canonical v2 的目标不是让各 builder 相互隔离后重复计算，也不是让一个可变大对象沿严格线性步骤不断改写。目标是显式依赖的可物化 DAG：每个阶段消费具名、已验证的上游 artifact，产生新的不可变 artifact；共享确定性计算在一次 run 中只执行一次。
+
+```text
+parser adapter -> ObservedDocument -> ObservedIndex
+  -> BookSkeleton + PageLayoutAnalysis
+  -> PageReview
+  -> TextFlow
+  -> SectionMap + VisualRelationReview + NoteResolution
+  -> BookGraph assembler
+  -> public BookGraph + internal canonical
+```
+
+- `PageLayoutAnalysis` 提供 PageReview 与 TextFlow 共享的页面几何、版心和 observation-level layout evidence；PageReview 不应为了页面特征生成最终 TextUnits。
+- `TextFlow` 在 Skeleton 与 resolved PageReview 之后生成一次，是唯一创建 TextUnits 的阶段。
+- `SectionMap` 只负责 section/page/TextUnit membership 与 ranges，不负责把 observations 分类为 heading/paragraph 等类型，也不修补错误 TextUnit。
+- public BookGraph 与 internal canonical 必须从同一个 assembled artifact bundle 投射，不能分别重跑 observed pipeline。
+- orchestration 负责 DAG 调度、写盘、恢复和 golden 发布；domain builders 不选择输出路径。未来可以把调度迁移给 agent，但 agent 仍调用相同的 builders 与 validators，不把 domain contract 搬进 prompt。
+
+开发期 artifact 可以使用 `0.x-shadow` 等临时 schema version，并允许不兼容变化。pre-release 阶段不为旧 shadow artifact 编写 migration/compatibility code；contract 变化后直接重建 artifacts 与 goldens。首次发布前统一冻结一个 release schema version，之后只在发布边界升级 schema 并处理必要迁移。
+
 shadow 期允许同时存在：
 
 ```text
@@ -274,6 +296,11 @@ uv run --extra mineru mineru-to-canonical \
 
 ### Phase 3.1 TextUnit aggregation
 
+This subsection records the existing incremental implementation history. The target
+ordering defined above supersedes its original direct `ObservedDocument -> TextUnit ->
+BookGraph` orchestration: the reusable algorithm moves behind the single TextFlow
+builder after Skeleton and resolved PageReview.
+
 Phase 3.1 在 ObservedDocument 和 BookGraph 之间新增内部 shadow 聚合层：
 
 ```text
@@ -282,7 +309,11 @@ ObservedDocument observations
   -> BookGraph from text units
 ```
 
-`TextUnit` 不是新的 release artifact，也不是下游 API。它是 canonical builder 内部的稳定文本单元，用来把 parser 输出的碎片化 observations 先聚合成段落候选，再进入 BookGraph node 构造。
+`TextUnit` 不是 release artifact，也不是下游公共 API。目标架构把它放在可独立验证和按需物化的 `TextFlow` 开发期 artifact 中，用来把 parser 输出的碎片化 observations 聚合成段落候选，再交给 SectionMap 与 BookGraph assembler。一个 canonical DAG run 只能生成一份 TextFlow；PageReview、public BookGraph 和 internal canonical 不得各自重建 TextUnits。
+
+TextFlow 构建发生在 BookSkeleton 与 resolved PageReview 之后。Skeleton 的 direct-anchor `title_observation_ids` 是不可跨越的结构边界；PageReview 的 `text_flow_action = exclude` 页面不能静默产生 reading-flow TextUnits。TextUnit 是 Inkline 可重建的中间结构，不是 MinerU 事实；如果一个 TextUnit 跨越两个已验证的 Skeleton title groups，必须修复 TextFlow builder 并重新生成，而不是由 SectionMap 包装或兼容错误结果。
+
+TextFlow 中有序的 TextUnits 是 SectionMap 与 BookGraph assembler 消费的权威 internal text units。现有 paragraph logical-splitting 行为在最终 `tu...` id 分配前折叠进 TextFlow；目标架构不再产生第二套相互竞争的 `lu...` identity namespace。
 
 Phase 3.1 只做同页、非语义聚合：
 
@@ -404,9 +435,9 @@ Phase 3 acceptance report 同时保留全量 `node_counts` 和 `page_role_counts
 ### Phase 4A PageReview
 
 Phase 4A is an internal bounded multimodal review between `BookSkeleton` and
-`BookGraph`. It can use the physical page image plus parser-neutral observation
-signals, but it does not rewrite observations, create visual assets, or resolve
-image-to-caption relationships.
+`TextFlow`. It consumes `PageLayoutAnalysis`, Skeleton context, and optionally the
+physical page image. It does not build final TextUnits, rewrite observations, create
+visual assets, or resolve image-to-caption relationships.
 
 `BookSkeleton.selected_start_page` is a **title anchor**, not evidence that all
 following physical pages belong to that title. `PageReview` consumes
@@ -611,15 +642,25 @@ where a section starts and why; it does not establish a section end page or
 page/resource membership by itself. SectionMap owns membership and ranges and
 may leave an offset-backed placement unresolved.
 
-The dependency graph is intentionally a DAG rather than a linear pipeline:
+The dependency graph is intentionally a materialized DAG rather than isolated rebuilds
+or a mutable linear pipeline:
 
 ```text
-ObservedDocument ──> BookSkeleton (TOC/title anchors) ─┐
-ObservedDocument ──> TextFlow units ───────────────────┼─> SectionMap ─> BookGraph contains edges
-ObservedDocument ──> PageReview ───────────────────────┘
-                         │
-                         └─> VisualRelationReview (4B) ─> BookGraph visual relations
+ObservedDocument ─> ObservedIndex ─> BookSkeleton ─────┐
+                  └> PageLayoutAnalysis ─> PageReview ─┼─> TextFlow ─┐
+BookSkeleton ──────────────────────────────────────────┘             ├─> SectionMap
+BookSkeleton ────────────────────────────────────────────────────────┤
+PageReview ──────────────────────────────────────────────────────────┘
+
+ObservedIndex + PageReview ─> VisualRelationReview
+TextFlow + SectionMap ───────> NoteResolution
+all confirmed artifacts ─────> BookGraph assembler
 ```
+
+The SectionMap business builder consumes `BookSkeleton`, resolved `PageReview`, and
+validated `TextFlow`; it does not need the entire ObservedDocument to rediscover facts.
+A separate cross-source validator may consume `ObservedIndex` or ObservedDocument to
+prove that referenced observation ids, pages, assets, and provenance exist.
 
 The planned internal contract has two complementary views:
 
@@ -661,7 +702,8 @@ text from an attached visual asset, but this is not a replacement for physical
 
 The initial implementation must:
 
-- map direct-anchor `title_observation_ids` to TextUnits/logical units; for an
+- map direct-anchor `title_observation_ids` to exact units in the validated TextFlow;
+  for an
   offset-only anchor, retain its validated physical page, TOC evidence, and two
   direct supports without inventing a title unit;
 - use TextFlow continuity, PageReview identities, and provenance to decide

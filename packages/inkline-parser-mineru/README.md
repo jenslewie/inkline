@@ -21,6 +21,27 @@ rules.
 - Does not define canonical public contracts; those belong in
   `inkline-canonical`.
 
+## Target DAG Boundary
+
+MinerU is an adapter, not the owner of book interpretation. In the target canonical
+artifact DAG, its durable parser-neutral responsibility ends at `ObservedDocument`:
+
+```text
+MinerU raw outputs -> inkline-parser-mineru -> ObservedDocument
+ObservedDocument -> parser-neutral canonical DAG
+```
+
+`BookSkeleton`, `PageLayoutAnalysis`, `PageReview`, `TextFlow`, `SectionMap`, visual
+relations, note resolution, and BookGraph assembly belong to parser-neutral canonical
+builders and orchestration. MinerU fields may remain in explicit parser payloads for
+provenance, but they cannot control downstream contracts.
+
+The current CLIs still orchestrate several shadow stages inside this package while the
+DAG is under construction. That is current runtime behavior, not the final ownership
+boundary. The migration must preserve the existing narrow Skeleton-only and
+PageReview-only commands while moving reusable stage builders out of MinerU-specific
+control flow.
+
 ## BookSkeleton Only
 
 Use `mineru-to-book-skeleton` when a BookSkeleton is the only requested output.

@@ -9,7 +9,8 @@ work evolves here before becoming the release canonical contract.
 - Owns the current `CanonicalDocument` schema, validation, migration helpers,
   and JSON IO.
 - Owns parser-neutral development contracts such as `ObservedDocument`,
-  `BookSkeleton`, `BookGraph`, and `internal_canonical`.
+  `BookSkeleton`, `PageLayoutAnalysis`, `PageReview`, `TextFlow`, `SectionMap`,
+  `BookGraph`, and `internal_canonical`.
 - Keeps parser-specific details out of public canonical fields. Parser payloads
   belong in provenance/debug payload fields.
 - Does not parse PDFs, call MinerU, render EPUB, or build RAG indexes.
@@ -27,8 +28,13 @@ inkline/canonical/
   observed/                Parser-neutral ObservedDocument layer.
     schema.py              Observation, page, and document contracts.
     page_roles.py          Geometry-first page-role candidates.
-    text_units.py          Natural text-unit construction.
-    text_unit_layout.py    Layout-profile and text-unit audit helpers.
+    text_units.py          Current on-demand TextUnit construction; target moves to TextFlow.
+    text_unit_layout.py    Current layout-profile and TextUnit audit helpers.
+
+  page_layout/             Target reusable PageLayoutAnalysis artifact.
+    contract.py            Parser-neutral page-layout development contract.
+    builder.py             ObservedDocument geometry -> reusable page analysis.
+    validation.py          Page-layout contract and provenance validation.
 
   book_skeleton/           TOC-driven book skeleton layer.
     contract.py            Skeleton schema and role contracts.
@@ -43,6 +49,22 @@ inkline/canonical/
     llm.py                  Strict LLM decision prompt and profile selection.
     resolution.py           Decision validation and resolved-review contract.
 
+  text_flow/               Target single TextFlow/TextUnit artifact.
+    contract.py            TextFlow and TextUnit development contract.
+    builder.py             Observed + layout + Skeleton + PageReview -> TextFlow.
+    validation.py          Unit ordering, boundary, and provenance validation.
+
+  section_map/             Section membership and physical-page placement.
+    contract.py            SectionMap development contract.
+    builder.py             Skeleton + PageReview + TextFlow -> SectionMap.
+    validation.py          Contract and cross-source validation.
+
+  visual_relations/        Planned asset-caption relation artifact.
+  note_resolution/         Planned unified note/reference relation artifact.
+
+  artifact_dag/            Artifact bundle contracts shared with orchestration.
+    artifacts.py           Immutable canonical artifact bundle types.
+
   bookgraph/               BookGraph v2 shadow layer.
     schema.py              Public BookGraph node/edge/evidence contract.
     from_observed.py       ObservedDocument -> BookGraph builder.
@@ -53,20 +75,39 @@ inkline/canonical/
     footnote_text.py       Footnote text normalization utilities.
 ```
 
-The intended development data flow is:
+The target development data flow is an explicit materialized DAG:
 
 ```text
-parser output -> ObservedDocument
-  -> BookSkeleton (TOC/title anchors)
-  -> TextFlow units
+parser output -> ObservedDocument -> ObservedIndex
+  -> BookSkeleton + PageLayoutAnalysis
   -> PageReview
-  -> SectionMap (planned) + VisualRelationReview (planned)
-  -> BookGraph -> projections
+  -> TextFlow
+  -> SectionMap + VisualRelationReview + NoteResolution
+  -> BookGraph assembler
+  -> public BookGraph + internal canonical -> projections
 ```
 
-`ObservedDocument`, `BookSkeleton`, `BookGraph`, and `internal_canonical` are
-pre-release development artifacts. Existing EPUB/RAG flows still consume the
-current canonical contract until the BookGraph projection switch is complete.
+`ObservedDocument`, `BookSkeleton`, `PageLayoutAnalysis`, `PageReview`, `TextFlow`,
+`SectionMap`, `BookGraph`, and `internal_canonical` are pre-release development
+artifacts. Each has a validator and may be materialized independently by the
+`inkline-parse` orchestration layer for golden review, resume, or debugging. Builders
+do not choose output paths and do not mutate upstream artifacts. Existing EPUB/RAG
+flows still consume the current canonical contract until the BookGraph projection
+switch is complete.
+
+The current runtime is earlier than this target. PageReview builds TextUnits to obtain
+layout evidence, while public BookGraph and internal canonical independently rebuild
+the observed pipeline. A complete run can therefore generate TextUnits three times.
+The target first extracts reusable `PageLayoutAnalysis`, then creates one validated
+TextFlow artifact after Skeleton and resolved PageReview and shares it with every
+downstream stage. TextFlow's ordered TextUnits are the authoritative internal text
+units; current paragraph logical-splitting behavior moves into TextFlow before final
+`tu...` ids are assigned rather than creating a second `lu...` namespace.
+
+During pre-release development, temporary schema versions such as `0.1-shadow` may
+change incompatibly. Do not add migration or backward-compatibility code for superseded
+shadow artifacts; regenerate them and their goldens. Freeze one release schema version
+before the first release, then handle future migrations only at release boundaries.
 
 `BookSkeleton` schema `0.2-shadow` records a `selected_start_anchor` exactly
 when `selected_start_page` is non-null. Its exact fields are `anchor_id`,
@@ -77,9 +118,11 @@ is `medium` confidence and has exactly two straddling direct anchors that agree
 on the offset. A selected start anchor proves where a section starts and why.
 It does not prove that later pages or resources belong to that section.
 
-The planned internal `SectionMap` consumes anchors by method. For
-`observed_title_match`, it maps `title_observation_ids` to TextUnits/logical
-units. For `printed_page_offset`, whose title evidence is empty, it uses the
+The planned internal `SectionMap` consumes `BookSkeleton`, resolved `PageReview`, and
+the single validated `TextFlow` artifact. It assigns already-classified units to
+sections; it does not classify paragraphs or repair invalid TextUnit boundaries. For
+`observed_title_match`, it maps `title_observation_ids` to exact TextFlow units. For
+`printed_page_offset`, whose title evidence is empty, it uses the
 validated physical `page`, matching `toc_observation_ids`, and two agreeing
 direct `supporting_anchor_ids`; it does not fabricate a title TextUnit or
 rediscover a heading. SectionMap still owns membership and ranges, may leave an
@@ -87,6 +130,11 @@ offset-backed placement unresolved, and must preserve both `standalone` and
 `unresolved` physical pages instead of assigning them to the nearest preceding
 TOC title. Only confirmed membership becomes BookGraph `contains` edges and
 later RAG heading-path context.
+
+The SectionMap business builder should not require the full ObservedDocument. A
+separate cross-source validator may use `ObservedIndex` or ObservedDocument to prove
+that referenced observations, pages, assets, and provenance exist. This keeps raw
+evidence auditing separate from section-assignment decisions.
 
 ## TOC LLM Boundary
 
