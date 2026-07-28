@@ -81,9 +81,11 @@ from inkline.canonical.section_map import (
     SECTION_MAP_SCHEMA_VERSION,
     SectionMapSources,
     build_section_map_evidence,
+    build_section_map_placements,
     validate_section_map,
     validate_section_map_against_sources,
     validate_section_map_evidence,
+    validate_section_map_placements,
     validate_section_map_sources,
 )
 from inkline.canonical.text_flow import (
@@ -139,6 +141,7 @@ __all__ = [
     "build_page_layout_analysis",
     "build_page_review_plan",
     "build_section_map_evidence",
+    "build_section_map_placements",
     "build_text_flow",
     "build_text_units",
     "classify_observed_page_roles",
@@ -175,6 +178,7 @@ __all__ = [
     "validate_section_map",
     "validate_section_map_against_sources",
     "validate_section_map_evidence",
+    "validate_section_map_placements",
     "validate_section_map_sources",
     "validate_text_flow",
     "validate_text_flow_against_sources",
