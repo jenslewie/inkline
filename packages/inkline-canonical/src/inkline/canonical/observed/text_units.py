@@ -10,16 +10,27 @@ TEXT_UNIT_TYPES = {"heading", "paragraph", "display_block", "list_item", "footno
 _MIN_FIRST_LINE_INDENT = 8.0
 
 
-def build_text_units(document: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def build_text_units(
+    document: dict[str, Any],
+    *,
+    included_pages: set[int] | None = None,
+    anchor_groups_by_observation_id: dict[str, tuple[str, ...]] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
     validate_observed_document(document)
     units: list[dict[str, Any]] = []
     ignored_counts: Counter[str] = Counter()
     page_sizes = _page_sizes(document["pages"])
-    visual_bboxes = _visual_bboxes(document["observations"])
-    image_bboxes = _region_bboxes(document["observations"], {"image_region"})
-    table_bboxes = _region_bboxes(document["observations"], {"table_region"})
-    ordered_observations = _ordered_observations(document["observations"])
+    observations = [
+        observation
+        for observation in document["observations"]
+        if included_pages is None or int(observation["page"]) in included_pages
+    ]
+    visual_bboxes = _visual_bboxes(observations)
+    image_bboxes = _region_bboxes(observations, {"image_region"})
+    table_bboxes = _region_bboxes(observations, {"table_region"})
+    ordered_observations = _ordered_observations(observations)
     caption_title_ids = _visual_caption_title_ids(ordered_observations, image_bboxes, page_sizes)
+    caption_title_ids.difference_update((anchor_groups_by_observation_id or {}).keys())
 
     for observation in ordered_observations:
         layout_role = None
@@ -38,9 +49,45 @@ def build_text_units(document: dict[str, Any]) -> tuple[list[dict[str, Any]], di
         units.append(_unit_from_observation(observation, len(units) + 1, unit_type, layout_role))
 
     _promote_table_heading_fragments(units, page_sizes, table_bboxes)
-    _merge_heading_cluster_fragments(units, page_sizes, visual_bboxes)
+    _merge_direct_anchor_fragments(units, anchor_groups_by_observation_id or {})
+    _merge_heading_cluster_fragments(
+        units,
+        page_sizes,
+        visual_bboxes,
+        anchor_groups_by_observation_id or {},
+    )
     _renumber_units(units)
     return units, dict(sorted(ignored_counts.items()))
+
+
+def _merge_direct_anchor_fragments(
+    units: list[dict[str, Any]],
+    anchor_groups_by_observation_id: dict[str, tuple[str, ...]],
+) -> None:
+    """Materialize each protected direct title anchor as one exact heading unit."""
+
+    groups = list(dict.fromkeys(anchor_groups_by_observation_id.values()))
+    for group in groups:
+        group_ids = set(group)
+        fragments = [
+            unit
+            for unit in units
+            if set(unit.get("observation_ids") or [])
+            and set(unit.get("observation_ids") or []) <= group_ids
+        ]
+        covered = {
+            observation_id
+            for fragment in fragments
+            for observation_id in fragment.get("observation_ids") or []
+        }
+        if covered != group_ids or not fragments:
+            continue
+        keeper = fragments[0]
+        keeper["unit_type"] = "heading"
+        keeper["attrs"]["structure_promotion"] = "direct_skeleton_anchor"
+        for fragment in fragments[1:]:
+            _merge_unit_fragment(keeper, fragment, "direct_skeleton_anchor")
+            units.remove(fragment)
 
 
 def _ordered_observations(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -236,6 +283,7 @@ def _merge_heading_cluster_fragments(
     units: list[dict[str, Any]],
     page_sizes: dict[int, dict[str, float]],
     visual_bboxes: dict[int, list[list[float]]],
+    anchor_groups_by_observation_id: dict[str, tuple[str, ...]],
 ) -> None:
     units_by_page: dict[int, list[dict[str, Any]]] = {}
     for unit in units:
@@ -252,23 +300,75 @@ def _merge_heading_cluster_fragments(
             for unit in page_units
             if unit.get("unit_type") == "heading" and _valid_bbox(unit.get("bbox"))
         ]
-        cluster_units = [
-            unit
-            for unit in page_units
-            if unit.get("unit_type") == "heading"
-            or (
-                unit.get("unit_type") == "paragraph"
-                and _heading_cluster_candidate(unit, heading_bboxes, page_width, page_height)
-            )
-        ]
-        if len(cluster_units) < 2:
+        for contiguous_cluster in _contiguous_heading_clusters(
+            page_units, heading_bboxes, page_width, page_height
+        ):
+            for cluster in _protected_heading_clusters(
+                contiguous_cluster, anchor_groups_by_observation_id
+            ):
+                if len(cluster) < 2:
+                    continue
+                keeper = cluster[0]
+                keeper["unit_type"] = "heading"
+                keeper["attrs"]["structure_promotion"] = "heading_cluster"
+                for fragment in cluster[1:]:
+                    _merge_unit_fragment(keeper, fragment, "heading_cluster")
+                    units.remove(fragment)
+
+
+def _contiguous_heading_clusters(
+    page_units: list[dict[str, Any]],
+    heading_bboxes: list[list[float]],
+    page_width: float,
+    page_height: float,
+) -> list[list[dict[str, Any]]]:
+    clusters: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    for unit in page_units:
+        candidate = unit.get("unit_type") == "heading" or (
+            unit.get("unit_type") == "paragraph"
+            and _heading_cluster_candidate(unit, heading_bboxes, page_width, page_height)
+        )
+        if candidate:
+            current.append(unit)
             continue
-        keeper = cluster_units[0]
-        keeper["unit_type"] = "heading"
-        keeper["attrs"]["structure_promotion"] = "heading_cluster"
-        for fragment in cluster_units[1:]:
-            _merge_unit_fragment(keeper, fragment, "heading_cluster")
-            units.remove(fragment)
+        if len(current) >= 2:
+            clusters.append(current)
+        current = []
+    if len(current) >= 2:
+        clusters.append(current)
+    return clusters
+
+
+def _protected_heading_clusters(
+    cluster_units: list[dict[str, Any]],
+    anchor_groups_by_observation_id: dict[str, tuple[str, ...]],
+) -> list[list[dict[str, Any]]]:
+    protected_keys = {
+        anchor_groups_by_observation_id[observation_id]
+        for unit in cluster_units
+        for observation_id in unit.get("observation_ids") or []
+        if observation_id in anchor_groups_by_observation_id
+    }
+    if not protected_keys:
+        return [cluster_units]
+    clusters: list[list[dict[str, Any]]] = []
+    by_key: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    for unit in cluster_units:
+        keys = {
+            anchor_groups_by_observation_id[observation_id]
+            for observation_id in unit.get("observation_ids") or []
+            if observation_id in anchor_groups_by_observation_id
+        }
+        if len(keys) != 1:
+            clusters.append([unit])
+            continue
+        key = next(iter(keys))
+        cluster = by_key.setdefault(key, [])
+        if not cluster:
+            clusters.append(cluster)
+        cluster.append(unit)
+    return clusters
 
 
 def _text_only_heading_cluster_page(page_units: list[dict[str, Any]]) -> bool:

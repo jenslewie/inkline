@@ -112,7 +112,7 @@ def test_internal_canonical_groups_public_and_debug_by_node() -> None:
     assert first_node["public"]["text"] == "First line"
     assert first_node["debug"]["attrs"]["source_observation_ids"] == ["obs000001"]
     assert first_node["debug"]["attrs"]["source_text_unit_id"] == "tu000001"
-    assert first_node["debug"]["attrs"]["source_logical_unit_id"] == "lu000001"
+    assert first_node["debug"]["attrs"]["source_logical_unit_id"] == "tu000001"
     assert internal["pipeline"]["text_units"][0]["text"] == "First line\nSecond line"
 
 

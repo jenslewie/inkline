@@ -215,6 +215,128 @@ def test_centered_fragments_on_text_only_heading_page_merge_into_one_heading() -
     assert units[0]["attrs"]["merge_reasons"] == ["heading_cluster", "heading_cluster"]
 
 
+def test_protected_heading_groups_stop_heading_cluster_merge() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Chapter\nTitle",
+                page=1,
+                bbox=[360, 300, 640, 360],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Subsection",
+                page=1,
+                bbox=[410, 400, 590, 430],
+                role_hint="title_text",
+                attrs={"reading_order": 2},
+            ),
+        ]
+    )
+
+    units, _ = build_text_units(
+        document,
+        anchor_groups_by_observation_id={
+            "obs000001": ("obs000001",),
+            "obs000002": ("obs000002",),
+        },
+    )
+
+    assert [unit["observation_ids"] for unit in units] == [
+        ["obs000001"],
+        ["obs000002"],
+    ]
+
+
+def test_direct_anchor_overrides_visual_caption_candidate() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "image_region",
+                page=1,
+                bbox=[100, 100, 900, 240],
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Protected chapter title",
+                page=1,
+                bbox=[300, 260, 700, 290],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Nearby text",
+                page=1,
+                bbox=[320, 300, 680, 325],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+        ]
+    )
+
+    units, _ = build_text_units(
+        document,
+        anchor_groups_by_observation_id={"obs000002": ("obs000002",)},
+    )
+
+    assert [unit["observation_ids"] for unit in units] == [
+        ["obs000002"],
+        ["obs000003"],
+    ]
+    assert units[0]["unit_type"] == "heading"
+
+
+def test_heading_cluster_does_not_cross_intervening_body_paragraph() -> None:
+    document = _document(
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="First heading",
+                page=1,
+                bbox=[420, 180, 580, 210],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Wide body paragraph",
+                page=1,
+                bbox=[100, 260, 900, 650],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Second heading",
+                page=1,
+                bbox=[410, 760, 590, 790],
+                role_hint="title_text",
+                attrs={"reading_order": 3},
+            ),
+        ]
+    )
+
+    units, _ = build_text_units(document)
+
+    assert [unit["observation_ids"] for unit in units] == [
+        ["obs000001"],
+        ["obs000002"],
+        ["obs000003"],
+    ]
+
+
 def test_wide_body_paragraph_after_heading_does_not_promote_to_heading() -> None:
     document = _document(
         [

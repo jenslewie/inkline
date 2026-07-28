@@ -77,6 +77,13 @@ from inkline.canonical.section_map import (
     validate_section_map,
     validate_section_map_against_sources,
 )
+from inkline.canonical.text_flow import (
+    TEXT_FLOW_SCHEMA_NAME,
+    TEXT_FLOW_SCHEMA_VERSION,
+    build_text_flow,
+    validate_text_flow,
+    validate_text_flow_against_sources,
+)
 from inkline.canonical.types import CanonicalBlock, CanonicalSource, NoteRef
 
 __all__ = [
@@ -94,6 +101,8 @@ __all__ = [
     "SCHEMA_VERSION",
     "SECTION_MAP_SCHEMA_NAME",
     "SECTION_MAP_SCHEMA_VERSION",
+    "TEXT_FLOW_SCHEMA_NAME",
+    "TEXT_FLOW_SCHEMA_VERSION",
     "TEXT_UNIT_TYPES",
     "CanonicalBlock",
     "CanonicalSource",
@@ -114,6 +123,7 @@ __all__ = [
     "build_observed_index",
     "build_page_layout_analysis",
     "build_page_review_plan",
+    "build_text_flow",
     "build_text_units",
     "classify_observed_page_roles",
     "classify_text_units_by_layout",
@@ -148,4 +158,6 @@ __all__ = [
     "validate_resolved_page_review",
     "validate_section_map",
     "validate_section_map_against_sources",
+    "validate_text_flow",
+    "validate_text_flow_against_sources",
 ]
