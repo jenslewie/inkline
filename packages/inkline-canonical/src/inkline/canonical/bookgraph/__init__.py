@@ -1,7 +1,9 @@
 from inkline.canonical.bookgraph.audit import audit_bookgraph
 from inkline.canonical.bookgraph.footnote_text import strip_footnote_marker
 from inkline.canonical.bookgraph.from_observed import (
+    build_bookgraph_from_artifacts,
     build_bookgraph_from_observed,
+    build_internal_canonical_from_artifacts,
     build_internal_canonical_from_observed,
 )
 from inkline.canonical.bookgraph.internal import (
@@ -36,7 +38,9 @@ __all__ = [
     "audit_bookgraph",
     "audit_bookgraph_notes",
     "bookgraph_to_blocks",
+    "build_bookgraph_from_artifacts",
     "build_bookgraph_from_observed",
+    "build_internal_canonical_from_artifacts",
     "build_internal_canonical_from_observed",
     "make_bookgraph",
     "make_edge",

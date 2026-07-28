@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from inkline.canonical.artifact_dag import CanonicalArtifactBundle
 from inkline.canonical.bookgraph.internal import make_internal_canonical
 from inkline.canonical.bookgraph.notes import resolve_bookgraph_note_refs
 from inkline.canonical.bookgraph.schema import (
@@ -22,6 +23,7 @@ from inkline.canonical.observed.text_unit_layout import (
 from inkline.canonical.observed.text_units import build_text_units
 from inkline.canonical.page_review import validate_resolved_page_review
 from inkline.canonical.text_flow.builder import finalize_text_units
+from inkline.canonical.text_flow.validation import validate_text_flow_against_sources
 
 INTERNAL_METADATA_PREFIXES = ("shadow_",)
 INTERNAL_NODE_ATTRS = {
@@ -68,6 +70,88 @@ def build_internal_canonical_from_observed(
             "bookgraph_debug_metadata": deepcopy(artifacts["debug_graph"]["metadata"]),
         },
     )
+
+
+def build_bookgraph_from_artifacts(bundle: CanonicalArtifactBundle) -> dict[str, Any]:
+    """Assemble a public BookGraph without reconstructing upstream artifacts."""
+
+    return _bookgraph_artifacts_from_bundle(bundle)["public_graph"]
+
+
+def build_internal_canonical_from_artifacts(
+    bundle: CanonicalArtifactBundle, public_graph: dict[str, Any]
+) -> dict[str, Any]:
+    """Assemble internal provenance from the same TextFlow used by the public graph."""
+
+    artifacts = _bookgraph_artifacts_from_bundle(bundle)
+    return make_internal_canonical(
+        public_graph,
+        pages=_internal_pages(public_graph, artifacts["page_role_records"], bundle.page_review),
+        nodes=_internal_nodes(public_graph, artifacts["debug_graph"]),
+        edges=_internal_edges(public_graph, artifacts["debug_graph"]),
+        evidence=_internal_evidence(public_graph, artifacts["debug_graph"]),
+        pipeline={
+            "observed_document": deepcopy(bundle.observed),
+            "text_flow": deepcopy(bundle.text_flow),
+            "layout_audit": deepcopy(artifacts["layout_audit"]),
+            "page_roles": deepcopy(artifacts["page_role_records"]),
+            "page_review": deepcopy(bundle.page_review),
+            "ignored_observation_counts": deepcopy(
+                bundle.text_flow["ignored_observation_counts"] if bundle.text_flow else {}
+            ),
+            "bookgraph_debug_metadata": deepcopy(artifacts["debug_graph"]["metadata"]),
+        },
+    )
+
+
+def _bookgraph_artifacts_from_bundle(
+    bundle: CanonicalArtifactBundle,
+) -> dict[str, Any]:
+    text_flow = bundle.text_flow
+    if text_flow is None:
+        raise ValueError("cannot assemble BookGraph while PageReview remains unresolved")
+    validate_text_flow_against_sources(
+        text_flow,
+        bundle.observed,
+        bundle.skeleton,
+        bundle.page_review,
+        bundle.page_layout,
+        observed_index=bundle.observed_index,
+    )
+    units = text_flow["text_units"]
+    page_role_records = bundle.page_review["pages"]
+    layout_audit = audit_text_unit_layout(
+        units,
+        bundle.observed["pages"],
+        bundle.observed["observations"],
+        page_layout=bundle.page_layout,
+    )
+    roles_by_page = page_roles_by_page(page_role_records)
+    parser = str(bundle.observed["metadata"].get("parser_name") or "")
+    nodes, evidence, edges, reading_order = _graph_records_for_units(units, parser, roles_by_page)
+    metadata = _bookgraph_metadata(bundle.observed)
+    metadata["shadow_ignored_observation_counts"] = text_flow["ignored_observation_counts"]
+    metadata["shadow_text_unit_layout_audit_summary"] = layout_audit["summary"]
+    metadata["shadow_text_unit_layout_page_coverage"] = layout_audit["page_coverage"]
+    metadata["shadow_text_unit_layout_profile_quality"] = layout_audit["profile_quality"]
+    metadata["shadow_page_roles"] = _canonical_page_role_records(page_role_records)
+    metadata["shadow_page_sizes"] = _canonical_page_sizes(bundle.observed["pages"])
+    debug_graph = resolve_bookgraph_note_refs(
+        make_bookgraph(
+            metadata,
+            nodes,
+            edges,
+            evidence,
+            assets=deepcopy(bundle.page_assets or {}),
+            projections={"reading_order": reading_order},
+        )
+    )
+    return {
+        "public_graph": _public_bookgraph(debug_graph),
+        "debug_graph": debug_graph,
+        "layout_audit": layout_audit,
+        "page_role_records": page_role_records,
+    }
 
 
 def build_observed_bookgraph_artifacts(

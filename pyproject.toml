@@ -41,6 +41,7 @@ inkline-parse = { workspace = true }
 inkline-parser-mineru = { workspace = true }
 inkline-epub = { workspace = true }
 inkline-rag = { workspace = true }
+inkline-workflow = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -52,6 +53,7 @@ pythonpath = [
   "packages/inkline-epub/src",
   "packages/inkline-rag/src",
   "packages/inkline-cli/src",
+  "packages/inkline-workflow/src",
 ]
 
 [tool.ruff]
@@ -65,6 +67,7 @@ src = [
   "packages/inkline-parse/src",
   "packages/inkline-parser-mineru/src",
   "packages/inkline-rag/src",
+  "packages/inkline-workflow/src",
   "tests",
 ]
 extend-exclude = [".venv", ".ruff_cache", "build", "dist", "data", "outputs"]
@@ -95,6 +98,7 @@ include = [
   "packages/inkline-parse/src",
   "packages/inkline-parser-mineru/src",
   "packages/inkline-rag/src",
+  "packages/inkline-workflow/src",
   "tests",
 ]
 exclude = [".venv", "build", "dist", "data", "outputs"]
@@ -106,6 +110,7 @@ extraPaths = [
   "packages/inkline-epub/src",
   "packages/inkline-rag/src",
   "packages/inkline-cli/src",
+  "packages/inkline-workflow/src",
 ]
 
 [tool.bandit]

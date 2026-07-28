@@ -9,22 +9,21 @@ from pathlib import Path
 from typing import Any
 
 from inkline.canonical import (
-    build_bookgraph_from_observed,
-    build_internal_canonical_from_observed,
-    build_page_layout_analysis,
+    build_bookgraph_from_artifacts,
+    build_internal_canonical_from_artifacts,
     validate_book_skeleton,
     validate_bookgraph,
     validate_internal_canonical,
     validate_observed_document,
-    validate_resolved_page_review,
 )
 from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_QWEN_MODEL
+from inkline.workflow import build_canonical_artifacts, canonical_artifact_stages
 
 from ..extraction.io import load_inputs, load_json
 from ..normalize.book_skeleton_shadow import build_book_skeleton_shadow
 from ..normalize.observed_shadow import build_observed_document_shadow
 from ..normalize.page_review_shadow import build_page_review_shadow
-from ..normalize.v2_page_assets import materialize_v2_page_assets
+from ..normalize.v2_page_assets import materialize_v2_page_assets_value
 from ..reconcile import resolve_source_pdf_path
 
 
@@ -56,55 +55,80 @@ def build_v2_artifacts(
         allow_missing_pdf_text=allow_missing_pdf_text,
     )
     _emit_stage(on_stage_complete, "observed", observed)
-    skeleton = build_book_skeleton_shadow(
-        observed,
-        use_llm=use_skeleton_llm,
-        source_pdf=source_pdf,
-        image_output_dir=output_dir / "book_skeleton_toc_llm_pages",
-        llm_model=llm_model,
-        llm_api_url=llm_api_url,
-        llm_timeout_seconds=llm_timeout_seconds,
+
+    def skeleton_builder(observed, observed_index):
+        del observed_index
+        return build_book_skeleton_shadow(
+            observed,
+            use_llm=use_skeleton_llm,
+            source_pdf=source_pdf,
+            image_output_dir=output_dir / "book_skeleton_toc_llm_pages",
+            llm_model=llm_model,
+            llm_api_url=llm_api_url,
+            llm_timeout_seconds=llm_timeout_seconds,
+        )
+
+    def page_review_builder(observed, skeleton, page_layout):
+        return build_page_review_shadow(
+            observed,
+            skeleton,
+            page_layout=page_layout,
+            use_llm=use_page_review_llm,
+            source_pdf=source_pdf,
+            image_output_dir=output_dir / "page_review_llm_pages",
+            llm_model=llm_model,
+            llm_api_url=llm_api_url,
+            llm_timeout_seconds=llm_timeout_seconds,
+            checkpoint_path=output_dir / "page_review.checkpoint.json",
+        )
+
+    def page_assets_builder(observed, page_review):
+        if page_review["candidate_pages"] and not use_page_review_llm:
+            return None
+        return materialize_v2_page_assets_value(
+            observed,
+            page_review,
+            source_pdf=source_pdf,
+            output_dir=output_dir,
+        )
+
+    stages = canonical_artifact_stages(
+        skeleton_builder=skeleton_builder,
+        page_review_builder=page_review_builder,
+        page_assets_builder=page_assets_builder,
     )
-    _emit_stage(on_stage_complete, "book_skeleton", skeleton)
-    page_layout = build_page_layout_analysis(observed)
-    page_review = build_page_review_shadow(
+    bundle = build_canonical_artifacts(
         observed,
-        skeleton,
-        page_layout=page_layout,
-        use_llm=use_page_review_llm,
-        source_pdf=source_pdf,
-        image_output_dir=output_dir / "page_review_llm_pages",
-        llm_model=llm_model,
-        llm_api_url=llm_api_url,
-        llm_timeout_seconds=llm_timeout_seconds,
-        checkpoint_path=output_dir / "page_review.checkpoint.json",
+        stages=stages,
+        on_stage_complete=lambda name, artifact: _emit_workflow_stage(
+            on_stage_complete, name, artifact
+        ),
     )
-    _emit_stage(on_stage_complete, "page_review", page_review)
     artifacts: dict[str, Any] = {
         "observed": observed,
-        "book_skeleton": skeleton,
-        "page_review": page_review,
+        "book_skeleton": bundle.skeleton,
+        "page_review": bundle.page_review,
+        "artifact_bundle": bundle,
         "public_graph": None,
         "internal_canonical": None,
     }
-    if page_review["candidate_pages"] and not use_page_review_llm:
+    if bundle.text_flow is None:
         return artifacts
-    validate_resolved_page_review(page_review)
-    observed_with_assets = materialize_v2_page_assets(
-        observed,
-        page_review,
-        source_pdf=source_pdf,
-        output_dir=output_dir,
-    )
-    artifacts["public_graph"] = build_bookgraph_from_observed(
-        observed_with_assets,
-        page_review=page_review,
-    )
-    artifacts["internal_canonical"] = build_internal_canonical_from_observed(
-        observed_with_assets,
-        page_review=page_review,
-    )
+    public_graph = build_bookgraph_from_artifacts(bundle)
+    artifacts["public_graph"] = public_graph
+    artifacts["internal_canonical"] = build_internal_canonical_from_artifacts(bundle, public_graph)
     return artifacts
+
+
+def _emit_workflow_stage(
+    callback: Callable[[str, dict[str, Any]], None] | None,
+    name: str,
+    artifact: Any,
+) -> None:
+    if name == "skeleton":
+        _emit_stage(callback, "book_skeleton", artifact)
+    elif name == "page_review":
+        _emit_stage(callback, name, artifact)
 
 
 def _emit_stage(

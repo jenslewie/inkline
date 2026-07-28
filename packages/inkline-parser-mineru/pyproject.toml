@@ -11,6 +11,7 @@ dependencies = [
   "inkline-canonical>=0.1.0",
   "inkline-llm>=0.1.0",
   "inkline-parse>=0.1.0",
+  "inkline-workflow>=0.1.0",
 ]
 
 [project.optional-dependencies]

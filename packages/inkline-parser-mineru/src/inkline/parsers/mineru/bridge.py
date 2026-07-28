@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from inkline.canonical import (
+    build_bookgraph_from_artifacts,
     build_bookgraph_from_observed,
+    build_internal_canonical_from_artifacts,
     build_internal_canonical_from_observed,
     validate_book_skeleton,
     validate_bookgraph,
@@ -23,6 +25,7 @@ from inkline.canonical import (
 from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_OLLAMA_KEEP_ALIVE, DEFAULT_QWEN_MODEL
 from inkline.parse.state import write_run_state
 from inkline.parse.types import ParseRequest, ParseResult
+from inkline.workflow import build_canonical_artifacts, canonical_artifact_stages
 
 DEFAULT_MINERU_BACKEND = "vlm-auto-engine"
 DEFAULT_MINERU_METHOD = "auto"
@@ -466,39 +469,58 @@ def _write_observed_shadow_if_requested(
         allow_missing_pdf_text=allow_missing_pdf_text,
     )
     validate_observed_document(observed)
+    stages = None
+    if book_skeleton_llm and book_skeleton_output:
+        from inkline.parsers.mineru.normalize.book_skeleton_shadow import (
+            build_book_skeleton_shadow,
+        )
+
+        def skeleton_builder(observed, observed_index):
+            del observed_index
+            return build_book_skeleton_shadow(
+                observed,
+                use_llm=True,
+                source_pdf=source_pdf,
+                image_output_dir=(
+                    Path(book_skeleton_output).parent
+                    / f"{Path(book_skeleton_output).stem}_toc_llm_pages"
+                ),
+                llm_model=book_skeleton_llm_model,
+                llm_api_url=book_skeleton_llm_api_url,
+                llm_timeout_seconds=book_skeleton_llm_timeout_seconds,
+            )
+
+        stages = canonical_artifact_stages(skeleton_builder=skeleton_builder)
+    bundle = build_canonical_artifacts(observed, stages=stages)
     if observed_output:
         out = Path(observed_output)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(observed, ensure_ascii=False, indent=2), encoding="utf-8")
-    if bookgraph_from_observed_output:
-        graph = build_bookgraph_from_observed(observed)
+    public_graph = None
+    if bookgraph_from_observed_output or internal_canonical_output:
+        public_graph = (
+            build_bookgraph_from_artifacts(bundle)
+            if bundle.text_flow is not None
+            else build_bookgraph_from_observed(observed)
+        )
+    if bookgraph_from_observed_output and public_graph is not None:
+        graph = public_graph
         validate_bookgraph(graph)
         out = Path(bookgraph_from_observed_output)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(graph, ensure_ascii=False, indent=2), encoding="utf-8")
     if internal_canonical_output:
-        internal = build_internal_canonical_from_observed(observed)
+        internal = (
+            build_internal_canonical_from_artifacts(bundle, public_graph)
+            if bundle.text_flow is not None and public_graph is not None
+            else build_internal_canonical_from_observed(observed)
+        )
         validate_internal_canonical(internal)
         out = Path(internal_canonical_output)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(internal, ensure_ascii=False, indent=2), encoding="utf-8")
     if book_skeleton_output:
-        from inkline.parsers.mineru.normalize.book_skeleton_shadow import (
-            build_book_skeleton_shadow,
-        )
-
-        skeleton = build_book_skeleton_shadow(
-            observed,
-            use_llm=book_skeleton_llm,
-            source_pdf=source_pdf,
-            image_output_dir=(
-                Path(book_skeleton_output).parent
-                / f"{Path(book_skeleton_output).stem}_toc_llm_pages"
-            ),
-            llm_model=book_skeleton_llm_model,
-            llm_api_url=book_skeleton_llm_api_url,
-            llm_timeout_seconds=book_skeleton_llm_timeout_seconds,
-        )
+        skeleton = bundle.skeleton
         validate_book_skeleton(skeleton)
         out = Path(book_skeleton_output)
         out.parent.mkdir(parents=True, exist_ok=True)

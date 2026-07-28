@@ -60,3 +60,13 @@ def test_materialize_v2_page_assets_renders_all_retained_visual_pages(
             "source": {"page": 2},
         },
     ]
+
+    page_assets = v2_page_assets.materialize_v2_page_assets_value(
+        observed,
+        page_review,
+        source_pdf="sample.pdf",
+        output_dir=tmp_path,
+    )
+
+    assert page_assets == materialized["assets"]
+    assert observed == {"assets": {"images": []}}

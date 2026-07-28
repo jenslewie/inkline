@@ -25,12 +25,6 @@ def test_v2_pipeline_builds_skeleton_and_review_before_bookgraph(monkeypatch, tm
     )
     monkeypatch.setattr(
         canonical_v2,
-        "build_page_layout_analysis",
-        lambda value: events.append(("page_layout", value)) or page_layout,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        canonical_v2,
         "build_page_review_shadow",
         lambda value, supplied_skeleton, **kwargs: (
             events.append(
@@ -47,30 +41,45 @@ def test_v2_pipeline_builds_skeleton_and_review_before_bookgraph(monkeypatch, tm
     )
     monkeypatch.setattr(
         canonical_v2,
-        "validate_resolved_page_review",
-        lambda value: events.append(("validated_review", value)),
-    )
-    monkeypatch.setattr(
-        canonical_v2,
-        "materialize_v2_page_assets",
+        "materialize_v2_page_assets_value",
         lambda value, supplied_review, **_kwargs: (
-            events.append(("assets", value, supplied_review)) or {"assets": {"images": []}}
+            events.append(("assets", value, supplied_review)) or {"images": []}
         ),
     )
     monkeypatch.setattr(
         canonical_v2,
-        "build_bookgraph_from_observed",
-        lambda value, **kwargs: (
-            events.append(("bookgraph", value, kwargs["page_review"])) or {"nodes": []}
-        ),
+        "build_bookgraph_from_artifacts",
+        lambda bundle: events.append(("bookgraph", bundle)) or {"nodes": []},
     )
     monkeypatch.setattr(
         canonical_v2,
-        "build_internal_canonical_from_observed",
-        lambda value, **kwargs: (
-            events.append(("internal", value, kwargs["page_review"])) or {"pages": []}
-        ),
+        "build_internal_canonical_from_artifacts",
+        lambda bundle, public: events.append(("internal", bundle, public)) or {"pages": []},
     )
+
+    bundle = SimpleNamespace(
+        skeleton=skeleton,
+        page_review=review,
+        text_flow={"text_units": []},
+        page_assets={"images": []},
+    )
+
+    def run_workflow(value, *, stages, on_stage_complete):
+        skeleton_stage = next(stage for stage in stages if stage.name == "skeleton")
+        review_stage = next(stage for stage in stages if stage.name == "page_review")
+        assets_stage = next(stage for stage in stages if stage.name == "page_assets")
+        built_skeleton = skeleton_stage.run(observed=value, observed_index=object())
+        on_stage_complete("skeleton", built_skeleton)
+        built_review = review_stage.run(
+            observed=value,
+            skeleton=built_skeleton,
+            page_layout=page_layout,
+        )
+        on_stage_complete("page_review", built_review)
+        assets_stage.run(observed=value, page_review=built_review)
+        return bundle
+
+    monkeypatch.setattr(canonical_v2, "build_canonical_artifacts", run_workflow)
 
     artifacts = canonical_v2.build_v2_artifacts(
         pages={},
@@ -87,7 +96,6 @@ def test_v2_pipeline_builds_skeleton_and_review_before_bookgraph(monkeypatch, tm
     assert events == [
         "observed",
         ("skeleton", observed),
-        ("page_layout", observed),
         (
             "review",
             observed,
@@ -95,10 +103,9 @@ def test_v2_pipeline_builds_skeleton_and_review_before_bookgraph(monkeypatch, tm
             page_layout,
             tmp_path / "page_review.checkpoint.json",
         ),
-        ("validated_review", review),
         ("assets", observed, review),
-        ("bookgraph", {"assets": {"images": []}}, review),
-        ("internal", {"assets": {"images": []}}, review),
+        ("bookgraph", bundle),
+        ("internal", bundle, {"nodes": []}),
     ]
     assert artifacts["public_graph"] == {"nodes": []}
     assert artifacts["internal_canonical"] == {"pages": []}

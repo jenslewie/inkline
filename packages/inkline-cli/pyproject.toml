@@ -12,6 +12,7 @@ dependencies = [
   "inkline-parse>=0.1.0",
   "inkline-epub>=0.1.0",
   "inkline-rag>=0.1.0",
+  "inkline-workflow>=0.1.0",
 ]
 
 [project.scripts]

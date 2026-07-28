@@ -1,3 +1,4 @@
+from inkline.canonical.artifact_dag import CanonicalArtifactBundle
 from inkline.canonical.book_skeleton import (
     BOOK_SKELETON_SCHEMA_NAME,
     BOOK_SKELETON_SCHEMA_VERSION,
@@ -17,7 +18,9 @@ from inkline.canonical.bookgraph import (
     INTERNAL_CANONICAL_SCHEMA_VERSION,
     audit_bookgraph,
     audit_bookgraph_notes,
+    build_bookgraph_from_artifacts,
     build_bookgraph_from_observed,
+    build_internal_canonical_from_artifacts,
     build_internal_canonical_from_observed,
     make_bookgraph,
     make_edge,
@@ -104,6 +107,7 @@ __all__ = [
     "TEXT_FLOW_SCHEMA_NAME",
     "TEXT_FLOW_SCHEMA_VERSION",
     "TEXT_UNIT_TYPES",
+    "CanonicalArtifactBundle",
     "CanonicalBlock",
     "CanonicalSource",
     "MigrationError",
@@ -118,7 +122,9 @@ __all__ = [
     "build_book_skeleton_from_index",
     "build_book_skeleton_from_observed",
     "build_book_skeleton_toc_llm_input",
+    "build_bookgraph_from_artifacts",
     "build_bookgraph_from_observed",
+    "build_internal_canonical_from_artifacts",
     "build_internal_canonical_from_observed",
     "build_observed_index",
     "build_page_layout_analysis",

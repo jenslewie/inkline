@@ -15,14 +15,35 @@ def materialize_v2_page_assets(
     output_dir: Path,
     dpi: int = 150,
 ) -> dict[str, Any]:
-    """Return an observed copy with assets for every page whose visual asset is retained."""
+    """Compatibility wrapper returning an observed copy with separately built assets."""
+
+    materialized = deepcopy(observed)
+    materialized["assets"] = materialize_v2_page_assets_value(
+        observed,
+        page_review,
+        source_pdf=source_pdf,
+        output_dir=output_dir,
+        dpi=dpi,
+    )
+    return materialized
+
+
+def materialize_v2_page_assets_value(
+    observed: dict[str, Any],
+    page_review: dict[str, Any],
+    *,
+    source_pdf: str | Path,
+    output_dir: Path,
+    dpi: int = 150,
+) -> dict[str, Any]:
+    """Build the PageAssets value without mutating or copying ObservedDocument."""
 
     visual_pages = _visual_asset_pages(page_review)
-    materialized = deepcopy(observed)
+    assets = deepcopy(observed.get("assets") or {})
     if not visual_pages:
-        return materialized
+        return assets
     image_paths = _render_page_assets(Path(source_pdf), visual_pages, output_dir, dpi=dpi)
-    images = materialized.setdefault("assets", {}).setdefault("images", [])
+    images = assets.setdefault("images", [])
     for record in page_review.get("pages") or []:
         if not isinstance(record, dict) or record.get("page") not in image_paths:
             continue
@@ -39,7 +60,7 @@ def materialize_v2_page_assets(
                 "source": {"page": page},
             }
         )
-    return materialized
+    return assets
 
 
 def _visual_asset_pages(page_review: dict[str, Any]) -> list[int]:

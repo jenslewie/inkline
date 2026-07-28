@@ -26,6 +26,7 @@ members = [
     "inkline-parse",
     "inkline-parser-mineru",
     "inkline-rag",
+    "inkline-workflow",
 ]
 
 [[package]]
@@ -1382,6 +1383,7 @@ dependencies = [
     { name = "inkline-epub" },
     { name = "inkline-parse" },
     { name = "inkline-rag" },
+    { name = "inkline-workflow" },
 ]
 
 [package.metadata]
@@ -1390,6 +1392,7 @@ requires-dist = [
     { name = "inkline-epub", editable = "packages/inkline-epub" },
     { name = "inkline-parse", editable = "packages/inkline-parse" },
     { name = "inkline-rag", editable = "packages/inkline-rag" },
+    { name = "inkline-workflow", editable = "packages/inkline-workflow" },
 ]
 
 [[package]]
@@ -1427,6 +1430,7 @@ dependencies = [
     { name = "inkline-canonical" },
     { name = "inkline-llm" },
     { name = "inkline-parse" },
+    { name = "inkline-workflow" },
 ]
 
 [package.optional-dependencies]
@@ -1441,6 +1445,7 @@ requires-dist = [
     { name = "inkline-canonical", editable = "packages/inkline-canonical" },
     { name = "inkline-llm", editable = "packages/inkline-llm" },
     { name = "inkline-parse", editable = "packages/inkline-parse" },
+    { name = "inkline-workflow", editable = "packages/inkline-workflow" },
     { name = "mineru", extras = ["core", "mlx", "pipeline"], marker = "extra == 'mineru'", specifier = ">=3.2.3,<4" },
     { name = "pillow", marker = "extra == 'mineru'", specifier = ">=10" },
     { name = "pymupdf", marker = "extra == 'mineru'", specifier = ">=1.24" },
@@ -1474,6 +1479,17 @@ requires-dist = [
     { name = "requests", marker = "extra == 'embeddings'", specifier = ">=2.31" },
 ]
 provides-extras = ["faiss", "embeddings"]
+
+[[package]]
+name = "inkline-workflow"
+version = "0.1.0"
+source = { editable = "packages/inkline-workflow" }
+dependencies = [
+    { name = "inkline-canonical" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "inkline-canonical", editable = "packages/inkline-canonical" }]
 
 [[package]]
 name = "isort"
