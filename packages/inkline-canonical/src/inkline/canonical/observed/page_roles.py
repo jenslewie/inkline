@@ -7,6 +7,8 @@ from typing import Any
 from inkline.canonical.observed.schema import validate_observed_document
 from inkline.canonical.observed.text_unit_layout import audit_text_unit_layout
 from inkline.canonical.observed.text_units import build_text_units
+from inkline.canonical.page_layout.validation import validate_page_layout_analysis
+from inkline.canonical.schema import ValidationError
 
 VISUAL_KINDS = {"image_region", "table_region"}
 TEXT_KINDS = {"text_region", "footnote_region"}
@@ -15,18 +17,20 @@ CONTENT_KINDS = VISUAL_KINDS | TEXT_KINDS
 VISUAL_DOMINANT_RATIO = 0.55
 SPARSE_TEXT_AREA_RATIO = 0.12
 CENTER_TOLERANCE_RATIO = 0.18
+MAX_SPARSE_VISUAL_TEXT_AREA_RATIO = 0.02
+MAX_ANNOTATED_VISUAL_TEXT_AREA_RATIO = 0.03
 
 
 def classify_observed_page_roles(
     document: dict[str, Any],
     *,
     layout_audit: dict[str, Any] | None = None,
+    page_layout: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     validate_observed_document(document)
-    resolved_layout_audit = (
-        layout_audit if layout_audit is not None else _build_layout_audit(document)
+    profile_pages, supplied_metrics = _resolve_layout_inputs(
+        document, layout_audit=layout_audit, page_layout=page_layout
     )
-    profile_pages = _profile_pages(resolved_layout_audit)
     observations_by_page = _observations_by_page(document["observations"])
     pages = sorted(document["pages"], key=lambda page: int(page["page"]))
     page_numbers = [int(page["page"]) for page in pages]
@@ -40,7 +44,9 @@ def classify_observed_page_roles(
     metrics_by_page: dict[int, dict[str, Any]] = {}
     for page in pages:
         page_number = int(page["page"])
-        metrics = _page_metrics(page, observations_by_page.get(page_number, []))
+        metrics = supplied_metrics.get(page_number)
+        if metrics is None:
+            metrics = _page_metrics(page, observations_by_page.get(page_number, []))
         metrics_by_page[page_number] = metrics
         roles.append(
             _page_role_record(
@@ -59,6 +65,26 @@ def classify_observed_page_roles(
     return _apply_book_level_scope_overrides(roles, metrics_by_page)
 
 
+def _resolve_layout_inputs(
+    document: dict[str, Any],
+    *,
+    layout_audit: dict[str, Any] | None,
+    page_layout: dict[str, Any] | None,
+) -> tuple[set[int], dict[int, dict[str, Any]]]:
+    if layout_audit is not None and page_layout is not None:
+        raise ValueError("provide layout_audit or page_layout, not both")
+    if page_layout is not None:
+        validate_page_layout_analysis(page_layout)
+        doc_id = str(document["metadata"].get("doc_id") or "")
+        if page_layout["metadata"]["doc_id"] != doc_id:
+            raise ValidationError("PageLayoutAnalysis doc_id does not match ObservedDocument")
+        return _analysis_profile_pages(page_layout), _analysis_metrics_by_page(page_layout)
+    resolved_layout_audit = (
+        layout_audit if layout_audit is not None else _build_layout_audit(document)
+    )
+    return _profile_pages(resolved_layout_audit), {}
+
+
 def page_roles_by_page(records: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
     return {int(record["page"]): record for record in records}
 
@@ -71,6 +97,19 @@ def _profile_pages(layout_audit: dict[str, Any]) -> set[int]:
         and isinstance(record.get("page"), int)
         and record.get("profile_scope") == "page"
     }
+
+
+def _analysis_profile_pages(page_layout: dict[str, Any]) -> set[int]:
+    return {
+        int(record["page"])
+        for record in page_layout["pages"]
+        if isinstance(record.get("body_lane"), dict)
+        and record["body_lane"].get("profile_scope") == "page"
+    }
+
+
+def _analysis_metrics_by_page(page_layout: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    return {int(record["page"]): dict(record["role_signals"]) for record in page_layout["pages"]}
 
 
 def _build_layout_audit(document: dict[str, Any]) -> dict[str, Any]:
@@ -663,7 +702,20 @@ def _is_visual_page_candidate(metrics: dict[str, Any]) -> bool:
         return True
     if metrics["visual_count"] >= 2 and metrics["visual_area_ratio"] >= 0.45:
         return True
-    return metrics["text_area_ratio"] <= 0.02 and metrics["visual_area_ratio"] >= 0.15
+    if (
+        metrics["text_area_ratio"] <= MAX_SPARSE_VISUAL_TEXT_AREA_RATIO
+        and metrics["visual_area_ratio"] >= 0.15
+    ):
+        return True
+    return _has_only_visual_annotation_text(metrics) and (
+        metrics["text_area_ratio"] <= MAX_ANNOTATED_VISUAL_TEXT_AREA_RATIO
+        and metrics["visual_area_ratio"] >= 0.15
+    )
+
+
+def _has_only_visual_annotation_text(metrics: dict[str, Any]) -> bool:
+    role_hints = set((metrics.get("role_hint_counts") or {}).keys())
+    return role_hints <= {"caption_text", "footnote_text", "unknown"}
 
 
 def _is_visual_verifier_candidate(metrics: dict[str, Any]) -> bool:

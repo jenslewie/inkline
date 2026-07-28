@@ -4,7 +4,11 @@ import json
 
 import pytest
 
-from inkline.canonical import make_observed_document, make_observed_page
+from inkline.canonical import (
+    build_page_layout_analysis,
+    make_observed_document,
+    make_observed_page,
+)
 from inkline.parsers.mineru.normalize import page_review_shadow
 
 
@@ -26,6 +30,7 @@ def test_page_review_checkpoint_resumes_after_a_failed_page(tmp_path, monkeypatc
     for image in (image_one, image_three):
         image.write_bytes(b"image")
     checkpoint_path = tmp_path / "page_review.checkpoint.json"
+    page_layout = build_page_layout_analysis(observed)
     monkeypatch.setattr(
         page_review_shadow,
         "classify_observed_page_roles",
@@ -57,6 +62,7 @@ def test_page_review_checkpoint_resumes_after_a_failed_page(tmp_path, monkeypatc
                 "boundaries": {"first_body_page": 4},
                 "toc_entries": [{"role": "front_matter", "selected_start_page": 1}],
             },
+            page_layout=page_layout,
             use_llm=True,
             source_pdf="sample.pdf",
             checkpoint_path=checkpoint_path,
@@ -84,6 +90,7 @@ def test_page_review_checkpoint_resumes_after_a_failed_page(tmp_path, monkeypatc
             "boundaries": {"first_body_page": 4},
             "toc_entries": [{"role": "front_matter", "selected_start_page": 1}],
         },
+        page_layout=page_layout,
         use_llm=True,
         source_pdf="sample.pdf",
         checkpoint_path=checkpoint_path,

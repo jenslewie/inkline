@@ -5,6 +5,7 @@ from pathlib import Path
 from inkline.canonical import (
     OBSERVED_SCHEMA_NAME,
     OBSERVED_SCHEMA_VERSION,
+    build_page_layout_analysis,
     classify_observed_page_roles,
     make_observation,
     make_observed_document,
@@ -47,6 +48,144 @@ def _layout_audit_with_body_profiles(pages: list[int]) -> dict:
             {"page": page, "profile_scope": "page", "profile_source": "local"} for page in pages
         ]
     }
+
+
+def test_classify_observed_page_roles_consumes_page_layout_signals(monkeypatch) -> None:
+    document = make_observed_document(
+        _metadata(),
+        [make_observed_page(1, width=1000, height=1000)],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body",
+                page=1,
+                bbox=[100, 100, 900, 220],
+                spans=[
+                    {"page": 1, "bbox": [100, 100, 900, 130]},
+                    {"page": 1, "bbox": [100, 150, 900, 180]},
+                    {"page": 1, "bbox": [100, 190, 900, 220]},
+                ],
+                role_hint="body_text",
+            )
+        ],
+    )
+    page_layout = build_page_layout_analysis(document)
+
+    def fail_if_metrics_are_rebuilt(*_args, **_kwargs):
+        raise AssertionError("page metrics were rebuilt from ObservedDocument")
+
+    monkeypatch.setattr(
+        "inkline.canonical.observed.page_roles._page_metrics",
+        fail_if_metrics_are_rebuilt,
+    )
+
+    roles = classify_observed_page_roles(document, page_layout=page_layout)
+
+    assert roles[0]["page_role"] == "text_flow_page"
+    assert roles[0]["signals"] == ["body_profile"]
+
+
+def test_page_roles_keep_table_with_small_caption_and_footnotes_visual() -> None:
+    document = make_observed_document(
+        _metadata(),
+        [make_observed_page(page, width=1000, height=1000) for page in range(1, 101)],
+        [
+            make_observation(
+                "obs000001",
+                "table_region",
+                page=50,
+                bbox=[110, 165, 895, 750],
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Table caption",
+                page=50,
+                bbox=[240, 95, 800, 120],
+                role_hint="caption_text",
+            ),
+            make_observation(
+                "obs000003",
+                "footnote_region",
+                text="Footnote one",
+                page=50,
+                bbox=[110, 785, 335, 805],
+                role_hint="footnote_text",
+            ),
+            make_observation(
+                "obs000004",
+                "footnote_region",
+                text="Footnote two",
+                page=50,
+                bbox=[110, 810, 335, 830],
+                role_hint="footnote_text",
+            ),
+            make_observation(
+                "obs000005",
+                "footnote_region",
+                text="Footnote three",
+                page=50,
+                bbox=[110, 835, 335, 855],
+                role_hint="footnote_text",
+            ),
+        ],
+    )
+    page_layout = build_page_layout_analysis(document)
+
+    roles = classify_observed_page_roles(document, page_layout=page_layout)
+
+    assert roles[49]["page_role"] == "visual_page"
+    assert roles[49]["signals"] == ["visual_sparse_text", "no_body_profile"]
+
+
+def test_page_roles_do_not_treat_title_labeled_image_as_sparse_visual() -> None:
+    document = make_observed_document(
+        _metadata(),
+        [make_observed_page(page, width=1000, height=1000) for page in range(1, 101)],
+        [
+            make_observation(
+                "obs000001",
+                "image_region",
+                page=50,
+                bbox=[160, 225, 870, 747],
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Appendix map",
+                page=50,
+                bbox=[400, 98, 660, 123],
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Map title",
+                page=50,
+                bbox=[160, 63, 270, 79],
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000004",
+                "footnote_region",
+                text="Map source note",
+                page=50,
+                bbox=[115, 829, 880, 850],
+                role_hint="footnote_text",
+            ),
+        ],
+    )
+    page_layout = build_page_layout_analysis(document)
+
+    roles = classify_observed_page_roles(document, page_layout=page_layout)
+
+    assert roles[49]["page_role"] == "text_flow_candidate"
+    assert roles[49]["signals"] == [
+        "text_flow_hint",
+        "no_body_profile",
+        "visual_verifier_candidate",
+    ]
 
 
 def test_canonical_v2_doc_defines_all_phase3_page_roles() -> None:

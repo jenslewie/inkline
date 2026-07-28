@@ -1,7 +1,54 @@
 from __future__ import annotations
 
-from inkline.canonical import make_observation, make_observed_document, make_observed_page
+from inkline.canonical import (
+    build_page_layout_analysis,
+    make_observation,
+    make_observed_document,
+    make_observed_page,
+)
 from inkline.parsers.mineru.normalize import page_review_shadow
+
+
+def test_page_review_shadow_consumes_page_layout_without_building_text_units(monkeypatch) -> None:
+    observed = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "zh-CN",
+            "source_file": "sample.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        [make_observed_page(1, width=1000, height=1400)],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Body",
+                page=1,
+                bbox=[100, 100, 900, 180],
+                spans=[
+                    {"page": 1, "bbox": [100, 100, 900, 130]},
+                    {"page": 1, "bbox": [100, 150, 900, 180]},
+                ],
+                role_hint="body_text",
+            )
+        ],
+    )
+    page_layout = build_page_layout_analysis(observed)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("PageReview constructed TextUnits")
+
+    monkeypatch.setattr(page_review_shadow, "build_text_units", fail_if_called, raising=False)
+
+    review = page_review_shadow.build_page_review_shadow(
+        observed,
+        {"boundaries": {"first_body_page": 1}},
+        page_layout=page_layout,
+    )
+
+    assert review["pages"][0]["page_role"] == "text_flow_page"
 
 
 def test_page_review_shadow_sends_only_selected_pages_to_llm(tmp_path, monkeypatch) -> None:
@@ -68,6 +115,7 @@ def test_page_review_shadow_sends_only_selected_pages_to_llm(tmp_path, monkeypat
     review = page_review_shadow.build_page_review_shadow(
         observed,
         {"boundaries": {"first_body_page": 4}},
+        page_layout=build_page_layout_analysis(observed),
         use_llm=True,
         source_pdf="sample.pdf",
         llm_model="qwen-test",
@@ -147,6 +195,7 @@ def test_page_review_shadow_requests_each_external_page_independently(
     page_review_shadow.build_page_review_shadow(
         observed,
         {"boundaries": {"first_body_page": 3}},
+        page_layout=build_page_layout_analysis(observed),
         use_llm=True,
         source_pdf="sample.pdf",
         llm_model="qwen-test",

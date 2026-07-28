@@ -56,6 +56,7 @@ def test_page_review_cli_writes_only_page_review_artifact(monkeypatch, tmp_path)
     calls = []
     observed = {"metadata": {"doc_id": "sample"}}
     skeleton = {"metadata": {"doc_id": "sample"}}
+    page_layout = {"metadata": {"doc_id": "sample", "schema_name": "layout"}}
     review = {"metadata": {"doc_id": "sample"}, "candidate_pages": [], "pages": []}
 
     monkeypatch.setattr(page_review_cli, "parse_args", lambda: args)
@@ -71,6 +72,12 @@ def test_page_review_cli_writes_only_page_review_artifact(monkeypatch, tmp_path)
         page_review_cli,
         "build_book_skeleton_shadow",
         lambda value, **_kwargs: skeleton if value is observed else None,
+    )
+    monkeypatch.setattr(
+        page_review_cli,
+        "build_page_layout_analysis",
+        lambda value: page_layout if value is observed else None,
+        raising=False,
     )
     monkeypatch.setattr(
         page_review_cli,
@@ -90,6 +97,7 @@ def test_page_review_cli_writes_only_page_review_artifact(monkeypatch, tmp_path)
             observed,
             skeleton,
             {
+                "page_layout": page_layout,
                 "use_llm": True,
                 "source_pdf": str(source_pdf),
                 "image_output_dir": tmp_path / "page_review_llm_pages",

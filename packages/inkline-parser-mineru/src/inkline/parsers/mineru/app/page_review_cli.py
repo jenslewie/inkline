@@ -8,7 +8,11 @@ import os
 from pathlib import Path
 from typing import Any
 
-from inkline.canonical import validate_book_skeleton, validate_observed_document
+from inkline.canonical import (
+    build_page_layout_analysis,
+    validate_book_skeleton,
+    validate_observed_document,
+)
 from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_QWEN_MODEL
 
 from ..extraction.io import load_inputs, load_json
@@ -96,9 +100,11 @@ def main() -> None:
         llm_timeout_seconds=args.llm_timeout_seconds,
     )
     validate_book_skeleton(skeleton)
+    page_layout = build_page_layout_analysis(observed)
     review = build_page_review_shadow(
         observed,
         skeleton,
+        page_layout=page_layout,
         use_llm=args.llm,
         source_pdf=args.source_pdf,
         image_output_dir=output_path.parent / "page_review_llm_pages",

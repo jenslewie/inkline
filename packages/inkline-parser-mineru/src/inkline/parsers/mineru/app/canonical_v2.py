@@ -11,6 +11,7 @@ from typing import Any
 from inkline.canonical import (
     build_bookgraph_from_observed,
     build_internal_canonical_from_observed,
+    build_page_layout_analysis,
     validate_book_skeleton,
     validate_bookgraph,
     validate_internal_canonical,
@@ -65,9 +66,11 @@ def build_v2_artifacts(
         llm_timeout_seconds=llm_timeout_seconds,
     )
     _emit_stage(on_stage_complete, "book_skeleton", skeleton)
+    page_layout = build_page_layout_analysis(observed)
     page_review = build_page_review_shadow(
         observed,
         skeleton,
+        page_layout=page_layout,
         use_llm=use_page_review_llm,
         source_pdf=source_pdf,
         image_output_dir=output_dir / "page_review_llm_pages",

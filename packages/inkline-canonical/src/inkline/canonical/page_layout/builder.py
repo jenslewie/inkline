@@ -39,7 +39,7 @@ def build_page_layout_analysis(
         cast(dict[str, Any], observation) for observation in index.observations_by_id.values()
     ]
     page_sizes = _page_sizes(pages)
-    fragments = _layout_fragments(observations)
+    fragments = _layout_fragments(observations, page_sizes)
     page_profile_map, profile_quality = _page_layout_profile_map(fragments, page_sizes)
     book_profile = _book_layout_profile(page_profile_map, fragments)
     observations_by_page = _observations_by_page(observations)
@@ -77,12 +77,17 @@ def build_page_layout_analysis(
     return analysis
 
 
-def _layout_fragments(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _layout_fragments(
+    observations: list[dict[str, Any]], page_sizes: dict[int, dict[str, float]]
+) -> list[dict[str, Any]]:
     fragments: list[dict[str, Any]] = []
+    title_cluster_pages = _title_cluster_pages(observations, page_sizes)
     for observation in sorted(observations, key=_observation_order):
         if observation.get("role_hint") != "body_text":
             continue
         page = int(observation["page"])
+        if page in title_cluster_pages:
+            continue
         bboxes = _observation_bboxes(observation)
         attrs_value = observation.get("attrs")
         attrs = attrs_value if isinstance(attrs_value, dict) else {}
@@ -96,6 +101,50 @@ def _layout_fragments(observations: list[dict[str, Any]]) -> list[dict[str, Any]
                 }
             )
     return fragments
+
+
+def _title_cluster_pages(
+    observations: list[dict[str, Any]], page_sizes: dict[int, dict[str, float]]
+) -> set[int]:
+    grouped = _observations_by_page(observations)
+    return {
+        page
+        for page, page_observations in grouped.items()
+        if _is_title_cluster_page(page_observations, page_sizes.get(page, {}))
+    }
+
+
+def _is_title_cluster_page(observations: list[dict[str, Any]], page_size: dict[str, float]) -> bool:
+    if any(observation.get("kind") in VISUAL_KINDS for observation in observations):
+        return False
+    text = [
+        observation
+        for observation in observations
+        if observation.get("kind") == "text_region"
+        and observation.get("role_hint") in {"title_text", "body_text"}
+        and _valid_bbox(observation.get("bbox"))
+    ]
+    title_bboxes = [
+        observation["bbox"] for observation in text if observation.get("role_hint") == "title_text"
+    ]
+    body_bboxes = [
+        observation["bbox"] for observation in text if observation.get("role_hint") == "body_text"
+    ]
+    width = float(page_size.get("width") or 0.0)
+    height = float(page_size.get("height") or 0.0)
+    if not 2 <= len(text) <= 4 or not title_bboxes or not body_bboxes or width <= 0 or height <= 0:
+        return False
+    page_center = width / 2.0
+    min_title_top = min(float(bbox[1]) for bbox in title_bboxes)
+    max_title_bottom = max(float(bbox[3]) for bbox in title_bboxes)
+    vertical_margin = height * 0.12
+    return all(
+        _width(bbox) <= width * 0.55
+        and abs((float(bbox[0]) + float(bbox[2])) / 2.0 - page_center) <= width * 0.12
+        and float(bbox[1]) >= min_title_top - vertical_margin
+        and float(bbox[3]) <= max_title_bottom + vertical_margin
+        for bbox in body_bboxes
+    )
 
 
 def _observation_order(observation: dict[str, Any]) -> tuple[int, int, float, float, str]:
@@ -347,7 +396,7 @@ def _page_record(
         "coverage": {
             "profile_status": "profiled"
             if body_lane is not None
-            else _missing_profile_reason(page, fragments, observations)
+            else _missing_profile_reason(page, page_size, fragments, observations)
         },
         "role_signals": _role_signals(page_size, observations),
     }
@@ -382,8 +431,13 @@ def _body_lane_record(profile: dict[str, Any], book_profile: dict[str, Any]) -> 
 
 
 def _missing_profile_reason(
-    page: int, fragments: list[dict[str, Any]], observations: list[dict[str, Any]]
+    page: int,
+    page_size: dict[str, float],
+    fragments: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
 ) -> str:
+    if _is_title_cluster_page(observations, page_size):
+        return "title_cluster"
     page_fragments = [fragment for fragment in fragments if int(fragment["page"]) == page]
     body_observations = [
         observation for observation in observations if observation.get("role_hint") == "body_text"

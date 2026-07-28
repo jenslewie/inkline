@@ -10,9 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from inkline.canonical import (
-    audit_text_unit_layout,
     build_page_review_plan,
-    build_text_units,
     classify_observed_page_roles,
     resolve_page_review,
     validate_page_review_decisions,
@@ -53,6 +51,7 @@ def build_page_review_shadow(
     observed: dict[str, Any],
     skeleton: dict[str, Any],
     *,
+    page_layout: dict[str, Any],
     use_llm: bool = False,
     source_pdf: str | Path | None = None,
     image_output_dir: str | Path | None = None,
@@ -63,9 +62,7 @@ def build_page_review_shadow(
 ) -> dict[str, Any]:
     """Build a deterministic plan, then resolve only selected pages with the LLM."""
 
-    text_units, _ignored_counts = build_text_units(observed)
-    layout_audit = audit_text_unit_layout(text_units, observed["pages"], observed["observations"])
-    page_roles = classify_observed_page_roles(observed, layout_audit=layout_audit)
+    page_roles = classify_observed_page_roles(observed, page_layout=page_layout)
     if source_pdf is not None and Path(source_pdf).is_file():
         page_roles = _add_pre_body_raster_visual_signals(page_roles, skeleton, Path(source_pdf))
     plan = build_page_review_plan(observed, skeleton, page_roles)

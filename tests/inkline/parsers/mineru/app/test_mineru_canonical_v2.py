@@ -7,6 +7,7 @@ from inkline.parsers.mineru.app import canonical_v2
 
 def test_v2_pipeline_builds_skeleton_and_review_before_bookgraph(monkeypatch, tmp_path) -> None:
     observed = {"assets": {}, "metadata": {"doc_id": "sample"}}
+    page_layout = {"metadata": {"doc_id": "sample", "schema_name": "layout"}}
     skeleton = {"boundaries": {"first_body_page": 3}}
     review = {"candidate_pages": [], "pages": []}
     events = []
@@ -24,9 +25,24 @@ def test_v2_pipeline_builds_skeleton_and_review_before_bookgraph(monkeypatch, tm
     )
     monkeypatch.setattr(
         canonical_v2,
+        "build_page_layout_analysis",
+        lambda value: events.append(("page_layout", value)) or page_layout,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        canonical_v2,
         "build_page_review_shadow",
         lambda value, supplied_skeleton, **kwargs: (
-            events.append(("review", value, supplied_skeleton, kwargs["checkpoint_path"])) or review
+            events.append(
+                (
+                    "review",
+                    value,
+                    supplied_skeleton,
+                    kwargs["page_layout"],
+                    kwargs["checkpoint_path"],
+                )
+            )
+            or review
         ),
     )
     monkeypatch.setattr(
@@ -71,7 +87,14 @@ def test_v2_pipeline_builds_skeleton_and_review_before_bookgraph(monkeypatch, tm
     assert events == [
         "observed",
         ("skeleton", observed),
-        ("review", observed, skeleton, tmp_path / "page_review.checkpoint.json"),
+        ("page_layout", observed),
+        (
+            "review",
+            observed,
+            skeleton,
+            page_layout,
+            tmp_path / "page_review.checkpoint.json",
+        ),
         ("validated_review", review),
         ("assets", observed, review),
         ("bookgraph", {"assets": {"images": []}}, review),

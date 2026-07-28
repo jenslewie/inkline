@@ -210,3 +210,41 @@ def test_validate_page_layout_analysis_rejects_incomplete_body_lane() -> None:
 
     with pytest.raises(ValidationError, match=r"pages\[0\]\.body_lane"):
         validate_page_layout_analysis(analysis)
+
+
+def test_sparse_centered_title_cluster_body_hints_do_not_define_body_lane() -> None:
+    document = make_observed_document(
+        _document()["metadata"],
+        [make_observed_page(1, width=1000, height=1000)],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text="Chapter label",
+                page=1,
+                bbox=[300, 250, 700, 280],
+                role_hint="body_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="Chapter title",
+                page=1,
+                bbox=[350, 330, 650, 370],
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="Chapter subtitle",
+                page=1,
+                bbox=[300, 420, 700, 450],
+                role_hint="body_text",
+            ),
+        ],
+    )
+
+    analysis = build_page_layout_analysis(document)
+
+    assert analysis["pages"][0]["body_lane"] is None
+    assert analysis["pages"][0]["coverage"] == {"profile_status": "title_cluster"}
