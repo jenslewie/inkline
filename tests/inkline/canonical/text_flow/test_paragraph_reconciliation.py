@@ -260,6 +260,36 @@ def test_unproven_multi_page_right_paragraph_is_not_absorbed() -> None:
     assert "merge_events" not in reconciled[1]["attrs"]
 
 
+@pytest.mark.parametrize(
+    "right_pages",
+    [
+        [2, 3, 2],
+        [],
+        None,
+        "2",
+        [2, True, 2],
+        [2, False, 2],
+        [2, "2", 2],
+        [2, 2.0, 2],
+    ],
+    ids=[
+        "hidden-extra-page",
+        "empty",
+        "none",
+        "not-a-list",
+        "true-page",
+        "false-page",
+        "string-page",
+        "float-page",
+    ],
+)
+def test_noncanonical_right_pages_reject_paragraph_merge(right_pages: Any) -> None:
+    records, pages, page_layout = _cross_page_pair()
+    records[1]["pages"] = right_pages
+
+    assert reconcile_cross_page_paragraphs(records, pages, page_layout) == records
+
+
 @pytest.mark.parametrize("right_type", ["display_block", "heading", "list_item"])
 def test_paragraph_does_not_cross_different_type(right_type: str) -> None:
     records, pages, page_layout = _cross_page_pair("paragraph", right_type)
@@ -335,6 +365,28 @@ def test_non_finite_first_line_metrics_reject_paragraph_merge(
     assert reconcile_cross_page_paragraphs(records, pages, page_layout) == records
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("first_line_indent", True),
+        ("first_line_indent", False),
+        ("first_line_indent", "20"),
+        ("char_width", True),
+        ("char_width", False),
+        ("char_width", "20"),
+    ],
+)
+def test_coerced_first_line_metrics_reject_paragraph_merge(
+    field: str,
+    value: bool | str,
+) -> None:
+    records, pages, page_layout = _cross_page_pair()
+    metrics = records[1]["attrs"]["text_line_metrics_by_observation"]["right"]
+    metrics[field] = value
+
+    assert reconcile_cross_page_paragraphs(records, pages, page_layout) == records
+
+
 @pytest.mark.parametrize("coordinate", range(4), ids=["x1", "y1", "x2", "y2"])
 @pytest.mark.parametrize("value", [math.nan, math.inf], ids=["nan", "inf"])
 def test_non_finite_bbox_coordinate_rejects_paragraph_merge(
@@ -344,6 +396,35 @@ def test_non_finite_bbox_coordinate_rejects_paragraph_merge(
     records, pages, page_layout = _cross_page_pair()
     records[1]["bbox"][coordinate] = value
     records[1]["spans"][0]["bbox"][coordinate] = value
+
+    assert reconcile_cross_page_paragraphs(records, pages, page_layout) == records
+
+
+@pytest.mark.parametrize("value", [True, False, "20"], ids=["true", "false", "string"])
+def test_coerced_bbox_coordinate_rejects_paragraph_merge(value: bool | str) -> None:
+    records, pages, page_layout = _cross_page_pair()
+    records[1]["bbox"][1] = value
+    records[1]["spans"][0]["bbox"][1] = value
+
+    assert reconcile_cross_page_paragraphs(records, pages, page_layout) == records
+
+
+@pytest.mark.parametrize(
+    "spans",
+    [
+        [{"page": 2, "bbox": [100.0, 160.0, 900.0, 160.0]}],
+        [
+            {"page": 2, "bbox": [100.0, 100.0, 900.0, 160.0]},
+            {"page": 2, "bbox": [100.0, 160.0, 900.0, 160.0]},
+        ],
+    ],
+    ids=["only-invalid-target-span", "mixed-valid-and-invalid-target-spans"],
+)
+def test_invalid_target_page_span_cannot_fall_back_to_record_bbox(
+    spans: list[dict[str, Any]],
+) -> None:
+    records, pages, page_layout = _cross_page_pair()
+    records[1]["spans"] = deepcopy(spans)
 
     assert reconcile_cross_page_paragraphs(records, pages, page_layout) == records
 

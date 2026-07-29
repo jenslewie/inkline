@@ -89,7 +89,10 @@ def _paragraph_boundary_candidate(
                 return None
             interruptions.append(right)
             continue
-        if last_page != right_page or right.get("unit_type") != "paragraph":
+        if (
+            not _canonical_single_page_record(right, right_page)
+            or right.get("unit_type") != "paragraph"
+        ):
             return None
         evidence = _boundary_evidence(
             left,
@@ -309,22 +312,28 @@ def _page_foot_interruption(
 
 def _bbox_on_page(record: dict[str, Any], page: int) -> list[float] | None:
     spans = record.get("spans")
-    span_bboxes = [
-        span["bbox"]
+    target_spans = [
+        span
         for span in spans or []
-        if isinstance(span, dict)
-        and span.get("page") == page
-        and _valid_bbox(span.get("bbox"))
+        if isinstance(span, dict) and span.get("page") == page
     ]
-    if span_bboxes:
+    if target_spans:
+        span_bboxes = [span.get("bbox") for span in target_spans]
+        if not all(_valid_bbox(bbox) for bbox in span_bboxes):
+            return None
+        valid_bboxes = [bbox for bbox in span_bboxes if _valid_bbox(bbox)]
         return [
-            min(float(bbox[0]) for bbox in span_bboxes),
-            min(float(bbox[1]) for bbox in span_bboxes),
-            max(float(bbox[2]) for bbox in span_bboxes),
-            max(float(bbox[3]) for bbox in span_bboxes),
+            min(float(bbox[0]) for bbox in valid_bboxes),
+            min(float(bbox[1]) for bbox in valid_bboxes),
+            max(float(bbox[2]) for bbox in valid_bboxes),
+            max(float(bbox[3]) for bbox in valid_bboxes),
         ]
     bbox = record.get("bbox")
-    if record.get("page") == page and _valid_bbox(bbox):
+    if (
+        record.get("page") == page
+        and _canonical_single_page_record(record, page)
+        and _valid_bbox(bbox)
+    ):
         return bbox
     return None
 
@@ -393,10 +402,21 @@ def _last_page(record: dict[str, Any]) -> int | None:
     return int(value) if isinstance(value, int) else None
 
 
+def _canonical_single_page_record(record: dict[str, Any], page: int) -> bool:
+    pages = record.get("pages")
+    return (
+        isinstance(pages, list)
+        and bool(pages)
+        and all(type(value) is int and value == page for value in pages)
+    )
+
+
 def _float(value: Any) -> float | None:
+    if type(value) not in (int, float):
+        return None
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (OverflowError, TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
 
@@ -404,9 +424,12 @@ def _float(value: Any) -> float | None:
 def _valid_bbox(value: Any) -> TypeGuard[list[float]]:
     if not isinstance(value, list) or len(value) != 4:
         return False
-    if not all(isinstance(number, int | float) for number in value):
+    if not all(type(number) in (int, float) for number in value):
         return False
-    coordinates = [float(number) for number in value]
+    try:
+        coordinates = [float(number) for number in value]
+    except OverflowError:
+        return False
     return (
         all(math.isfinite(number) for number in coordinates)
         and coordinates[0] < coordinates[2]
