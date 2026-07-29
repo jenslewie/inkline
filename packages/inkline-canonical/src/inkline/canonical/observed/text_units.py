@@ -477,7 +477,8 @@ def _next_candidate_starts_continuation(candidate: dict[str, Any]) -> bool:
 
 
 def _candidate_text_line_metrics(candidate: dict[str, Any]) -> dict[str, Any] | None:
-    attrs = candidate.get("attrs") if isinstance(candidate.get("attrs"), dict) else {}
+    raw_attrs = candidate.get("attrs")
+    attrs = raw_attrs if isinstance(raw_attrs, dict) else {}
     metrics_by_observation = attrs.get("text_line_metrics_by_observation")
     if not isinstance(metrics_by_observation, dict):
         return None
