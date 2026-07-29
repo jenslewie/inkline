@@ -161,6 +161,7 @@ def _boundary_evidence(
     right_alignment_metadata = _alignment_metadata(right)
     if (
         left_form is None
+        or right_form is None
         or left_form != right_form
         or left_alignment_metadata is None
         or right_alignment_metadata is None
