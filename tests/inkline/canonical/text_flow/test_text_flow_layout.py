@@ -146,9 +146,7 @@ def _page_layout_for_pages(page_count: int) -> dict[str, Any]:
     return page_layout
 
 
-def _decision(
-    classified: list[dict[str, Any]], observation_id: str
-) -> dict[str, Any]:
+def _decision(classified: list[dict[str, Any]], observation_id: str) -> dict[str, Any]:
     return next(
         candidate["layout_decision"]
         for candidate in classified
@@ -162,9 +160,7 @@ def _terminal_right_aligned_candidate_with_body_on_next_page() -> SimpleNamespac
         _body_candidate("obs000002", page=1, bbox=[600, 820, 900, 850]),
         _body_candidate("obs000003", page=2, bbox=[100, 100, 900, 300]),
     ]
-    pages = [
-        make_observed_page(page, width=1000, height=1000) for page in (1, 2)
-    ]
+    pages = [make_observed_page(page, width=1000, height=1000) for page in (1, 2)]
     return SimpleNamespace(
         candidates=candidates,
         pages=pages,
@@ -180,9 +176,7 @@ def _classify_three_page_display_fixture() -> list[dict[str, Any]]:
         _body_candidate("obs000004", page=3, bbox=[180, 100, 850, 300]),
         _body_candidate("obs000005", page=3, bbox=[100, 350, 900, 600]),
     ]
-    pages = [
-        make_observed_page(page, width=1000, height=1000) for page in (1, 2, 3)
-    ]
+    pages = [make_observed_page(page, width=1000, height=1000) for page in (1, 2, 3)]
     return classify_text_candidates_by_layout(
         candidates,
         pages,
@@ -301,9 +295,7 @@ def test_isolated_cross_page_set_off_candidates_do_not_invent_outer_gaps() -> No
         _body_candidate("obs000001", page=1, bbox=[180, 700, 850, 900]),
         _body_candidate("obs000002", page=2, bbox=[180, 100, 850, 300]),
     ]
-    pages = [
-        make_observed_page(page, width=1000, height=1000) for page in (1, 2)
-    ]
+    pages = [make_observed_page(page, width=1000, height=1000) for page in (1, 2)]
 
     classified = classify_text_candidates_by_layout(
         candidates,
@@ -321,9 +313,7 @@ def test_terminal_right_aligned_without_preceding_gap_is_uncertain_paragraph() -
         _body_candidate("obs000002", page=1, bbox=[600, 850, 900, 900]),
         _body_candidate("obs000003", page=2, bbox=[100, 100, 900, 300]),
     ]
-    pages = [
-        make_observed_page(page, width=1000, height=1000) for page in (1, 2)
-    ]
+    pages = [make_observed_page(page, width=1000, height=1000) for page in (1, 2)]
 
     classified = classify_text_candidates_by_layout(
         candidates,
@@ -336,6 +326,29 @@ def test_terminal_right_aligned_without_preceding_gap_is_uncertain_paragraph() -
     assert "terminal_right_aligned_without_preceding_outer_gap" in decision["signals"]
     assert "terminal_right_aligned_without_structural_boundary" in decision["signals"]
     assert "display_gap_after" not in decision["signals"]
+
+
+def test_terminal_mixed_alignment_short_line_cluster_is_display() -> None:
+    candidates = [
+        _body_candidate("body", page=1, bbox=[100, 100, 900, 500]),
+        _body_candidate("left-1", page=1, bbox=[150, 525, 650, 545]),
+        _body_candidate("left-2", page=1, bbox=[150, 560, 500, 580]),
+        _body_candidate("right-1", page=1, bbox=[700, 610, 900, 630]),
+        _body_candidate("right-2", page=1, bbox=[730, 645, 900, 665]),
+    ]
+
+    classified = classify_text_candidates_by_layout(
+        candidates,
+        [make_observed_page(1, width=1000, height=1000)],
+        page_layout=_page_layout_with_profile(),
+    )
+
+    left_decisions = [_decision(classified, value) for value in ("left-1", "left-2")]
+    right_decisions = [_decision(classified, value) for value in ("right-1", "right-2")]
+    assert {decision["classified_type"] for decision in left_decisions} == {"display_block"}
+    assert {decision["layout_form"] for decision in left_decisions} == {"short_line_group"}
+    assert {decision["classified_type"] for decision in right_decisions} == {"display_block"}
+    assert {decision["layout_form"] for decision in right_decisions} == {"attribution"}
 
 
 def test_terminal_attribution_rejects_heading_after_next_page_body() -> None:
@@ -351,9 +364,7 @@ def test_terminal_attribution_rejects_heading_after_next_page_body() -> None:
         _body_candidate("obs000003", page=2, bbox=[100, 100, 900, 200]),
         heading,
     ]
-    pages = [
-        make_observed_page(page, width=1000, height=1000) for page in (1, 2)
-    ]
+    pages = [make_observed_page(page, width=1000, height=1000) for page in (1, 2)]
     page_layout = _page_layout_for_pages(2)
     page_layout["pages"][1]["role_signals"]["role_hint_counts"] = {
         "body_text": 1,
@@ -382,9 +393,7 @@ def test_terminal_attribution_rejects_next_page_caption_title() -> None:
         _body_candidate("obs000002", page=1, bbox=[600, 870, 900, 900]),
         caption_title,
     ]
-    pages = [
-        make_observed_page(page, width=1000, height=1000) for page in (1, 2)
-    ]
+    pages = [make_observed_page(page, width=1000, height=1000) for page in (1, 2)]
     page_layout = _page_layout_for_pages(2)
     page_layout["pages"][1]["role_signals"]["role_hint_counts"] = {"title_text": 1}
 

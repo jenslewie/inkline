@@ -49,8 +49,44 @@ def classify_text_candidates_by_layout(
     )
     layout_pages = list(page_layout["pages"])
     _apply_terminal_attributions(classified, layout_pages, profiles, book_profile)
+    _apply_terminal_mixed_alignment_short_line_clusters(
+        classified,
+        profiles,
+        book_profile,
+    )
     _apply_cross_page_display_runs(classified, layout_pages, profiles, book_profile)
     return classified
+
+
+def _apply_terminal_mixed_alignment_short_line_clusters(
+    candidates: list[dict[str, Any]],
+    profiles: dict[int, dict[str, Any]],
+    book_profile: dict[str, Any],
+) -> None:
+    runs = _ordered_body_runs(candidates, profiles, book_profile)
+    for left, right in pairwise(runs):
+        left_page = int(left.candidates[0]["page"])
+        right_page = int(right.candidates[0]["page"])
+        right_following = right.following
+        if (
+            left_page != right_page
+            or left.following is not right.candidates[0]
+            or left.lane not in {"body_indent", "left_set_off"}
+            or right.lane != "right_set_off"
+            or left.short_line_alignment != "left"
+            or right.short_line_alignment != "right"
+            or not _terminal_preceding_gap(left, book_profile)
+            or _has_protected_member(left)
+            or _has_protected_member(right)
+            or (right_following is not None and int(right_following["page"]) == right_page)
+        ):
+            continue
+        for run in (left, right):
+            _promote_run_decision(run)
+            for candidate in run.candidates:
+                candidate["layout_decision"]["signals"].append(
+                    "terminal_mixed_alignment_short_line_cluster"
+                )
 
 
 def _apply_terminal_attributions(
@@ -86,17 +122,11 @@ def _apply_terminal_attributions(
                 decision["layout_form"] = None
                 decision["alignment"] = None
                 if not page_bottom:
-                    decision["signals"].append(
-                        "terminal_right_aligned_without_page_bottom"
-                    )
+                    decision["signals"].append("terminal_right_aligned_without_page_bottom")
                 if not preceding_gap:
-                    decision["signals"].append(
-                        "terminal_right_aligned_without_preceding_outer_gap"
-                    )
+                    decision["signals"].append("terminal_right_aligned_without_preceding_outer_gap")
                 if not structural_boundary:
-                    decision["signals"].append(
-                        "terminal_right_aligned_without_structural_boundary"
-                    )
+                    decision["signals"].append("terminal_right_aligned_without_structural_boundary")
 
 
 def _is_terminal_right_aligned_run(
@@ -108,9 +138,7 @@ def _is_terminal_right_aligned_run(
     return run.following is None or int(run.following["page"]) != page
 
 
-def _terminal_preceding_gap(
-    run: _SamePageRun, book_profile: dict[str, Any]
-) -> bool:
+def _terminal_preceding_gap(run: _SamePageRun, book_profile: dict[str, Any]) -> bool:
     previous = run.previous
     first_bbox = run.candidates[0].get("bbox")
     if (
@@ -215,9 +243,7 @@ def _joint_display_evidence(
     return {
         "left_page": left_page,
         "right_page": right_page,
-        "left_observation_ids": [
-            str(candidate["observation_id"]) for candidate in left.candidates
-        ],
+        "left_observation_ids": [str(candidate["observation_id"]) for candidate in left.candidates],
         "right_observation_ids": [
             str(candidate["observation_id"]) for candidate in right.candidates
         ],
@@ -265,8 +291,7 @@ def _has_only_recorded_page_foot_interruptions(
     page_records: dict[int, dict[str, Any]],
 ) -> bool:
     indexes = {
-        str(candidate["observation_id"]): index
-        for index, candidate in enumerate(candidates)
+        str(candidate["observation_id"]): index for index, candidate in enumerate(candidates)
     }
     left_end = indexes[str(left.candidates[-1]["observation_id"])]
     right_start = indexes[str(right.candidates[0]["observation_id"])]
@@ -310,9 +335,7 @@ def _apply_transition_components(
         for run in runs:
             _promote_run_decision(run)
             for candidate in run.candidates:
-                candidate["layout_decision"]["cross_page_transitions"] = deepcopy(
-                    transitions
-                )
+                candidate["layout_decision"]["cross_page_transitions"] = deepcopy(transitions)
 
 
 def _has_recorded_component_outer_gaps(
@@ -405,9 +428,7 @@ def _run_key(
     )
 
 
-def _candidate_status(
-    candidate: dict[str, Any], profile: dict[str, Any] | None
-) -> str:
+def _candidate_status(candidate: dict[str, Any], profile: dict[str, Any] | None) -> str:
     if candidate.get("candidate_type") != BODY_CANDIDATE_TYPE:
         return "resolved"
     if not valid_bbox(candidate.get("bbox")) or profile is None:
@@ -544,8 +565,10 @@ def _run_is_display(
         return False
     if any(is_display_candidate(signals) for signals in member_signals):
         return True
-    return separated_before and separated_after and any(
-        _has_set_off_signal(signals) for signals in member_signals
+    return (
+        separated_before
+        and separated_after
+        and any(_has_set_off_signal(signals) for signals in member_signals)
     )
 
 
