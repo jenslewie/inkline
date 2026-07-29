@@ -191,6 +191,74 @@ def test_display_aggregation_requires_resolved_compatible_run_membership() -> No
     ]
 
 
+@pytest.mark.parametrize(
+    ("layout_form", "alignment"),
+    [("", "left"), ("set_off_prose", "")],
+)
+def test_display_aggregation_rejects_empty_layout_metadata(
+    layout_form: str, alignment: str
+) -> None:
+    candidates = [
+        _classified_candidate(
+            "obs000001",
+            classified_type="display_block",
+            layout_form=layout_form,
+            alignment=alignment,
+            run_ids=["obs000001", "obs000002"],
+        ),
+        _classified_candidate(
+            "obs000002",
+            classified_type="display_block",
+            layout_form=layout_form,
+            alignment=alignment,
+            run_ids=["obs000001", "obs000002"],
+        ),
+    ]
+
+    records = aggregate_text_candidates(
+        candidates, [{"page": 1, "width": 1000, "height": 1000}]
+    )
+
+    assert [record["observation_ids"] for record in records] == [
+        ["obs000001"],
+        ["obs000002"],
+    ]
+
+
+def test_protected_anchor_member_blocks_interleaved_display_aggregation() -> None:
+    candidates = [
+        _classified_candidate(
+            "a",
+            classified_type="display_block",
+            layout_form="set_off_prose",
+            alignment="left",
+            run_ids=["a", "x", "b"],
+            protected_anchor_group=["a", "b"],
+        ),
+        _classified_candidate(
+            "x",
+            classified_type="display_block",
+            layout_form="set_off_prose",
+            alignment="left",
+            run_ids=["a", "x", "b"],
+        ),
+        _classified_candidate(
+            "b",
+            classified_type="display_block",
+            layout_form="set_off_prose",
+            alignment="left",
+            run_ids=["a", "x", "b"],
+            protected_anchor_group=["a", "b"],
+        ),
+    ]
+
+    records = aggregate_text_candidates(
+        candidates, [{"page": 1, "width": 1000, "height": 1000}]
+    )
+
+    assert [record["observation_ids"] for record in records] == [["a"], ["x"], ["b"]]
+
+
 def test_layout_fragments_preserve_one_exact_decision_per_display_observation() -> None:
     candidates = [
         _classified_candidate(

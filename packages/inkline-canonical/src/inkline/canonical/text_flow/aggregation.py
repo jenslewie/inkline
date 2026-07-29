@@ -50,6 +50,8 @@ def _same_homogeneous_display_run(
 ) -> bool:
     if previous is None or int(previous["page"]) != int(candidate["page"]):
         return False
+    if previous.get("protected_anchor_group") or candidate.get("protected_anchor_group"):
+        return False
     previous_decision = _layout_decision(previous)
     decision = _layout_decision(candidate)
     if previous_decision is None or decision is None:
@@ -61,12 +63,16 @@ def _same_homogeneous_display_run(
         or decision.get("status") != "resolved"
     ):
         return False
-    if (
-        previous_decision.get("layout_form") is None
-        or previous_decision.get("alignment") is None
-        or previous_decision.get("layout_form") != decision.get("layout_form")
-        or previous_decision.get("alignment") != decision.get("alignment")
+    previous_layout_form = previous_decision.get("layout_form")
+    layout_form = decision.get("layout_form")
+    previous_alignment = previous_decision.get("alignment")
+    alignment = decision.get("alignment")
+    if not all(
+        isinstance(value, str) and value
+        for value in (previous_layout_form, layout_form, previous_alignment, alignment)
     ):
+        return False
+    if previous_layout_form != layout_form or previous_alignment != alignment:
         return False
     run_ids = _run_observation_ids(decision)
     return run_ids is not None and run_ids == _run_observation_ids(previous_decision)
