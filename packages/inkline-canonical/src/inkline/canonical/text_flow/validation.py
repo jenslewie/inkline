@@ -265,7 +265,7 @@ def _validate_layout_evidence(unit: dict[str, Any]) -> None:
 
 
 def _validate_layout_fragment(fragment: Any) -> None:
-    if not isinstance(fragment, Mapping) or not set(fragment) >= LAYOUT_FRAGMENT_FIELDS:
+    if not isinstance(fragment, Mapping) or set(fragment) != LAYOUT_FRAGMENT_FIELDS:
         raise ValidationError("TextFlow layout fragment is invalid")
     observation_id = fragment["observation_id"]
     page = fragment["page"]

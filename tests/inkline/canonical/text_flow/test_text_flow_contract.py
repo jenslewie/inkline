@@ -228,6 +228,17 @@ def test_validation_rejects_missing_layout_fragment_fields(sources, field) -> No
         validate_text_flow(flow)
 
 
+def test_validation_rejects_extra_layout_fragment_fields(sources) -> None:
+    flow, _source_artifacts = _valid_text_flow_fixture(sources)
+    paragraph = next(
+        unit for unit in flow["text_units"] if unit["unit_type"] == "paragraph"
+    )
+    paragraph["attrs"]["layout_fragments"][0]["unexpected"] = "junk"
+
+    with pytest.raises(ValidationError, match="layout fragment"):
+        validate_text_flow(flow)
+
+
 def test_validation_rejects_non_mapping_layout_fragment(sources) -> None:
     flow, _source_artifacts = _valid_text_flow_fixture(sources)
     paragraph = next(
