@@ -245,6 +245,8 @@ def _alignment_metadata(record: dict[str, Any]) -> tuple[str | None] | None:
     attrs = record.get("attrs")
     if not isinstance(attrs, dict):
         return None
+    if "alignment_conflict" in attrs:
+        return None
     raw_direct = attrs.get("alignment")
     direct = _optional_alignment(raw_direct)
     if "alignment" in attrs and direct is None and not _absent_alignment(raw_direct):

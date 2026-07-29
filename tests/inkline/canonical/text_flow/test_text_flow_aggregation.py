@@ -304,6 +304,46 @@ def test_display_record_preserves_resolved_alignment_for_reconciliation() -> Non
     record = aggregate_text_candidates([candidate], [{"page": 1, "width": 1000, "height": 1000}])[0]
 
     assert record["attrs"]["alignment"] == "left"
+    assert "alignment_conflict" not in record["attrs"]
+
+
+def test_display_record_keeps_matching_source_alignment_without_conflict() -> None:
+    candidate = _classified_candidate(
+        "obs000001",
+        classified_type="display_block",
+        layout_form="set_off_prose",
+        alignment="left",
+    )
+    candidate["attrs"]["alignment"] = "left"
+
+    record = aggregate_text_candidates(
+        [candidate],
+        [{"page": 1, "width": 1000, "height": 1000}],
+    )[0]
+
+    assert record["attrs"]["alignment"] == "left"
+    assert "alignment_conflict" not in record["attrs"]
+
+
+def test_display_record_preserves_source_alignment_conflict_provenance() -> None:
+    candidate = _classified_candidate(
+        "obs000001",
+        classified_type="display_block",
+        layout_form="set_off_prose",
+        alignment="left",
+    )
+    candidate["attrs"]["alignment"] = "right"
+
+    record = aggregate_text_candidates(
+        [candidate],
+        [{"page": 1, "width": 1000, "height": 1000}],
+    )[0]
+
+    assert record["attrs"]["alignment"] == "right"
+    assert record["attrs"]["alignment_conflict"] == {
+        "source_alignment": "right",
+        "classified_alignment": "left",
+    }
 
 
 def test_materialization_deep_copies_nested_logical_record_state() -> None:

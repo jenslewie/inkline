@@ -98,7 +98,7 @@ def _record_from_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     attrs = deepcopy(_attrs(candidate))
     alignment = decision.get("alignment")
     if unit_type == "display_block" and isinstance(alignment, str) and alignment:
-        attrs["alignment"] = alignment
+        _preserve_alignment_evidence(attrs, alignment)
     if unit_type in {"paragraph", "display_block"}:
         attrs["layout_fragments"] = [_layout_fragment(candidate, decision)]
     return {
@@ -113,6 +113,18 @@ def _record_from_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         "attrs": attrs,
         "parser_payloads": [deepcopy(candidate.get("parser_payload") or {})],
     }
+
+
+def _preserve_alignment_evidence(attrs: dict[str, Any], classified_alignment: str) -> None:
+    if "alignment" not in attrs:
+        attrs["alignment"] = classified_alignment
+        return
+    source_alignment = attrs["alignment"]
+    if source_alignment != classified_alignment:
+        attrs["alignment_conflict"] = {
+            "source_alignment": deepcopy(source_alignment),
+            "classified_alignment": classified_alignment,
+        }
 
 
 def _attrs(candidate: dict[str, Any]) -> dict[str, Any]:

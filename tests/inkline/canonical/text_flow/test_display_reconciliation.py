@@ -354,6 +354,16 @@ def test_explicit_endpoint_alignment_conflict_rejects_display_merge() -> None:
     assert reconcile_cross_page_displays(records, pages, page_layout) == records
 
 
+def test_aggregation_alignment_conflict_marker_rejects_display_merge() -> None:
+    records, pages, page_layout = _cross_page_pair()
+    records[0]["attrs"]["alignment_conflict"] = {
+        "source_alignment": "right",
+        "classified_alignment": "left",
+    }
+
+    assert reconcile_cross_page_displays(records, pages, page_layout) == records
+
+
 def test_explicit_alignment_checks_only_its_matching_lane_axis() -> None:
     records, pages, page_layout = _cross_page_pair()
     records[0]["attrs"]["alignment"] = "left"
