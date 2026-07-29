@@ -91,6 +91,10 @@ def _three_page_text_flow_fixture(
     return flow, source_artifacts
 
 
+def _three_page_unit(flow: dict) -> dict:
+    return next(unit for unit in flow["text_units"] if unit["pages"] == [4, 5, 6])
+
+
 def test_text_flow_contract_accepts_built_artifact(sources) -> None:
     flow, observed, skeleton, page_review, page_layout = sources
 
@@ -139,7 +143,97 @@ def test_validation_rejects_mixed_layout_fragments(sources) -> None:
 
 def test_validation_requires_one_event_per_cross_page_transition(sources) -> None:
     flow, source_artifacts = _three_page_text_flow_fixture(sources)
-    flow["text_units"][4]["attrs"]["merge_events"].pop()
+    _three_page_unit(flow)["attrs"]["merge_events"].pop()
 
     with pytest.raises(ValidationError, match="adjacent-page transition"):
         validate_text_flow_against_sources(flow, *source_artifacts)
+
+
+def test_validation_requires_cross_page_footnote_merge_events(sources) -> None:
+    flow, _source_artifacts = _three_page_text_flow_fixture(sources)
+    footnote = _three_page_unit(flow)
+    footnote["unit_type"] = "footnote"
+    footnote["attrs"].pop("layout_fragments")
+    footnote["attrs"]["merge_events"].pop()
+
+    with pytest.raises(ValidationError, match="adjacent-page transition"):
+        validate_text_flow(flow)
+
+
+@pytest.mark.parametrize(
+    "extra_event",
+    [
+        {"left_page": 6, "right_page": 7},
+        {"left_page": 4, "right_page": 5},
+        "not-an-event",
+        {"reason": "missing pages"},
+        {"left_page": "4", "right_page": 5},
+    ],
+    ids=["unmatched", "duplicate", "non-mapping", "missing-pages", "invalid-pages"],
+)
+def test_validation_requires_exact_transition_event_collection(
+    sources, extra_event
+) -> None:
+    flow, _source_artifacts = _three_page_text_flow_fixture(sources)
+    _three_page_unit(flow)["attrs"]["merge_events"].append(extra_event)
+
+    with pytest.raises(ValidationError, match="adjacent-page transition"):
+        validate_text_flow(flow)
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("observation_id", ""),
+        ("page", True),
+        ("classified_type", []),
+        ("status", "pending"),
+        ("status", []),
+        ("layout_form", []),
+        ("signals", "display_gap_before"),
+    ],
+)
+def test_validation_rejects_invalid_layout_fragment_fields(
+    sources, field, invalid_value
+) -> None:
+    flow, _source_artifacts = _valid_text_flow_fixture(sources)
+    paragraph = next(
+        unit for unit in flow["text_units"] if unit["unit_type"] == "paragraph"
+    )
+    paragraph["attrs"]["layout_fragments"][0][field] = invalid_value
+
+    with pytest.raises(ValidationError, match="layout fragment"):
+        validate_text_flow(flow)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "observation_id",
+        "page",
+        "classified_type",
+        "status",
+        "layout_form",
+        "signals",
+    ],
+)
+def test_validation_rejects_missing_layout_fragment_fields(sources, field) -> None:
+    flow, _source_artifacts = _valid_text_flow_fixture(sources)
+    paragraph = next(
+        unit for unit in flow["text_units"] if unit["unit_type"] == "paragraph"
+    )
+    paragraph["attrs"]["layout_fragments"][0].pop(field)
+
+    with pytest.raises(ValidationError, match="layout fragment"):
+        validate_text_flow(flow)
+
+
+def test_validation_rejects_non_mapping_layout_fragment(sources) -> None:
+    flow, _source_artifacts = _valid_text_flow_fixture(sources)
+    paragraph = next(
+        unit for unit in flow["text_units"] if unit["unit_type"] == "paragraph"
+    )
+    paragraph["attrs"]["layout_fragments"][0] = []
+
+    with pytest.raises(ValidationError, match="layout fragment"):
+        validate_text_flow(flow)
