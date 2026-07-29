@@ -340,10 +340,49 @@ def test_display_record_preserves_source_alignment_conflict_provenance() -> None
     )[0]
 
     assert record["attrs"]["alignment"] == "right"
-    assert record["attrs"]["alignment_conflict"] == {
-        "source_alignment": "right",
-        "classified_alignment": "left",
-    }
+    assert record["attrs"]["alignment_conflict"] == [
+        {
+            "observation_id": "obs000001",
+            "source_alignment": "right",
+            "classified_alignment": "left",
+        }
+    ]
+
+
+def test_display_run_retains_every_appended_member_alignment_conflict() -> None:
+    run_ids = ["obs000001", "obs000002", "obs000003"]
+    candidates = [
+        _classified_candidate(
+            observation_id,
+            classified_type="display_block",
+            layout_form="set_off_prose",
+            alignment="left",
+            run_ids=run_ids,
+        )
+        for observation_id in run_ids
+    ]
+    candidates[0]["attrs"]["alignment"] = "left"
+    candidates[1]["attrs"]["alignment"] = "right"
+    candidates[2]["attrs"]["alignment"] = "center"
+
+    record = aggregate_text_candidates(
+        candidates,
+        [{"page": 1, "width": 1000, "height": 1000}],
+    )[0]
+
+    assert record["attrs"]["alignment"] == "left"
+    assert record["attrs"]["alignment_conflict"] == [
+        {
+            "observation_id": "obs000002",
+            "source_alignment": "right",
+            "classified_alignment": "left",
+        },
+        {
+            "observation_id": "obs000003",
+            "source_alignment": "center",
+            "classified_alignment": "left",
+        },
+    ]
 
 
 def test_materialization_deep_copies_nested_logical_record_state() -> None:

@@ -54,6 +54,38 @@ def _record(
     }
 
 
+def _classified_display_candidate(
+    observation_id: str,
+    *,
+    page: int,
+    bbox: list[float],
+    run_ids: list[str],
+    source_alignment: str,
+) -> dict[str, Any]:
+    return {
+        "observation_id": observation_id,
+        "candidate_type": "body_text",
+        "text": observation_id,
+        "page": page,
+        "bbox": deepcopy(bbox),
+        "spans": [{"page": page, "bbox": deepcopy(bbox)}],
+        "role_hint": "body_text",
+        "attrs": {"alignment": source_alignment},
+        "parser_payload": {},
+        "protected_anchor_group": None,
+        "layout_decision": {
+            "classified_type": "display_block",
+            "status": "resolved",
+            "layout_form": "short_line_group",
+            "alignment": "left",
+            "signals": ["fixture_signal"],
+            "profile_source": "local",
+            "same_page_run_observation_ids": run_ids,
+            "cross_page_transitions": [],
+        },
+    }
+
+
 def _pages(*page_numbers: int) -> list[dict[str, Any]]:
     return [{"page": page, "width": 1000.0, "height": 1000.0} for page in page_numbers]
 
@@ -361,6 +393,45 @@ def test_aggregation_alignment_conflict_marker_rejects_display_merge() -> None:
         "classified_alignment": "left",
     }
 
+    assert reconcile_cross_page_displays(records, pages, page_layout) == records
+
+
+def test_aggregated_run_member_alignment_conflict_rejects_display_merge() -> None:
+    left_run_ids = ["left-1", "left-2"]
+    candidates = [
+        _classified_display_candidate(
+            "left-1",
+            page=1,
+            bbox=[200.0, 850.0, 500.0, 885.0],
+            run_ids=left_run_ids,
+            source_alignment="left",
+        ),
+        _classified_display_candidate(
+            "left-2",
+            page=1,
+            bbox=[200.0, 886.0, 500.0, 920.0],
+            run_ids=left_run_ids,
+            source_alignment="right",
+        ),
+        _classified_display_candidate(
+            "right",
+            page=2,
+            bbox=[210.0, 100.0, 420.0, 160.0],
+            run_ids=["right"],
+            source_alignment="left",
+        ),
+    ]
+    pages = _pages(1, 2)
+    page_layout = _page_layout(1, 2)
+    records = aggregate_text_candidates(candidates, pages)
+
+    assert records[0]["attrs"]["alignment_conflict"] == [
+        {
+            "observation_id": "left-2",
+            "source_alignment": "right",
+            "classified_alignment": "left",
+        }
+    ]
     assert reconcile_cross_page_displays(records, pages, page_layout) == records
 
 

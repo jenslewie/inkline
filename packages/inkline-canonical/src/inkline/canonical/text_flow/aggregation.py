@@ -95,10 +95,16 @@ def _record_from_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     if decision is None:
         raise ValueError("classified candidate is missing layout_decision")
     unit_type = str(decision["classified_type"])
-    attrs = deepcopy(_attrs(candidate))
+    source_attrs = _attrs(candidate)
+    attrs = deepcopy(source_attrs)
     alignment = decision.get("alignment")
     if unit_type == "display_block" and isinstance(alignment, str) and alignment:
-        _preserve_alignment_evidence(attrs, alignment)
+        _preserve_alignment_evidence(
+            attrs,
+            source_attrs,
+            observation_id=str(candidate["observation_id"]),
+            classified_alignment=alignment,
+        )
     if unit_type in {"paragraph", "display_block"}:
         attrs["layout_fragments"] = [_layout_fragment(candidate, decision)]
     return {
@@ -115,16 +121,29 @@ def _record_from_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _preserve_alignment_evidence(attrs: dict[str, Any], classified_alignment: str) -> None:
-    if "alignment" not in attrs:
-        attrs["alignment"] = classified_alignment
+def _preserve_alignment_evidence(
+    target: dict[str, Any],
+    source: dict[str, Any],
+    *,
+    observation_id: str,
+    classified_alignment: str,
+) -> None:
+    if "alignment" not in source:
+        target.setdefault("alignment", classified_alignment)
         return
-    source_alignment = attrs["alignment"]
+    source_alignment = source["alignment"]
     if source_alignment != classified_alignment:
-        attrs["alignment_conflict"] = {
+        conflict = {
+            "observation_id": observation_id,
             "source_alignment": deepcopy(source_alignment),
             "classified_alignment": classified_alignment,
         }
+        conflicts = target.get("alignment_conflict")
+        if not isinstance(conflicts, list):
+            conflicts = []
+            target["alignment_conflict"] = conflicts
+        if conflict not in conflicts:
+            conflicts.append(conflict)
 
 
 def _attrs(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -164,8 +183,17 @@ def _append_candidate(record: dict[str, Any], candidate: dict[str, Any]) -> None
     if role_hint not in record["role_hints"]:
         record["role_hints"].append(role_hint)
     record["parser_payloads"].append(deepcopy(candidate.get("parser_payload") or {}))
-    _merge_candidate_attrs(record["attrs"], _attrs(candidate))
+    source_attrs = _attrs(candidate)
     decision = _layout_decision(candidate)
+    alignment = decision.get("alignment") if decision is not None else None
+    if record["unit_type"] == "display_block" and isinstance(alignment, str) and alignment:
+        _preserve_alignment_evidence(
+            record["attrs"],
+            source_attrs,
+            observation_id=str(candidate["observation_id"]),
+            classified_alignment=alignment,
+        )
+    _merge_candidate_attrs(record["attrs"], source_attrs)
     if record["unit_type"] in {"paragraph", "display_block"} and decision is not None:
         record["attrs"]["layout_fragments"].append(_layout_fragment(candidate, decision))
 
