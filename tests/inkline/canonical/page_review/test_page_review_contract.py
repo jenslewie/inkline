@@ -161,6 +161,51 @@ def test_page_review_resolves_non_pre_body_visual_pages_from_layout() -> None:
     assert page_three["visual_asset_action"] == "retain"
 
 
+def test_page_review_includes_title_like_body_section_start_as_text_flow() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "zh-CN",
+            "source_file": "sample.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        [make_observed_page(page, width=1000, height=1400) for page in range(1, 4)],
+        [],
+    )
+    skeleton = {
+        "boundaries": {"first_body_page": 2},
+        "toc_pages": [],
+        "toc_entries": [{"role": "body", "selected_start_page": 2}],
+    }
+    page_roles = [
+        {"page": 1, "page_role": "text_flow_page", "signals": ["body_profile"]},
+        {
+            "page": 2,
+            "page_role": "title_like_page",
+            "signals": ["sparse_centered_text", "no_body_profile"],
+        },
+        {
+            "page": 3,
+            "page_role": "title_like_page",
+            "signals": ["sparse_centered_text", "no_body_profile"],
+        },
+    ]
+
+    plan = build_page_review_plan(document, skeleton, page_roles)
+    by_page = {record["page"]: record for record in plan["pages"]}
+
+    assert by_page[2]["page_role"] == "text_flow_page"
+    assert by_page[2]["text_flow_action"] == "include"
+    assert by_page[2]["visual_asset_action"] == "not_needed"
+    assert by_page[2]["decision_source"] == "layout_and_skeleton"
+    assert by_page[2]["llm_review_status"] == "not_selected"
+    assert by_page[3]["page_role"] == "visual_page"
+    assert by_page[3]["text_flow_action"] == "exclude"
+    assert by_page[3]["visual_asset_action"] == "retain"
+
+
 def test_page_review_does_not_select_unindexed_front_matter_text_for_llm_review() -> None:
     document = make_observed_document(
         {

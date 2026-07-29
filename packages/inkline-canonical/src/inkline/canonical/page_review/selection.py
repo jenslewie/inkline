@@ -174,6 +174,10 @@ def _page_review_record(
         special_page_kind = "toc_page"
         actions = _DETERMINISTIC_SPECIAL_PAGE_ACTIONS["toc_page"]
         status = "deterministic"
+    elif is_body_section_start and layout_page_role == "title_like_page":
+        page_role = "text_flow_page"
+        actions = ("include", "not_needed")
+        status = "not_selected"
     else:
         actions = _deterministic_actions(page_role, special_page_kind, signals)
         # A pre-body text layout is only provisional. Before
