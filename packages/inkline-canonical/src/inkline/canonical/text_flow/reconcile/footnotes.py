@@ -19,7 +19,7 @@ _UP_PREFIX = re.compile(
 )
 _INDEPENDENT_MARKER = re.compile(
     r"^\s*(?:\[\d{1,3}\]|［\d{1,3}］|【\d{1,3}】|〔\d{1,3}〕|"
-    r"\(\d{1,3}\)|（\d{1,3}）|[⁰¹²³⁴⁵⁶⁷⁸⁹]+|"
+    r"\(\d{1,3}\)|（\d{1,3}）|[⁰¹²³⁴⁵⁶⁷⁸⁹]+(?=[\s、.)）]|$)|"
     r"[①-⑳㉑-㊿❶-❿⓵-⓾]|[*†‡]|\d{1,3}(?=[\s、.)）]|$))"
 )
 _REFERENCE_ROLES = {"reference_text", "footnote_text"}

@@ -461,6 +461,34 @@ def test_tail_absorption_does_not_treat_ordinary_leading_digits_as_note_marker()
     assert reconciled[0]["observation_ids"] == ["left", "right", "tail"]
 
 
+def test_tail_absorption_keeps_superscript_isotope_continuation_prose() -> None:
+    records = [
+        _record(
+            "left",
+            "4 Left（接下页）",
+            page=1,
+            bbox=[100.0, 880.0, 900.0, 920.0],
+        ),
+        _record(
+            "right",
+            "（接上页）Right",
+            page=2,
+            bbox=[100.0, 100.0, 900.0, 140.0],
+        ),
+        _record(
+            "tail",
+            "¹⁴C dating remains continuation prose.",
+            page=2,
+            bbox=[100.0, 150.0, 900.0, 190.0],
+        ),
+    ]
+
+    reconciled = reconcile_cross_page_footnotes(records, _page_layout(1, 2))
+
+    assert len(reconciled) == 1
+    assert reconciled[0]["observation_ids"] == ["left", "right", "tail"]
+
+
 def test_explicit_pair_accepts_short_left_aligned_line_then_full_same_lane_line() -> None:
     records = [
         _record(
