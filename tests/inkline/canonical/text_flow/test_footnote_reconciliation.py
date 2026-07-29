@@ -125,9 +125,7 @@ def _next_independent_marker_record(records: list[dict[str, Any]]) -> dict[str, 
     return next(record for record in records if "obs001412" in record["observation_ids"])
 
 
-def _unmarked_cross_page_reference_fixture() -> tuple[
-    list[dict[str, Any]], dict[str, Any]
-]:
+def _unmarked_cross_page_reference_fixture() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return (
         [
             _record(
@@ -153,9 +151,7 @@ def test_explicit_cross_page_footnote_absorbs_only_same_lane_tail() -> None:
 
     reconciled = reconcile_cross_page_footnotes(records, page_layout)
 
-    footnote = next(
-        record for record in reconciled if "obs001399" in record["observation_ids"]
-    )
+    footnote = next(record for record in reconciled if "obs001399" in record["observation_ids"])
     assert records == original
     assert "obs001405" in footnote["observation_ids"]
     assert "（接下页）" not in footnote["text"]
@@ -167,9 +163,7 @@ def test_explicit_cross_page_footnote_absorbs_only_same_lane_tail() -> None:
     assert footnote["attrs"]["merge_events"][0]["reason"] == (
         "explicit_cross_page_footnote_continuation"
     )
-    assert footnote["attrs"]["merge_events"][0][
-        "interrupting_observation_ids"
-    ] == ["obs001402"]
+    assert footnote["attrs"]["merge_events"][0]["interrupting_observation_ids"] == ["obs001402"]
     assert all(
         observation_id in footnote["observation_ids"]
         for observation_id in [
@@ -182,12 +176,8 @@ def test_explicit_cross_page_footnote_absorbs_only_same_lane_tail() -> None:
         ]
     )
     assert len(footnote["attrs"]["merge_events"]) == 7
-    assert _next_independent_marker_record(reconciled)["observation_ids"] == [
-        "obs001412"
-    ]
-    inline_text = "".join(
-        str(run.get("text") or "") for run in footnote["attrs"]["inline_runs"]
-    )
+    assert _next_independent_marker_record(reconciled)["observation_ids"] == ["obs001412"]
+    inline_text = "".join(str(run.get("text") or "") for run in footnote["attrs"]["inline_runs"])
     assert "（接下页）" not in inline_text
     assert "（接上页）" not in inline_text
 
@@ -220,9 +210,7 @@ def test_explicit_cross_page_footnote_reconciles_three_page_marker_chain() -> No
     assert reconciled[0]["observation_ids"] == ["a", "b", "c"]
     assert reconciled[0]["pages"] == [1, 2, 3]
     assert reconciled[0]["text"] == "A\nB\nC"
-    assert [
-        event["reason"] for event in reconciled[0]["attrs"]["merge_events"]
-    ] == [
+    assert [event["reason"] for event in reconciled[0]["attrs"]["merge_events"]] == [
         "explicit_cross_page_footnote_continuation",
         "explicit_cross_page_footnote_continuation",
     ]
@@ -271,14 +259,10 @@ def test_tail_absorption_stops_at_an_independent_reference_marker() -> None:
 
     reconciled = reconcile_cross_page_footnotes(records, page_layout)
 
-    footnote = next(
-        record for record in reconciled if "obs001399" in record["observation_ids"]
-    )
+    footnote = next(record for record in reconciled if "obs001399" in record["observation_ids"])
     assert "obs001412" not in footnote["observation_ids"]
     assert "after-marker" not in footnote["observation_ids"]
-    assert any(
-        record["observation_ids"] == ["after-marker"] for record in reconciled
-    )
+    assert any(record["observation_ids"] == ["after-marker"] for record in reconciled)
 
 
 @pytest.mark.parametrize(

@@ -40,9 +40,7 @@ def build_text_units(
 
     for candidate in candidates:
         unit_type = _legacy_unit_type(candidate["candidate_type"])
-        merge_reason = (
-            _merge_reason(units[-1], candidate, unit_type, page_sizes) if units else None
-        )
+        merge_reason = _merge_reason(units[-1], candidate, unit_type, page_sizes) if units else None
         if merge_reason:
             _merge_candidate(units[-1], candidate, merge_reason)
             continue
@@ -388,7 +386,8 @@ def _same_page_merge(previous_unit: dict[str, Any], candidate: dict[str, Any]) -
 
 
 def _same_page_short_line_group_merge(
-    previous_unit: dict[str, Any], candidate: dict[str, Any],
+    previous_unit: dict[str, Any],
+    candidate: dict[str, Any],
     page_sizes: dict[int, dict[str, float]],
 ) -> bool:
     previous_bbox = _last_bbox_for_page(previous_unit, int(candidate["page"]))
@@ -410,7 +409,8 @@ def _same_page_short_line_group_merge(
 
 
 def _cross_page_merge(
-    previous_unit: dict[str, Any], candidate: dict[str, Any],
+    previous_unit: dict[str, Any],
+    candidate: dict[str, Any],
     page_sizes: dict[int, dict[str, float]],
 ) -> bool:
     previous_page = _last_page(previous_unit)
@@ -499,9 +499,7 @@ def _metric_int(metrics: dict[str, Any], key: str) -> int | None:
         return None
 
 
-def _merge_candidate(
-    unit: dict[str, Any], candidate: dict[str, Any], merge_reason: str
-) -> None:
+def _merge_candidate(unit: dict[str, Any], candidate: dict[str, Any], merge_reason: str) -> None:
     target_text = str(unit.get("text") or "")
     text = str(candidate.get("text") or "")
     if text:
@@ -530,7 +528,8 @@ def _join_merged_text(target_text: str, source_text: str, merge_reason: str) -> 
 
 
 def _merge_attrs(
-    attrs: dict[str, Any], candidate_attrs: dict[str, Any],
+    attrs: dict[str, Any],
+    candidate_attrs: dict[str, Any],
     *,
     target_text: str,
     source_text: str,

@@ -57,9 +57,7 @@ def _merge_text(left: dict[str, Any], right: dict[str, Any], joiner: str) -> Non
         left["text"] = left_text
 
 
-def _extend_collection(
-    left: dict[str, Any], right: dict[str, Any], field: str
-) -> None:
+def _extend_collection(left: dict[str, Any], right: dict[str, Any], field: str) -> None:
     target = left.get(field)
     if not isinstance(target, list):
         target = []
@@ -84,8 +82,7 @@ def _extend_unique(left: dict[str, Any], right: dict[str, Any], field: str) -> N
 
 def _merge_bbox(left: dict[str, Any], right: dict[str, Any]) -> None:
     if (
-        _boundary_page(left, from_right=False)
-        != _boundary_page(right, from_right=False)
+        _boundary_page(left, from_right=False) != _boundary_page(right, from_right=False)
         or not _valid_bbox(left.get("bbox"))
         or not _valid_bbox(right.get("bbox"))
     ):

@@ -33,8 +33,7 @@ def reconcile_cross_page_displays(
     eligible_endpoints = {
         id(record)
         for record in reconciled
-        if record.get("unit_type") == "display_block"
-        and _canonical_single_page_record(record)
+        if record.get("unit_type") == "display_block" and _canonical_single_page_record(record)
     }
     source_pages = _source_page_numbers(pages)
     index = 0
@@ -95,14 +94,11 @@ def _display_boundary_candidate(
         if first_page < left_page or first_page > right_page:
             return None
         if first_page == left_page:
-            if (
-                last_page > right_page
-                or not _page_foot_interruption(
-                    right,
-                    left_page,
-                    pages,
-                    page_layout,
-                )
+            if last_page > right_page or not _page_foot_interruption(
+                right,
+                left_page,
+                pages,
+                page_layout,
             ):
                 return None
             interruptions.append(right)
@@ -136,9 +132,7 @@ def _prior_transition_footnote(
     left_page: int,
 ) -> bool:
     return (
-        record.get("unit_type") == "footnote"
-        and first_page < left_page
-        and last_page <= left_page
+        record.get("unit_type") == "footnote" and first_page < left_page and last_page <= left_page
     )
 
 
@@ -318,16 +312,12 @@ def _alignment_from_spans(
     if not isinstance(spans, list):
         return None
     bboxes = [
-        span.get("bbox")
-        for span in spans
-        if isinstance(span, dict) and span.get("page") == page
+        span.get("bbox") for span in spans if isinstance(span, dict) and span.get("page") == page
     ]
     if len(bboxes) < 2 or not all(_valid_bbox(bbox) for bbox in bboxes):
         return None
     positions = [
-        _bbox_lane_position(bbox, page, page_layout)
-        for bbox in bboxes
-        if _valid_bbox(bbox)
+        _bbox_lane_position(bbox, page, page_layout) for bbox in bboxes if _valid_bbox(bbox)
     ]
     if any(position is None for position in positions):
         return None
@@ -340,9 +330,7 @@ def _alignment_from_spans(
     minimum = min(spreads)
     if minimum > _DISPLAY_ALIGNMENT_SPREAD_TOLERANCE:
         return None
-    winners = [
-        index for index, spread in enumerate(spreads) if math.isclose(spread, minimum)
-    ]
+    winners = [index for index, spread in enumerate(spreads) if math.isclose(spread, minimum)]
     return _DISPLAY_ALIGNMENT_AXES[winners[0]] if len(winners) == 1 else None
 
 
@@ -407,11 +395,7 @@ def _right_starts_at_page_top(
     if not _valid_bbox(bbox) or page_height is None or page_record is None:
         return False
     body_lane = page_record.get("body_lane")
-    line_height = (
-        _float(body_lane.get("line_height"))
-        if isinstance(body_lane, dict)
-        else None
-    )
+    line_height = _float(body_lane.get("line_height")) if isinstance(body_lane, dict) else None
     top_limit = max(page_height * _PAGE_TOP_RATIO, (line_height or 0.0) * 2.0)
     return 0.0 <= float(bbox[1]) <= top_limit
 
@@ -504,9 +488,7 @@ def _valid_record_geometry(record: dict[str, Any]) -> bool:
         return False
     spans = record.get("spans")
     return isinstance(spans, list) and all(
-        isinstance(span, dict)
-        and type(span.get("page")) is int
-        and _valid_bbox(span.get("bbox"))
+        isinstance(span, dict) and type(span.get("page")) is int and _valid_bbox(span.get("bbox"))
         for span in spans
     )
 
@@ -552,18 +534,14 @@ def _page_height(
     return height if height is not None and height > 0 else None
 
 
-def _page_record(
-    page_layout: dict[str, Any], page: int
-) -> dict[str, Any] | None:
+def _page_record(page_layout: dict[str, Any], page: int) -> dict[str, Any] | None:
     records = page_layout.get("pages")
     if not isinstance(records, list):
         return None
     matches = [
         record
         for record in records
-        if isinstance(record, dict)
-        and type(record.get("page")) is int
-        and record["page"] == page
+        if isinstance(record, dict) and type(record.get("page")) is int and record["page"] == page
     ]
     return matches[0] if len(matches) == 1 else None
 
@@ -590,9 +568,7 @@ def _last_page(record: dict[str, Any]) -> int | None:
     return pages[-1]
 
 
-def _canonical_single_page_record(
-    record: dict[str, Any], page: int | None = None
-) -> bool:
+def _canonical_single_page_record(record: dict[str, Any], page: int | None = None) -> bool:
     pages = record.get("pages")
     if not isinstance(pages, list) or not pages or type(pages[0]) is not int:
         return False

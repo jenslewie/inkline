@@ -14,9 +14,7 @@ _UP_WRAPPED = r"(?:（接上页）|\(接上页\)|【接上页】|\[接上页\])"
 _DOWN_SUFFIX = re.compile(
     rf"(?:\s*{_DOWN_WRAPPED}|^接下页|\s+接下页|(?<=[{_TOKEN_BOUNDARY}])接下页)\s*$"
 )
-_UP_PREFIX = re.compile(
-    rf"^\s*(?:{_UP_WRAPPED}|接上页(?=$|[{_TOKEN_BOUNDARY}]))\s*"
-)
+_UP_PREFIX = re.compile(rf"^\s*(?:{_UP_WRAPPED}|接上页(?=$|[{_TOKEN_BOUNDARY}]))\s*")
 _INDEPENDENT_MARKER = re.compile(
     r"^\s*(?:\[\d{1,3}\]|［\d{1,3}］|【\d{1,3}】|〔\d{1,3}〕|"
     r"\(\d{1,3}\)|（\d{1,3}）|[⁰¹²³⁴⁵⁶⁷⁸⁹]+(?=[\s、.)）]|$)|"
@@ -44,9 +42,7 @@ def reconcile_cross_page_footnotes(
     index = 0
     while index < len(reconciled):
         left = reconciled[index]
-        right_index = _explicit_continuation_match(
-            reconciled, index, page_layout
-        )
+        right_index = _explicit_continuation_match(reconciled, index, page_layout)
         if right_index is None:
             index += 1
             continue
@@ -94,9 +90,7 @@ def _explicit_continuation_match(
     if not _has_structural_marker(left, _DOWN_SUFFIX) or not _reference_record(left):
         return None
     left_page = _last_page(left)
-    if left_page is None or not _in_reference_lane(
-        left, page_layout, require_page_foot=True
-    ):
+    if left_page is None or not _in_reference_lane(left, page_layout, require_page_foot=True):
         return None
     right_page = left_page + 1
     for index in range(left_index + 1, len(records)):
@@ -176,9 +170,7 @@ def _reference_record(record: dict[str, Any]) -> bool:
     if record.get("unit_type") == "footnote":
         return True
     roles = record.get("role_hints")
-    return isinstance(roles, list) and bool(
-        _REFERENCE_ROLES & {str(role) for role in roles}
-    )
+    return isinstance(roles, list) and bool(_REFERENCE_ROLES & {str(role) for role in roles})
 
 
 def _in_reference_lane(
@@ -283,9 +275,7 @@ def _bbox_on_page(record: dict[str, Any], page: int | None) -> list[float] | Non
     span_bboxes = [
         span["bbox"]
         for span in spans or []
-        if isinstance(span, dict)
-        and span.get("page") == page
-        and _valid_bbox(span.get("bbox"))
+        if isinstance(span, dict) and span.get("page") == page and _valid_bbox(span.get("bbox"))
     ]
     if span_bboxes:
         return [
@@ -319,9 +309,7 @@ def _strip_structural_marker(
     _remove_inline_text(inline_runs, removed, from_start=from_start)
 
 
-def _remove_inline_text(
-    inline_runs: list[Any], removed: int, *, from_start: bool
-) -> None:
+def _remove_inline_text(inline_runs: list[Any], removed: int, *, from_start: bool) -> None:
     ordered = inline_runs if from_start else list(reversed(inline_runs))
     remaining = removed
     for run in ordered:
@@ -335,9 +323,7 @@ def _remove_inline_text(
         remaining -= count
 
 
-def _has_structural_marker(
-    record: dict[str, Any], pattern: re.Pattern[str]
-) -> bool:
+def _has_structural_marker(record: dict[str, Any], pattern: re.Pattern[str]) -> bool:
     return pattern.search(str(record.get("text") or "")) is not None
 
 
@@ -345,27 +331,19 @@ def _normalize_reference_record_as_footnote(record: dict[str, Any]) -> None:
     record["unit_type"] = "footnote"
 
 
-def _page_record(
-    page_layout: dict[str, Any], page: int | None
-) -> dict[str, Any] | None:
+def _page_record(page_layout: dict[str, Any], page: int | None) -> dict[str, Any] | None:
     if page is None:
         return None
     pages = page_layout.get("pages")
     if not isinstance(pages, list):
         return None
     return next(
-        (
-            record
-            for record in pages
-            if isinstance(record, dict) and record.get("page") == page
-        ),
+        (record for record in pages if isinstance(record, dict) and record.get("page") == page),
         None,
     )
 
 
-def _page_height(
-    page_record: dict[str, Any], body_lane: dict[str, Any]
-) -> float | None:
+def _page_height(page_record: dict[str, Any], body_lane: dict[str, Any]) -> float | None:
     page_size = page_record.get("page_size")
     value = page_size.get("height") if isinstance(page_size, dict) else None
     return _float(value) or _float(body_lane.get("page_height"))

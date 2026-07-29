@@ -48,19 +48,14 @@ def _record(
         "bbox": deepcopy(bbox),
         "spans": [{"page": page, "bbox": deepcopy(bbox)}],
         "observation_ids": [observation_id],
-        "role_hints": [
-            "footnote_text" if unit_type == "footnote" else "body_text"
-        ],
+        "role_hints": ["footnote_text" if unit_type == "footnote" else "body_text"],
         "attrs": attrs,
         "parser_payloads": [{"source": observation_id}],
     }
 
 
 def _pages(*page_numbers: int) -> list[dict[str, Any]]:
-    return [
-        {"page": page, "width": 1000.0, "height": 1000.0}
-        for page in page_numbers
-    ]
+    return [{"page": page, "width": 1000.0, "height": 1000.0} for page in page_numbers]
 
 
 def _page_layout(*page_numbers: int) -> dict[str, Any]:
@@ -127,9 +122,7 @@ def _reconciled_text(
 def _record_with_observation_id(
     records: list[dict[str, Any]], observation_id: str
 ) -> dict[str, Any]:
-    return next(
-        record for record in records if observation_id in record["observation_ids"]
-    )
+    return next(record for record in records if observation_id in record["observation_ids"])
 
 
 def _silk_road_page_291_292_records() -> tuple[
@@ -176,9 +169,7 @@ def test_display_continues_across_page_291_292_footnotes() -> None:
     assert display["attrs"]["merge_events"][-1]["reason"] == (
         "cross_page_display_block_continuation"
     )
-    assert display["attrs"]["merge_events"][-1][
-        "interrupting_observation_ids"
-    ] == ["obs002500"]
+    assert display["attrs"]["merge_events"][-1]["interrupting_observation_ids"] == ["obs002500"]
 
 
 def test_display_joiner_depends_on_layout_form() -> None:
@@ -243,8 +234,7 @@ def test_three_page_display_audits_each_transition_and_keeps_footnotes() -> None
         for event in display["attrs"]["merge_events"]
     ] == [[1, 2], [2, 3]]
     assert [
-        event["interrupting_observation_ids"]
-        for event in display["attrs"]["merge_events"]
+        event["interrupting_observation_ids"] for event in display["attrs"]["merge_events"]
     ] == [["note-1"], ["note-2"]]
     assert [record["observation_ids"] for record in reconciled[1:]] == [
         ["note-1"],
@@ -283,9 +273,10 @@ def test_orchestrator_reconciles_footnotes_before_displays() -> None:
     display = _record_with_observation_id(reconciled, "display-left")
     footnote = _record_with_observation_id(reconciled, "note-left")
     assert display["observation_ids"] == ["display-left", "display-right"]
-    assert display["attrs"]["merge_events"][0][
-        "interrupting_observation_ids"
-    ] == ["note-left", "note-right"]
+    assert display["attrs"]["merge_events"][0]["interrupting_observation_ids"] == [
+        "note-left",
+        "note-right",
+    ]
     assert footnote["observation_ids"] == ["note-left", "note-right"]
 
 
@@ -488,9 +479,7 @@ def test_display_does_not_jump_over_nonfootnote_body_resumption() -> None:
 def test_unproven_multi_page_right_display_is_not_absorbed() -> None:
     records, _, _ = _cross_page_pair()
     records[1]["pages"] = [2, 3]
-    records[1]["spans"].append(
-        {"page": 3, "bbox": [210.0, 100.0, 420.0, 160.0]}
-    )
+    records[1]["spans"].append({"page": 3, "bbox": [210.0, 100.0, 420.0, 160.0]})
 
     reconciled = reconcile_cross_page_displays(
         records,

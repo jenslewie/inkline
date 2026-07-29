@@ -25,9 +25,7 @@ SILK_ROAD_OBSERVED = ROOT / "data/outputs/golden/observed/丝绸之路新史_obs
 def _record_with_observation_id(
     records: list[dict[str, Any]], observation_id: str
 ) -> dict[str, Any]:
-    return next(
-        record for record in records if observation_id in record["observation_ids"]
-    )
+    return next(record for record in records if observation_id in record["observation_ids"])
 
 
 def _record(
@@ -66,10 +64,7 @@ def _record(
 
 
 def _pages(*page_numbers: int) -> list[dict[str, Any]]:
-    return [
-        {"page": page, "width": 1000.0, "height": 1000.0}
-        for page in page_numbers
-    ]
+    return [{"page": page, "width": 1000.0, "height": 1000.0} for page in page_numbers]
 
 
 def _page_layout(*page_numbers: int) -> dict[str, Any]:
@@ -147,16 +142,10 @@ def test_paragraph_continues_across_two_page_footnotes() -> None:
     paragraph = _record_with_observation_id(reconciled, "obs000747")
     assert records == original
     assert paragraph["observation_ids"] == ["obs000747", "obs000752"]
-    assert paragraph["text"].endswith(
-        "大多数人改走塔克拉玛干北道，而这正是我们下一章的主题。"
-    )
+    assert paragraph["text"].endswith("大多数人改走塔克拉玛干北道，而这正是我们下一章的主题。")
     assert paragraph["pages"] == [81, 82]
-    assert _record_with_observation_id(reconciled, "obs000748")["unit_type"] == (
-        "footnote"
-    )
-    assert _record_with_observation_id(reconciled, "obs000749")["unit_type"] == (
-        "footnote"
-    )
+    assert _record_with_observation_id(reconciled, "obs000748")["unit_type"] == ("footnote")
+    assert _record_with_observation_id(reconciled, "obs000749")["unit_type"] == ("footnote")
     assert paragraph["attrs"]["note_refs"][-1]["marker"] == "1"
     event = paragraph["attrs"]["merge_events"][0]
     assert event["reason"] == "cross_page_paragraph_continuation"
@@ -197,9 +186,10 @@ def test_reconciliation_pipeline_runs_footnotes_before_paragraphs() -> None:
     paragraph = _record_with_observation_id(reconciled, "paragraph-left")
     footnote = _record_with_observation_id(reconciled, "note-left")
     assert paragraph["observation_ids"] == ["paragraph-left", "paragraph-right"]
-    assert paragraph["attrs"]["merge_events"][0][
-        "interrupting_observation_ids"
-    ] == ["note-left", "note-right"]
+    assert paragraph["attrs"]["merge_events"][0]["interrupting_observation_ids"] == [
+        "note-left",
+        "note-right",
+    ]
     assert footnote["observation_ids"] == ["note-left", "note-right"]
 
 
@@ -234,21 +224,17 @@ def test_three_page_paragraph_requires_two_proven_transitions() -> None:
     assert paragraph["observation_ids"] == ["page-1", "page-2", "page-3"]
     assert paragraph["pages"] == [1, 2, 3]
     assert [
-        (event["left_page"], event["right_page"])
-        for event in paragraph["attrs"]["merge_events"]
+        (event["left_page"], event["right_page"]) for event in paragraph["attrs"]["merge_events"]
     ] == [(1, 2), (2, 3)]
     assert [
-        event["interrupting_observation_ids"]
-        for event in paragraph["attrs"]["merge_events"]
+        event["interrupting_observation_ids"] for event in paragraph["attrs"]["merge_events"]
     ] == [["note-1"], ["note-2"]]
 
 
 def test_unproven_multi_page_right_paragraph_is_not_absorbed() -> None:
     records, _, _ = _cross_page_pair()
     records[1]["pages"] = [2, 3]
-    records[1]["spans"].append(
-        {"page": 3, "bbox": [100.0, 100.0, 900.0, 160.0]}
-    )
+    records[1]["spans"].append({"page": 3, "bbox": [100.0, 100.0, 900.0, 160.0]})
 
     reconciled = reconcile_cross_page_paragraphs(
         records,

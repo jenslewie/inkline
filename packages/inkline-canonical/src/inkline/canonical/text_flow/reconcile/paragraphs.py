@@ -116,9 +116,7 @@ def _prior_transition_footnote(
     left_page: int,
 ) -> bool:
     return (
-        record.get("unit_type") == "footnote"
-        and first_page < left_page
-        and last_page <= left_page
+        record.get("unit_type") == "footnote" and first_page < left_page and last_page <= left_page
     )
 
 
@@ -313,9 +311,7 @@ def _page_foot_interruption(
 def _bbox_on_page(record: dict[str, Any], page: int) -> list[float] | None:
     spans = record.get("spans")
     target_spans = [
-        span
-        for span in spans or []
-        if isinstance(span, dict) and span.get("page") == page
+        span for span in spans or [] if isinstance(span, dict) and span.get("page") == page
     ]
     if target_spans:
         span_bboxes = [span.get("bbox") for span in target_spans]
@@ -356,28 +352,18 @@ def _page_height(
             if height is not None:
                 return height
     source_page = next(
-        (
-            record
-            for record in pages
-            if isinstance(record, dict) and record.get("page") == page
-        ),
+        (record for record in pages if isinstance(record, dict) and record.get("page") == page),
         None,
     )
     return _float(source_page.get("height")) if source_page is not None else None
 
 
-def _page_record(
-    page_layout: dict[str, Any], page: int
-) -> dict[str, Any] | None:
+def _page_record(page_layout: dict[str, Any], page: int) -> dict[str, Any] | None:
     records = page_layout.get("pages")
     if not isinstance(records, list):
         return None
     return next(
-        (
-            record
-            for record in records
-            if isinstance(record, dict) and record.get("page") == page
-        ),
+        (record for record in records if isinstance(record, dict) and record.get("page") == page),
         None,
     )
 
