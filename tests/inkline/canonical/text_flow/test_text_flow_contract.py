@@ -185,6 +185,30 @@ def test_validation_accepts_same_page_merge_audit_with_cross_page_events(sources
     validate_text_flow(flow)
 
 
+def test_source_validation_rejects_swapped_cross_page_merge_operands(sources) -> None:
+    flow, source_artifacts = _three_page_text_flow_fixture(sources)
+    event = _three_page_unit(flow)["attrs"]["merge_events"][1]
+    event["left_observation_ids"], event["right_observation_ids"] = (
+        event["right_observation_ids"],
+        event["left_observation_ids"],
+    )
+
+    validate_text_flow(flow)
+    with pytest.raises(ValidationError, match="source page provenance"):
+        validate_text_flow_against_sources(flow, *source_artifacts)
+
+
+def test_source_validation_requires_same_page_merge_operands_to_anchor_that_page(sources) -> None:
+    flow, source_artifacts = _three_page_text_flow_fixture(sources)
+    _three_page_unit(flow)["attrs"]["merge_events"].append(
+        _merge_event(6, 6, ["obs000051", "obs000053"], ["obs000063"])
+    )
+
+    validate_text_flow(flow)
+    with pytest.raises(ValidationError, match="source page provenance"):
+        validate_text_flow_against_sources(flow, *source_artifacts)
+
+
 @pytest.mark.parametrize(
     "extra_event",
     [

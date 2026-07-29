@@ -117,6 +117,10 @@ def validate_text_flow_against_sources(
         included_pages,
         protected_observation_ids=direct_anchor_ids,
     )
+    _validate_merge_events_against_observations(
+        flow["text_units"],
+        index.observations_by_id,
+    )
     _validate_anchor_boundaries(flow, skeleton, included_pages)
 
 
@@ -182,6 +186,30 @@ def _validate_anchor_boundaries(
         groups = {protected[value] for value in unit["observation_ids"] if value in protected}
         if len(groups) > 1:
             raise ValidationError("TextUnit crosses distinct direct Skeleton anchors")
+
+
+def _validate_merge_events_against_observations(
+    units: list[dict[str, Any]],
+    observations: Mapping[str, Mapping[str, Any]],
+) -> None:
+    for unit in units:
+        for event in unit["attrs"].get("merge_events", []):
+            left_page = int(event["left_page"])
+            right_page = int(event["right_page"])
+            left_source_pages = [
+                int(observations[observation_id]["page"])
+                for observation_id in event["left_observation_ids"]
+            ]
+            right_source_pages = {
+                int(observations[observation_id]["page"])
+                for observation_id in event["right_observation_ids"]
+            }
+            if (
+                left_page not in left_source_pages
+                or max(left_source_pages) != left_page
+                or right_source_pages != {right_page}
+            ):
+                raise ValidationError("TextFlow merge event source page provenance differs")
 
 
 def _validate_metadata(value: Any) -> None:
