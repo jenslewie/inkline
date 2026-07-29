@@ -56,6 +56,15 @@ LAYOUT_FRAGMENT_FIELDS = {
     "signals",
 }
 LAYOUT_FRAGMENT_STATUSES = {"resolved", "uncertain"}
+MERGE_EVENT_REQUIRED_FIELDS = {
+    "reason",
+    "left_page",
+    "right_page",
+    "left_observation_ids",
+    "right_observation_ids",
+    "interrupting_observation_ids",
+}
+MERGE_EVENT_OPTIONAL_FIELDS = {"boundary_evidence"}
 
 
 def validate_text_flow(flow: dict[str, Any]) -> None:
@@ -259,9 +268,7 @@ def _validate_layout_evidence(unit: dict[str, Any]) -> None:
     for fragment in fragments:
         _validate_layout_fragment(fragment)
         if fragment["classified_type"] != unit["unit_type"]:
-            raise ValidationError(
-                "TextFlow layout fragment type differs from final unit type"
-            )
+            raise ValidationError("TextFlow layout fragment type differs from final unit type")
 
 
 def _validate_layout_fragment(fragment: Any) -> None:
@@ -281,9 +288,7 @@ def _validate_layout_fragment(fragment: Any) -> None:
         raise ValidationError("TextFlow layout fragment is invalid")
     if not isinstance(status, str) or status not in LAYOUT_FRAGMENT_STATUSES:
         raise ValidationError("TextFlow layout fragment is invalid")
-    if layout_form is not None and (
-        not isinstance(layout_form, str) or not layout_form
-    ):
+    if layout_form is not None and (not isinstance(layout_form, str) or not layout_form):
         raise ValidationError("TextFlow layout fragment is invalid")
     if not isinstance(signals, list) or not all(
         isinstance(signal, str) and signal for signal in signals
@@ -291,9 +296,7 @@ def _validate_layout_fragment(fragment: Any) -> None:
         raise ValidationError("TextFlow layout fragment is invalid")
 
 
-def _validate_adjacent_page_merge_events(
-    unit: dict[str, Any], attrs: dict[str, Any]
-) -> None:
+def _validate_adjacent_page_merge_events(unit: dict[str, Any], attrs: dict[str, Any]) -> None:
     transitions = [
         (left_page, right_page)
         for left_page, right_page in pairwise(unit["pages"])
@@ -301,31 +304,65 @@ def _validate_adjacent_page_merge_events(
     ]
     merge_events = attrs.get("merge_events", [])
     if not isinstance(merge_events, list):
-        raise ValidationError(
-            "TextFlow requires one merge event per adjacent-page transition"
-        )
+        raise ValidationError("TextFlow requires one merge event per adjacent-page transition")
     event_transitions: list[tuple[int, int]] = []
     for event in merge_events:
-        if not isinstance(event, Mapping):
-            raise ValidationError(
-                "TextFlow requires one merge event per adjacent-page transition"
-            )
-        left_page = event.get("left_page")
-        right_page = event.get("right_page")
-        if (
-            type(left_page) is not int
-            or type(right_page) is not int
-            or left_page <= 0
-            or right_page <= 0
-        ):
-            raise ValidationError(
-                "TextFlow requires one merge event per adjacent-page transition"
-            )
-        event_transitions.append((left_page, right_page))
+        transition = _validated_merge_event_transition(event, unit)
+        if transition[0] == transition[1]:
+            if transition[0] not in unit["pages"]:
+                raise ValidationError(
+                    "TextFlow requires one merge event per adjacent-page transition"
+                )
+            continue
+        event_transitions.append(transition)
     if Counter(event_transitions) != Counter(transitions):
-        raise ValidationError(
-            "TextFlow requires one merge event per adjacent-page transition"
-        )
+        raise ValidationError("TextFlow requires one merge event per adjacent-page transition")
+
+
+def _validated_merge_event_transition(event: Any, unit: dict[str, Any]) -> tuple[int, int]:
+    if (
+        not isinstance(event, Mapping)
+        or not MERGE_EVENT_REQUIRED_FIELDS.issubset(event)
+        or not set(event).issubset(MERGE_EVENT_REQUIRED_FIELDS | MERGE_EVENT_OPTIONAL_FIELDS)
+        or not isinstance(event.get("reason"), str)
+        or not event["reason"]
+    ):
+        raise ValidationError("TextFlow requires one merge event per adjacent-page transition")
+    left_page = event["left_page"]
+    right_page = event["right_page"]
+    if (
+        type(left_page) is not int
+        or type(right_page) is not int
+        or left_page <= 0
+        or right_page <= 0
+    ):
+        raise ValidationError("TextFlow requires one merge event per adjacent-page transition")
+    left_ids = _validated_merge_event_observation_ids(
+        event["left_observation_ids"], allow_empty=False
+    )
+    right_ids = _validated_merge_event_observation_ids(
+        event["right_observation_ids"], allow_empty=False
+    )
+    _validated_merge_event_observation_ids(event["interrupting_observation_ids"], allow_empty=True)
+    if set(left_ids).intersection(right_ids) or not set(left_ids + right_ids).issubset(
+        unit["observation_ids"]
+    ):
+        raise ValidationError("TextFlow requires one merge event per adjacent-page transition")
+    boundary_evidence = event.get("boundary_evidence")
+    if "boundary_evidence" in event and not isinstance(boundary_evidence, Mapping):
+        raise ValidationError("TextFlow requires one merge event per adjacent-page transition")
+    return left_page, right_page
+
+
+def _validated_merge_event_observation_ids(value: Any, *, allow_empty: bool) -> list[str]:
+    if (
+        not isinstance(value, list)
+        or (not allow_empty and not value)
+        or not all(isinstance(item, str) and item for item in value)
+        or len(value) != len(set(value))
+    ):
+        raise ValidationError("TextFlow requires one merge event per adjacent-page transition")
+    return value
 
 
 def _validate_index(index: ObservedIndex, document: dict[str, Any]) -> None:
