@@ -61,16 +61,22 @@ def _apply_terminal_attributions(
 ) -> None:
     page_records = {int(page["page"]): page for page in pages}
     for run in _ordered_body_runs(candidates, profiles, book_profile):
-        if not _is_terminal_right_aligned_run(run, page_records, book_profile):
+        if not _is_terminal_right_aligned_run(run):
             continue
         page = int(run.candidates[0]["page"])
-        structural_boundary = _has_structural_following_page(page_records.get(page + 1))
+        page_bottom = _at_page_edge(run, page_records.get(page), bottom=True)
+        preceding_gap = _terminal_preceding_gap(run, book_profile)
+        structural_boundary = _has_structural_following_boundary(
+            candidates,
+            page + 1,
+            page_records.get(page + 1),
+        )
         for candidate in run.candidates:
             decision = candidate["layout_decision"]
             decision["signals"] = [
                 signal for signal in decision["signals"] if signal != "display_gap_after"
             ]
-            if structural_boundary:
+            if page_bottom and preceding_gap and structural_boundary:
                 decision["classified_type"] = "display_block"
                 decision["layout_form"] = "attribution"
                 decision["alignment"] = "right"
@@ -79,29 +85,27 @@ def _apply_terminal_attributions(
                 decision["classified_type"] = "paragraph"
                 decision["layout_form"] = None
                 decision["alignment"] = None
-                decision["signals"].append(
-                    "terminal_right_aligned_without_structural_boundary"
-                )
+                if not page_bottom:
+                    decision["signals"].append(
+                        "terminal_right_aligned_without_page_bottom"
+                    )
+                if not preceding_gap:
+                    decision["signals"].append(
+                        "terminal_right_aligned_without_preceding_outer_gap"
+                    )
+                if not structural_boundary:
+                    decision["signals"].append(
+                        "terminal_right_aligned_without_structural_boundary"
+                    )
 
 
 def _is_terminal_right_aligned_run(
     run: _SamePageRun,
-    page_records: dict[int, dict[str, Any]],
-    book_profile: dict[str, Any],
 ) -> bool:
     if run.status != "resolved" or run.lane != "right_set_off":
         return False
     page = int(run.candidates[0]["page"])
-    if run.following is not None and int(run.following["page"]) == page:
-        return False
-    page_record = page_records.get(page)
-    bbox = run.candidates[-1].get("bbox")
-    if page_record is None or not valid_bbox(bbox):
-        return False
-    page_height = _page_height(page_record)
-    if page_height is None or float(bbox[3]) < page_height * 0.78:
-        return False
-    return _terminal_preceding_gap(run, book_profile)
+    return run.following is None or int(run.following["page"]) != page
 
 
 def _terminal_preceding_gap(
@@ -121,14 +125,27 @@ def _terminal_preceding_gap(
     return float(first_bbox[1]) - float(previous["bbox"][3]) >= threshold
 
 
-def _has_structural_following_page(page_record: dict[str, Any] | None) -> bool:
+def _has_structural_following_boundary(
+    candidates: list[dict[str, Any]],
+    page: int,
+    page_record: dict[str, Any] | None,
+) -> bool:
     if page_record is None:
         return False
-    role_signals = page_record.get("role_signals")
-    role_counts = (
-        role_signals.get("role_hint_counts") if isinstance(role_signals, dict) else None
+    page_height = _page_height(page_record)
+    following = [candidate for candidate in candidates if int(candidate["page"]) == page]
+    if page_height is None or not following:
+        return False
+    first = following[0]
+    bbox = first.get("bbox")
+    attrs = first.get("attrs")
+    return (
+        first.get("candidate_type") == "heading"
+        and first.get("role_hint") == "title_text"
+        and valid_bbox(bbox)
+        and float(bbox[1]) <= page_height * 0.22
+        and not (isinstance(attrs, dict) and attrs.get("layout_role") == "caption_candidate")
     )
-    return isinstance(role_counts, dict) and int(role_counts.get("title_text") or 0) > 0
 
 
 def _apply_cross_page_display_runs(
@@ -138,7 +155,7 @@ def _apply_cross_page_display_runs(
     book_profile: dict[str, Any],
 ) -> None:
     runs = _ordered_body_runs(candidates, profiles, book_profile)
-    accepted: list[tuple[_SamePageRun, _SamePageRun, dict[str, Any]]] = []
+    compatible: list[tuple[_SamePageRun, _SamePageRun, dict[str, Any]]] = []
     for left, right in pairwise(runs):
         evidence = _joint_display_evidence(
             left,
@@ -149,10 +166,8 @@ def _apply_cross_page_display_runs(
         )
         if evidence is None:
             continue
-        _promote_run_decision(left)
-        _promote_run_decision(right)
-        accepted.append((left, right, evidence))
-    _write_transition_components(accepted)
+        compatible.append((left, right, evidence))
+    _apply_transition_components(compatible, book_profile)
 
 
 def _ordered_body_runs(
@@ -189,13 +204,6 @@ def _joint_display_evidence(
     if not _at_page_edge(left, page_records.get(left_page), bottom=True):
         return None
     if not _at_page_edge(right, page_records.get(right_page), bottom=False):
-        return None
-    threshold = display_gap_threshold(book_profile)
-    if not _outer_separated(left.previous, left.candidates[0], threshold, before=True):
-        return None
-    if not _outer_separated(
-        right.following, right.candidates[-1], threshold, before=False
-    ):
         return None
     if not _has_only_recorded_page_foot_interruptions(
         left,
@@ -285,22 +293,57 @@ def _promote_run_decision(run: _SamePageRun) -> None:
         decision["alignment"] = _layout_alignment(run)
 
 
-def _write_transition_components(
-    accepted: list[tuple[_SamePageRun, _SamePageRun, dict[str, Any]]],
+def _apply_transition_components(
+    compatible: list[tuple[_SamePageRun, _SamePageRun, dict[str, Any]]],
+    book_profile: dict[str, Any],
 ) -> None:
     components: list[tuple[list[_SamePageRun], list[dict[str, Any]]]] = []
-    for left, right, evidence in accepted:
+    for left, right, evidence in compatible:
         if components and components[-1][0][-1] is left:
             components[-1][0].append(right)
             components[-1][1].append(evidence)
         else:
             components.append(([left, right], [evidence]))
     for runs, transitions in components:
+        if not _has_recorded_component_outer_gaps(runs, book_profile):
+            continue
         for run in runs:
+            _promote_run_decision(run)
             for candidate in run.candidates:
                 candidate["layout_decision"]["cross_page_transitions"] = deepcopy(
                     transitions
                 )
+
+
+def _has_recorded_component_outer_gaps(
+    runs: list[_SamePageRun], book_profile: dict[str, Any]
+) -> bool:
+    threshold = display_gap_threshold(book_profile)
+    first = runs[0]
+    last = runs[-1]
+    return _recorded_outer_separated(
+        first.previous,
+        first.candidates[0],
+        threshold,
+        before=True,
+    ) and _recorded_outer_separated(
+        last.following,
+        last.candidates[-1],
+        threshold,
+        before=False,
+    )
+
+
+def _recorded_outer_separated(
+    outside: dict[str, Any] | None,
+    edge: dict[str, Any],
+    threshold: float,
+    *,
+    before: bool,
+) -> bool:
+    if outside is None or int(outside["page"]) != int(edge["page"]):
+        return False
+    return _outer_separated(outside, edge, threshold, before=before)
 
 
 def _same_page_runs(

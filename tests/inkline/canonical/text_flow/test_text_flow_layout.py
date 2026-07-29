@@ -25,9 +25,10 @@ LAYOUT_DECISION_FIELDS = {
 
 def _silk_road_decisions(pages: set[int]) -> dict[str, dict[str, Any]]:
     observed = json.loads(SILK_ROAD_OBSERVED.read_text(encoding="utf-8"))
+    context_pages = pages | {page + 1 for page in pages}
     candidates, _ignored = build_text_candidates(
         observed,
-        included_pages=pages,
+        included_pages=context_pages,
         anchor_groups_by_observation_id={},
     )
     classified = classify_text_candidates_by_layout(
@@ -38,6 +39,7 @@ def _silk_road_decisions(pages: set[int]) -> dict[str, dict[str, Any]]:
     return {
         candidate["observation_id"]: candidate["layout_decision"]
         for candidate in classified
+        if int(candidate["page"]) in pages
     }
 
 
@@ -292,3 +294,106 @@ def test_three_page_joint_display_run_records_two_adjacent_transitions() -> None
         (1, 2),
         (2, 3),
     ]
+
+
+def test_isolated_cross_page_set_off_candidates_do_not_invent_outer_gaps() -> None:
+    candidates = [
+        _body_candidate("obs000001", page=1, bbox=[180, 700, 850, 900]),
+        _body_candidate("obs000002", page=2, bbox=[180, 100, 850, 300]),
+    ]
+    pages = [
+        make_observed_page(page, width=1000, height=1000) for page in (1, 2)
+    ]
+
+    classified = classify_text_candidates_by_layout(
+        candidates,
+        pages,
+        page_layout=_page_layout_for_pages(2),
+    )
+
+    assert _decision(classified, "obs000001")["cross_page_transitions"] == []
+    assert _decision(classified, "obs000002")["cross_page_transitions"] == []
+
+
+def test_terminal_right_aligned_without_preceding_gap_is_uncertain_paragraph() -> None:
+    candidates = [
+        _body_candidate("obs000001", page=1, bbox=[100, 700, 900, 850]),
+        _body_candidate("obs000002", page=1, bbox=[600, 850, 900, 900]),
+        _body_candidate("obs000003", page=2, bbox=[100, 100, 900, 300]),
+    ]
+    pages = [
+        make_observed_page(page, width=1000, height=1000) for page in (1, 2)
+    ]
+
+    classified = classify_text_candidates_by_layout(
+        candidates,
+        pages,
+        page_layout=_page_layout_for_pages(2),
+    )
+
+    decision = _decision(classified, "obs000002")
+    assert decision["classified_type"] == "paragraph"
+    assert "terminal_right_aligned_without_preceding_outer_gap" in decision["signals"]
+    assert "terminal_right_aligned_without_structural_boundary" in decision["signals"]
+    assert "display_gap_after" not in decision["signals"]
+
+
+def test_terminal_attribution_rejects_heading_after_next_page_body() -> None:
+    heading = {
+        **_body_candidate("obs000004", page=2, bbox=[300, 300, 700, 340]),
+        "candidate_type": "heading",
+        "role_hint": "title_text",
+        "protected_anchor_group": ["obs000004"],
+    }
+    candidates = [
+        _body_candidate("obs000001", page=1, bbox=[100, 700, 900, 850]),
+        _body_candidate("obs000002", page=1, bbox=[600, 870, 900, 900]),
+        _body_candidate("obs000003", page=2, bbox=[100, 100, 900, 200]),
+        heading,
+    ]
+    pages = [
+        make_observed_page(page, width=1000, height=1000) for page in (1, 2)
+    ]
+    page_layout = _page_layout_for_pages(2)
+    page_layout["pages"][1]["role_signals"]["role_hint_counts"] = {
+        "body_text": 1,
+        "title_text": 1,
+    }
+
+    classified = classify_text_candidates_by_layout(
+        candidates,
+        pages,
+        page_layout=page_layout,
+    )
+
+    decision = _decision(classified, "obs000002")
+    assert decision["classified_type"] == "paragraph"
+    assert "terminal_right_aligned_without_structural_boundary" in decision["signals"]
+
+
+def test_terminal_attribution_rejects_next_page_caption_title() -> None:
+    caption_title = {
+        **_body_candidate("obs000003", page=2, bbox=[200, 100, 500, 140]),
+        "role_hint": "title_text",
+        "attrs": {"layout_role": "caption_candidate"},
+    }
+    candidates = [
+        _body_candidate("obs000001", page=1, bbox=[100, 700, 900, 850]),
+        _body_candidate("obs000002", page=1, bbox=[600, 870, 900, 900]),
+        caption_title,
+    ]
+    pages = [
+        make_observed_page(page, width=1000, height=1000) for page in (1, 2)
+    ]
+    page_layout = _page_layout_for_pages(2)
+    page_layout["pages"][1]["role_signals"]["role_hint_counts"] = {"title_text": 1}
+
+    classified = classify_text_candidates_by_layout(
+        candidates,
+        pages,
+        page_layout=page_layout,
+    )
+
+    decision = _decision(classified, "obs000002")
+    assert decision["classified_type"] == "paragraph"
+    assert "terminal_right_aligned_without_structural_boundary" in decision["signals"]
