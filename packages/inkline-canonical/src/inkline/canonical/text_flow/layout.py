@@ -76,17 +76,47 @@ def _apply_terminal_mixed_alignment_short_line_clusters(
             or left.short_line_alignment != "left"
             or right.short_line_alignment != "right"
             or not _terminal_preceding_gap(left, book_profile)
+            or not _terminal_preceding_gap(right, book_profile)
+            or not _strong_short_line_cluster(
+                left,
+                required_signals={"narrower_than_body_lane", "left_inset_set_off_text"},
+            )
+            or not _strong_short_line_cluster(
+                right,
+                required_signals={"narrower_than_body_lane", "right_aligned_attribution"},
+            )
+            or not _is_terminal_right_aligned_run(right)
             or _has_protected_member(left)
             or _has_protected_member(right)
             or (right_following is not None and int(right_following["page"]) == right_page)
         ):
             continue
+        for candidate in right.candidates:
+            decision = candidate["layout_decision"]
+            decision["signals"] = [
+                signal
+                for signal in decision["signals"]
+                if not signal.startswith("terminal_right_aligned_without_")
+            ]
         for run in (left, right):
             _promote_run_decision(run)
             for candidate in run.candidates:
                 candidate["layout_decision"]["signals"].append(
                     "terminal_mixed_alignment_short_line_cluster"
                 )
+
+
+def _strong_short_line_cluster(
+    run: _SamePageRun,
+    *,
+    required_signals: set[str],
+) -> bool:
+    if len(run.candidates) < 2 or run.short_line_alignment is None:
+        return False
+    return all(
+        required_signals.issubset(candidate["layout_decision"]["signals"])
+        for candidate in run.candidates
+    )
 
 
 def _apply_terminal_attributions(

@@ -349,6 +349,31 @@ def test_terminal_mixed_alignment_short_line_cluster_is_display() -> None:
     assert {decision["layout_form"] for decision in left_decisions} == {"short_line_group"}
     assert {decision["classified_type"] for decision in right_decisions} == {"display_block"}
     assert {decision["layout_form"] for decision in right_decisions} == {"attribution"}
+    assert all(
+        "terminal_right_aligned_without_structural_boundary" not in decision["signals"]
+        for decision in right_decisions
+    )
+
+
+def test_terminal_attribution_does_not_promote_single_indented_body_fragment() -> None:
+    candidates = [
+        _body_candidate("body", page=1, bbox=[100, 100, 900, 500]),
+        _body_candidate("indented-body", page=1, bbox=[150, 525, 650, 565]),
+        _body_candidate("right-1", page=1, bbox=[700, 610, 900, 630]),
+        _body_candidate("right-2", page=1, bbox=[730, 645, 900, 665]),
+    ]
+
+    classified = classify_text_candidates_by_layout(
+        candidates,
+        [make_observed_page(1, width=1000, height=1000)],
+        page_layout=_page_layout_with_profile(),
+    )
+
+    assert _decision(classified, "indented-body")["classified_type"] == "paragraph"
+    for observation_id in ("right-1", "right-2"):
+        decision = _decision(classified, observation_id)
+        assert decision["classified_type"] == "paragraph"
+        assert "terminal_right_aligned_without_structural_boundary" in decision["signals"]
 
 
 def test_terminal_attribution_rejects_heading_after_next_page_body() -> None:
