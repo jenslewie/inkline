@@ -38,6 +38,7 @@ def reconcile_text_records(
     pages: list[dict[str, Any]],
     page_layout: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Backward-compatible name for the parser-neutral orchestrator."""
+    """Run the original footnote and paragraph reconciliation passes."""
 
-    return reconcile_text_flow_records(records, pages, page_layout)
+    reconciled = reconcile_cross_page_footnotes(records, page_layout)
+    return reconcile_cross_page_paragraphs(reconciled, pages, page_layout)

@@ -9,6 +9,7 @@ from typing import Any, TypeGuard
 from inkline.canonical.text_flow.reconcile.common import merge_records
 
 _DISPLAY_LANE_TOLERANCE = 0.12
+_DISPLAY_ALIGNMENT_SPREAD_TOLERANCE = 0.04
 _MIN_BODY_LANE_OVERLAP = 0.7
 _PAGE_BOTTOM_RATIO = 0.8
 _PAGE_FOOT_BAND_START_RATIO = 0.75
@@ -18,6 +19,7 @@ _ATTRIBUTION_SIGNALS = {
     "right_aligned_attribution",
     "terminal_right_aligned_attribution",
 }
+_DISPLAY_ALIGNMENT_AXES = ("left", "center", "right")
 
 
 def reconcile_cross_page_displays(
@@ -155,12 +157,27 @@ def _boundary_evidence(
         return None
     left_form = _layout_form(left)
     right_form = _layout_form(right)
+    left_alignment_metadata = _alignment_metadata(left)
+    right_alignment_metadata = _alignment_metadata(right)
     if (
         left_form is None
         or left_form != right_form
+        or left_alignment_metadata is None
+        or right_alignment_metadata is None
         or _has_attribution_boundary(left, left_form)
         or _has_attribution_boundary(right, right_form)
     ):
+        return None
+    alignment = _boundary_alignment(
+        left,
+        right,
+        left_page,
+        right_page,
+        page_layout,
+        left_alignment_metadata[0],
+        right_alignment_metadata[0],
+    )
+    if alignment is None:
         return None
     left_edge = _left_edge_evidence(
         left,
@@ -176,6 +193,7 @@ def _boundary_evidence(
         left_page,
         right_page,
         page_layout,
+        alignment,
     )
     if left_edge is None or not right_top or display_lane is None:
         return None
@@ -226,6 +244,105 @@ def _layout_form(record: dict[str, Any]) -> str | None:
         return None
     fragment_form = next(iter(fragment_forms))
     return fragment_form if direct_form in {None, fragment_form} else None
+
+
+def _alignment_metadata(record: dict[str, Any]) -> tuple[str | None] | None:
+    attrs = record.get("attrs")
+    if not isinstance(attrs, dict):
+        return None
+    raw_direct = attrs.get("alignment")
+    direct = _optional_alignment(raw_direct)
+    if "alignment" in attrs and direct is None and not _absent_alignment(raw_direct):
+        return None
+    fragments = attrs.get("layout_fragments")
+    if fragments is None:
+        return (direct,)
+    if not isinstance(fragments, list) or not fragments:
+        return None
+    fragment_alignments: set[str] = set()
+    for fragment in fragments:
+        if not isinstance(fragment, dict):
+            return None
+        raw_alignment = fragment.get("alignment")
+        alignment = _optional_alignment(raw_alignment)
+        if alignment is None and not _absent_alignment(raw_alignment):
+            return None
+        if alignment is not None:
+            fragment_alignments.add(alignment)
+    if len(fragment_alignments) > 1:
+        return None
+    fragment_alignment = next(iter(fragment_alignments), None)
+    if direct is not None and fragment_alignment not in {None, direct}:
+        return None
+    return (direct or fragment_alignment,)
+
+
+def _optional_alignment(value: Any) -> str | None:
+    return value if isinstance(value, str) and value in _DISPLAY_ALIGNMENT_AXES else None
+
+
+def _absent_alignment(value: Any) -> bool:
+    return value is None or value == ""
+
+
+def _boundary_alignment(
+    left: dict[str, Any],
+    right: dict[str, Any],
+    left_page: int,
+    right_page: int,
+    page_layout: dict[str, Any],
+    left_alignment: str | None,
+    right_alignment: str | None,
+) -> str | None:
+    explicit = {value for value in (left_alignment, right_alignment) if value}
+    if len(explicit) > 1:
+        return None
+    selected = next(iter(explicit), None)
+    left_inferred = _alignment_from_spans(left, left_page, page_layout)
+    right_inferred = _alignment_from_spans(right, right_page, page_layout)
+    inferred = {value for value in (left_inferred, right_inferred) if value}
+    if selected is not None and any(value != selected for value in inferred):
+        return None
+    if selected is not None:
+        return selected
+    return next(iter(inferred)) if len(inferred) == 1 else None
+
+
+def _alignment_from_spans(
+    record: dict[str, Any],
+    page: int,
+    page_layout: dict[str, Any],
+) -> str | None:
+    spans = record.get("spans")
+    if not isinstance(spans, list):
+        return None
+    bboxes = [
+        span.get("bbox")
+        for span in spans
+        if isinstance(span, dict) and span.get("page") == page
+    ]
+    if len(bboxes) < 2 or not all(_valid_bbox(bbox) for bbox in bboxes):
+        return None
+    positions = [
+        _bbox_lane_position(bbox, page, page_layout)
+        for bbox in bboxes
+        if _valid_bbox(bbox)
+    ]
+    if any(position is None for position in positions):
+        return None
+    typed_positions = [position for position in positions if position is not None]
+    spreads = [
+        max(position[index] for position in typed_positions)
+        - min(position[index] for position in typed_positions)
+        for index in range(len(_DISPLAY_ALIGNMENT_AXES))
+    ]
+    minimum = min(spreads)
+    if minimum > _DISPLAY_ALIGNMENT_SPREAD_TOLERANCE:
+        return None
+    winners = [
+        index for index, spread in enumerate(spreads) if math.isclose(spread, minimum)
+    ]
+    return _DISPLAY_ALIGNMENT_AXES[winners[0]] if len(winners) == 1 else None
 
 
 def _has_attribution_boundary(record: dict[str, Any], layout_form: str) -> bool:
@@ -304,24 +421,20 @@ def _compatible_display_lanes(
     left_page: int,
     right_page: int,
     page_layout: dict[str, Any],
+    alignment: str,
 ) -> dict[str, Any] | None:
     left_position = _display_lane_position(left, left_page, page_layout)
     right_position = _display_lane_position(right, right_page, page_layout)
     if left_position is None or right_position is None:
         return None
-    axes = ("left", "center", "right")
-    differences = [
-        abs(left_value - right_value)
-        for left_value, right_value in zip(left_position, right_position, strict=True)
-    ]
-    best_index = min(range(len(differences)), key=differences.__getitem__)
-    difference = differences[best_index]
+    axis_index = _DISPLAY_ALIGNMENT_AXES.index(alignment)
+    difference = abs(left_position[axis_index] - right_position[axis_index])
     if difference > _DISPLAY_LANE_TOLERANCE:
         return None
     return {
-        "axis": axes[best_index],
-        "left_position_ratio": left_position[best_index],
-        "right_position_ratio": right_position[best_index],
+        "axis": alignment,
+        "left_position_ratio": left_position[axis_index],
+        "right_position_ratio": right_position[axis_index],
         "difference_ratio": difference,
         "tolerance": _DISPLAY_LANE_TOLERANCE,
     }
@@ -333,8 +446,18 @@ def _display_lane_position(
     page_layout: dict[str, Any],
 ) -> tuple[float, float, float] | None:
     bbox = _bbox_on_page(record, page)
+    if not _valid_bbox(bbox):
+        return None
+    return _bbox_lane_position(bbox, page, page_layout)
+
+
+def _bbox_lane_position(
+    bbox: list[float],
+    page: int,
+    page_layout: dict[str, Any],
+) -> tuple[float, float, float] | None:
     page_record = _page_record(page_layout, page)
-    if not _valid_bbox(bbox) or page_record is None:
+    if page_record is None:
         return None
     body_lane = page_record.get("body_lane")
     if not isinstance(body_lane, dict):

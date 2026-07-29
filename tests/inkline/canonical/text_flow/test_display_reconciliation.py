@@ -16,6 +16,7 @@ from inkline.canonical.text_flow.reconcile import (
     reconcile_cross_page_displays,
     reconcile_cross_page_footnotes,
     reconcile_text_flow_records,
+    reconcile_text_records,
 )
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -37,6 +38,8 @@ def _record(
     }
     if layout_form is not None:
         attrs["layout_form"] = layout_form
+    if unit_type == "display_block":
+        attrs["alignment"] = "left"
     return {
         "unit_type": unit_type,
         "text": text,
@@ -286,6 +289,18 @@ def test_orchestrator_reconciles_footnotes_before_displays() -> None:
     assert footnote["observation_ids"] == ["note-left", "note-right"]
 
 
+def test_legacy_orchestrator_does_not_run_display_reconciliation() -> None:
+    records, pages, page_layout = _cross_page_pair()
+
+    legacy = reconcile_text_records(records, pages, page_layout)
+    text_flow = reconcile_text_flow_records(records, pages, page_layout)
+
+    assert legacy == records
+    assert len(legacy) == 2
+    assert len(text_flow) == 1
+    assert text_flow[0]["observation_ids"] == ["left", "right"]
+
+
 @pytest.mark.parametrize(
     ("left_form", "right_form"),
     [
@@ -318,6 +333,75 @@ def test_explicit_empty_layout_form_cannot_fall_back_to_fragments() -> None:
                 "classified_type": "display_block",
                 "status": "resolved",
                 "layout_form": "short_line_group",
+                "signals": [],
+            }
+        ]
+
+    assert reconcile_cross_page_displays(records, pages, page_layout) == records
+
+
+def test_direct_layout_form_conflict_with_resolved_fragments_rejects_merge() -> None:
+    records, pages, page_layout = _cross_page_pair()
+    records[0]["attrs"]["layout_form"] = "set_off_text"
+    records[0]["attrs"]["layout_fragments"] = [
+        {
+            "classified_type": "display_block",
+            "status": "resolved",
+            "layout_form": "short_line_group",
+            "signals": [],
+        }
+    ]
+
+    assert reconcile_cross_page_displays(records, pages, page_layout) == records
+
+
+def test_explicit_endpoint_alignment_conflict_rejects_display_merge() -> None:
+    records, pages, page_layout = _cross_page_pair()
+    records[0]["attrs"]["alignment"] = "left"
+    records[1]["attrs"]["alignment"] = "right"
+
+    assert reconcile_cross_page_displays(records, pages, page_layout) == records
+
+
+def test_explicit_alignment_checks_only_its_matching_lane_axis() -> None:
+    records, pages, page_layout = _cross_page_pair()
+    records[0]["attrs"]["alignment"] = "left"
+    records[1]["attrs"]["alignment"] = "left"
+    records[1]["bbox"] = [310.0, 100.0, 500.0, 160.0]
+    records[1]["spans"][0]["bbox"] = deepcopy(records[1]["bbox"])
+
+    assert reconcile_cross_page_displays(records, pages, page_layout) == records
+
+
+def test_direct_alignment_conflict_with_resolved_fragment_rejects_merge() -> None:
+    records, pages, page_layout = _cross_page_pair()
+    records[0]["attrs"]["alignment"] = "left"
+    records[0]["attrs"]["layout_fragments"] = [
+        {
+            "classified_type": "display_block",
+            "status": "resolved",
+            "layout_form": "short_line_group",
+            "alignment": "right",
+            "signals": [],
+        }
+    ]
+
+    assert reconcile_cross_page_displays(records, pages, page_layout) == records
+
+
+@pytest.mark.parametrize("source", ["direct", "fragment"])
+def test_malformed_alignment_metadata_rejects_display_merge(source: str) -> None:
+    records, pages, page_layout = _cross_page_pair()
+    if source == "direct":
+        records[0]["attrs"]["alignment"] = {}
+    else:
+        records[0]["attrs"].pop("alignment")
+        records[0]["attrs"]["layout_fragments"] = [
+            {
+                "classified_type": "display_block",
+                "status": "resolved",
+                "layout_form": "short_line_group",
+                "alignment": {},
                 "signals": [],
             }
         ]
