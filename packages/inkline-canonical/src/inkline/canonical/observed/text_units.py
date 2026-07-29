@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import Counter
 from copy import deepcopy
 from typing import Any, TypeGuard
 
@@ -16,37 +15,38 @@ def build_text_units(
     included_pages: set[int] | None = None,
     anchor_groups_by_observation_id: dict[str, tuple[str, ...]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    from inkline.canonical.text_flow.candidates import build_text_candidates
+
     validate_observed_document(document)
     units: list[dict[str, Any]] = []
-    ignored_counts: Counter[str] = Counter()
     page_sizes = _page_sizes(document["pages"])
+    effective_included_pages = (
+        included_pages
+        if included_pages is not None
+        else {int(observation["page"]) for observation in document["observations"]}
+    )
     observations = [
         observation
         for observation in document["observations"]
-        if included_pages is None or int(observation["page"]) in included_pages
+        if int(observation["page"]) in effective_included_pages
     ]
     visual_bboxes = _visual_bboxes(observations)
-    image_bboxes = _region_bboxes(observations, {"image_region"})
     table_bboxes = _region_bboxes(observations, {"table_region"})
-    ordered_observations = _ordered_observations(observations)
-    caption_title_ids = _visual_caption_title_ids(ordered_observations, image_bboxes, page_sizes)
-    caption_title_ids.difference_update((anchor_groups_by_observation_id or {}).keys())
+    candidates, ignored_counts = build_text_candidates(
+        document,
+        included_pages=effective_included_pages,
+        anchor_groups_by_observation_id=anchor_groups_by_observation_id or {},
+    )
 
-    for observation in ordered_observations:
-        layout_role = None
-        unit_type = _unit_type(observation, caption_title_ids)
-        if observation["observation_id"] in caption_title_ids:
-            layout_role = "caption_candidate"
-        if unit_type is None:
-            ignored_counts[str(observation["kind"])] += 1
-            continue
+    for candidate in candidates:
+        unit_type = _legacy_unit_type(candidate["candidate_type"])
         merge_reason = (
-            _merge_reason(units[-1], observation, unit_type, page_sizes) if units else None
+            _merge_reason(units[-1], candidate, unit_type, page_sizes) if units else None
         )
         if merge_reason:
-            _merge_observation(units[-1], observation, merge_reason)
+            _merge_candidate(units[-1], candidate, merge_reason)
             continue
-        units.append(_unit_from_observation(observation, len(units) + 1, unit_type, layout_role))
+        units.append(_unit_from_candidate(candidate, len(units) + 1, unit_type))
 
     _promote_table_heading_fragments(units, page_sizes, table_bboxes)
     _merge_direct_anchor_fragments(units, anchor_groups_by_observation_id or {})
@@ -57,7 +57,11 @@ def build_text_units(
         anchor_groups_by_observation_id or {},
     )
     _renumber_units(units)
-    return units, dict(sorted(ignored_counts.items()))
+    return units, ignored_counts
+
+
+def _legacy_unit_type(candidate_type: str) -> str:
+    return "paragraph" if candidate_type == "body_text" else candidate_type
 
 
 def _merge_direct_anchor_fragments(
@@ -90,19 +94,6 @@ def _merge_direct_anchor_fragments(
             units.remove(fragment)
 
 
-def _ordered_observations(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(
-        observations,
-        key=lambda observation: (
-            int(observation["page"]),
-            _reading_order(observation),
-            _bbox_top(observation.get("bbox")),
-            _bbox_left(observation.get("bbox")),
-            str(observation["observation_id"]),
-        ),
-    )
-
-
 def _page_sizes(pages: list[dict[str, Any]]) -> dict[int, dict[str, float]]:
     return {
         int(page["page"]): {"width": float(page["width"]), "height": float(page["height"])}
@@ -130,103 +121,6 @@ def _region_bboxes(
                 [float(value) for value in bbox]
             )
     return grouped
-
-
-def _visual_caption_title_ids(
-    observations: list[dict[str, Any]],
-    visual_bboxes: dict[int, list[list[float]]],
-    page_sizes: dict[int, dict[str, float]],
-) -> set[str]:
-    ids: set[str] = set()
-    text_observations_by_page: dict[int, list[dict[str, Any]]] = {}
-    for observation in observations:
-        if observation.get("kind") in {"text_region", "footnote_region"}:
-            text_observations_by_page.setdefault(int(observation["page"]), []).append(observation)
-
-    for page, text_observations in text_observations_by_page.items():
-        visuals = visual_bboxes.get(page) or []
-        if not visuals:
-            continue
-        page_size = page_sizes.get(page, {})
-        for index, observation in enumerate(text_observations[:-1]):
-            if observation.get("role_hint") != "title_text":
-                continue
-            if _near_visual_region(observation, visual_bboxes) and len(text_observations) > 1:
-                ids.add(str(observation["observation_id"]))
-                continue
-            following = text_observations[index + 1]
-            if following.get("role_hint") != "body_text":
-                continue
-            if not _caption_text_group(observation, following):
-                continue
-            if _visual_text_group(observation, following, visuals) or (
-                _visual_dominant_annotation_page(text_observations, visuals, page_size)
-            ):
-                ids.add(str(observation["observation_id"]))
-    return ids
-
-
-def _caption_text_group(title: dict[str, Any], following: dict[str, Any]) -> bool:
-    title_bbox = title.get("bbox")
-    following_bbox = following.get("bbox")
-    if not _valid_bbox(title_bbox) or not _valid_bbox(following_bbox):
-        return False
-    return 0 <= _vertical_gap(title_bbox, following_bbox) <= max(
-        40.0, _height(title_bbox) * 2.0
-    ) and (
-        _horizontal_overlap_ratio(title_bbox, following_bbox) >= 0.5
-        or _left_delta(title_bbox, following_bbox) <= 32.0
-    )
-
-
-def _visual_text_group(
-    title: dict[str, Any],
-    following: dict[str, Any],
-    visual_bboxes: list[list[float]],
-) -> bool:
-    group_bbox = _union_bbox(title["bbox"], following["bbox"])
-    return any(_near_visual_bbox(group_bbox, visual_bbox) for visual_bbox in visual_bboxes)
-
-
-def _visual_dominant_annotation_page(
-    text_observations: list[dict[str, Any]],
-    visual_bboxes: list[list[float]],
-    page_size: dict[str, float],
-) -> bool:
-    if len(visual_bboxes) >= 3:
-        return True
-    page_width = float(page_size.get("width") or 0.0)
-    if page_width <= 0:
-        return False
-    body_widths = [
-        _width(observation["bbox"])
-        for observation in text_observations
-        if observation.get("role_hint") == "body_text" and _valid_bbox(observation.get("bbox"))
-    ]
-    return bool(body_widths) and max(body_widths) <= page_width * 0.45
-
-
-def _reading_order(observation: dict[str, Any]) -> int:
-    attrs = observation.get("attrs") if isinstance(observation.get("attrs"), dict) else {}
-    value = attrs.get("reading_order")  # pyright: ignore[reportOptionalMemberAccess]
-    return int(value) if isinstance(value, int) else 999999
-
-
-def _unit_type(observation: dict[str, Any], caption_title_ids: set[str]) -> str | None:
-    role_hint = observation["role_hint"]
-    if role_hint == "title_text":
-        if observation["observation_id"] in caption_title_ids:
-            return "paragraph"
-        return "heading"
-    if role_hint == "body_text":
-        return "paragraph"
-    if role_hint == "list_text":
-        return "list_item"
-    if role_hint == "reference_text":
-        return "list_item"
-    if observation["kind"] == "footnote_region" or role_hint == "footnote_text":
-        return "footnote"
-    return None
 
 
 def _promote_table_heading_fragments(
@@ -437,86 +331,52 @@ def _renumber_units(units: list[dict[str, Any]]) -> None:
         unit["unit_id"] = f"tu{index:06d}"
 
 
-def _unit_from_observation(
-    observation: dict[str, Any],
+def _unit_from_candidate(
+    candidate: dict[str, Any],
     index: int,
     unit_type: str,
-    layout_role: str | None = None,
 ) -> dict[str, Any]:
-    bbox = deepcopy(observation.get("bbox"))
-    attrs = _unit_attrs(observation)
-    if layout_role:
-        attrs["layout_role"] = layout_role
     return {
         "unit_id": f"tu{index:06d}",
         "unit_type": unit_type,
-        "text": str(observation.get("text") or ""),
-        "page": observation["page"],
-        "pages": [observation["page"]],
-        "bbox": bbox,
-        "spans": _observation_spans(observation),
-        "observation_ids": [observation["observation_id"]],
-        "role_hints": [observation["role_hint"]],
-        "attrs": attrs,
-        "parser_payloads": [deepcopy(observation.get("parser_payload") or {})],
+        "text": candidate["text"],
+        "page": candidate["page"],
+        "pages": [candidate["page"]],
+        "bbox": deepcopy(candidate["bbox"]),
+        "spans": deepcopy(candidate["spans"]),
+        "observation_ids": [candidate["observation_id"]],
+        "role_hints": [candidate["role_hint"]],
+        "attrs": deepcopy(candidate["attrs"]),
+        "parser_payloads": [deepcopy(candidate["parser_payload"])],
     }
-
-
-def _observation_spans(observation: dict[str, Any]) -> list[dict[str, Any]]:
-    spans = observation.get("spans")
-    if isinstance(spans, list) and spans:
-        return deepcopy(spans)
-    bbox = observation.get("bbox")
-    if _valid_bbox(bbox):
-        return [{"page": observation["page"], "bbox": deepcopy(bbox)}]
-    return []
-
-
-def _unit_attrs(observation: dict[str, Any]) -> dict[str, Any]:
-    attrs: dict[str, Any] = {}
-    observation_attrs = observation.get("attrs")
-    if not isinstance(observation_attrs, dict):
-        return attrs
-    text_line_metrics = observation_attrs.get("text_line_metrics")
-    if isinstance(text_line_metrics, dict):
-        attrs["text_line_metrics_by_observation"] = {
-            str(observation["observation_id"]): deepcopy(text_line_metrics)
-        }
-    inline_runs = observation_attrs.get("inline_runs")
-    if isinstance(inline_runs, list):
-        attrs["inline_runs"] = deepcopy(inline_runs)
-    note_refs = observation_attrs.get("note_refs")
-    if isinstance(note_refs, list):
-        attrs["note_refs"] = deepcopy(note_refs)
-    return attrs
 
 
 def _merge_reason(
     previous_unit: dict[str, Any],
-    observation: dict[str, Any],
+    candidate: dict[str, Any],
     unit_type: str,
     page_sizes: dict[int, dict[str, float]],
 ) -> str | None:
     if unit_type != "paragraph" or previous_unit["unit_type"] != "paragraph":
         return None
-    if previous_unit["page"] == observation["page"]:
-        if _same_page_short_line_group_merge(previous_unit, observation, page_sizes):
+    if previous_unit["page"] == candidate["page"]:
+        if _same_page_short_line_group_merge(previous_unit, candidate, page_sizes):
             return "same_page_short_line_group"
         return (
             "same_page_geometry_continuation"
-            if _same_page_merge(previous_unit, observation)
+            if _same_page_merge(previous_unit, candidate)
             else None
         )
     return (
         "cross_page_boundary_continuation"
-        if _cross_page_merge(previous_unit, observation, page_sizes)
+        if _cross_page_merge(previous_unit, candidate, page_sizes)
         else None
     )
 
 
-def _same_page_merge(previous_unit: dict[str, Any], observation: dict[str, Any]) -> bool:
+def _same_page_merge(previous_unit: dict[str, Any], candidate: dict[str, Any]) -> bool:
     previous_bbox = previous_unit.get("bbox")
-    bbox = observation.get("bbox")
+    bbox = candidate.get("bbox")
     if not _valid_bbox(previous_bbox) or not _valid_bbox(bbox):
         return False
     return (
@@ -528,13 +388,12 @@ def _same_page_merge(previous_unit: dict[str, Any], observation: dict[str, Any])
 
 
 def _same_page_short_line_group_merge(
-    previous_unit: dict[str, Any],
-    observation: dict[str, Any],
+    previous_unit: dict[str, Any], candidate: dict[str, Any],
     page_sizes: dict[int, dict[str, float]],
 ) -> bool:
-    previous_bbox = _last_bbox_for_page(previous_unit, int(observation["page"]))
-    bbox = observation.get("bbox")
-    page_width = float(page_sizes.get(int(observation["page"]), {}).get("width") or 0.0)
+    previous_bbox = _last_bbox_for_page(previous_unit, int(candidate["page"]))
+    bbox = candidate.get("bbox")
+    page_width = float(page_sizes.get(int(candidate["page"]), {}).get("width") or 0.0)
     if not _valid_bbox(previous_bbox) or not _valid_bbox(bbox) or page_width <= 0:
         return False
     max_line_width = page_width * 0.55
@@ -551,16 +410,15 @@ def _same_page_short_line_group_merge(
 
 
 def _cross_page_merge(
-    previous_unit: dict[str, Any],
-    observation: dict[str, Any],
+    previous_unit: dict[str, Any], candidate: dict[str, Any],
     page_sizes: dict[int, dict[str, float]],
 ) -> bool:
     previous_page = _last_page(previous_unit)
-    page = int(observation["page"])
+    page = int(candidate["page"])
     if previous_page + 1 != page:
         return False
     previous_bbox = _last_bbox_for_page(previous_unit, previous_page)
-    bbox = observation.get("bbox")
+    bbox = candidate.get("bbox")
     previous_height = page_sizes.get(previous_page, {}).get("height")
     current_height = page_sizes.get(page, {}).get("height")
     if (
@@ -574,22 +432,22 @@ def _cross_page_merge(
         _near_page_bottom(previous_bbox, previous_height)
         and _near_page_top(bbox, current_height)
         and _horizontal_overlap_ratio(previous_bbox, bbox) >= 0.6
-        and _cross_page_text_flow_continues(previous_bbox, bbox, observation)
+        and _cross_page_text_flow_continues(previous_bbox, bbox, candidate)
     )
 
 
 def _cross_page_text_flow_continues(
-    previous_bbox: list[float], bbox: list[float], observation: dict[str, Any]
+    previous_bbox: list[float], bbox: list[float], candidate: dict[str, Any]
 ) -> bool:
-    if _next_observation_starts_new_paragraph(observation):
+    if _next_candidate_starts_new_paragraph(candidate):
         return False
-    if _next_observation_starts_continuation(observation):
+    if _next_candidate_starts_continuation(candidate):
         return True
     return _left_delta(previous_bbox, bbox) <= _max_left_delta(previous_bbox)
 
 
-def _next_observation_starts_new_paragraph(observation: dict[str, Any]) -> bool:
-    metrics = _observation_text_line_metrics(observation)
+def _next_candidate_starts_new_paragraph(candidate: dict[str, Any]) -> bool:
+    metrics = _candidate_text_line_metrics(candidate)
     if not metrics:
         return False
     line_count = _metric_int(metrics, "line_count")
@@ -603,8 +461,8 @@ def _next_observation_starts_new_paragraph(observation: dict[str, Any]) -> bool:
     return indent >= threshold
 
 
-def _next_observation_starts_continuation(observation: dict[str, Any]) -> bool:
-    metrics = _observation_text_line_metrics(observation)
+def _next_candidate_starts_continuation(candidate: dict[str, Any]) -> bool:
+    metrics = _candidate_text_line_metrics(candidate)
     if not metrics:
         return False
     line_count = _metric_int(metrics, "line_count")
@@ -618,9 +476,12 @@ def _next_observation_starts_continuation(observation: dict[str, Any]) -> bool:
     return abs(indent) <= threshold
 
 
-def _observation_text_line_metrics(observation: dict[str, Any]) -> dict[str, Any] | None:
-    attrs = observation.get("attrs") if isinstance(observation.get("attrs"), dict) else {}
-    metrics = attrs.get("text_line_metrics")  # pyright: ignore[reportOptionalMemberAccess]
+def _candidate_text_line_metrics(candidate: dict[str, Any]) -> dict[str, Any] | None:
+    attrs = candidate.get("attrs") if isinstance(candidate.get("attrs"), dict) else {}
+    metrics_by_observation = attrs.get("text_line_metrics_by_observation")
+    if not isinstance(metrics_by_observation, dict):
+        return None
+    metrics = metrics_by_observation.get(candidate["observation_id"])
     return metrics if isinstance(metrics, dict) else None
 
 
@@ -638,26 +499,26 @@ def _metric_int(metrics: dict[str, Any], key: str) -> int | None:
         return None
 
 
-def _merge_observation(
-    unit: dict[str, Any], observation: dict[str, Any], merge_reason: str
+def _merge_candidate(
+    unit: dict[str, Any], candidate: dict[str, Any], merge_reason: str
 ) -> None:
     target_text = str(unit.get("text") or "")
-    text = str(observation.get("text") or "")
+    text = str(candidate.get("text") or "")
     if text:
         unit["text"] = _join_merged_text(target_text, text, merge_reason)
-    bbox = observation.get("bbox")
-    if unit["page"] == observation["page"] and _valid_bbox(unit.get("bbox")) and _valid_bbox(bbox):
+    bbox = candidate.get("bbox")
+    if unit["page"] == candidate["page"] and _valid_bbox(unit.get("bbox")) and _valid_bbox(bbox):
         unit["bbox"] = _union_bbox(unit["bbox"], bbox)
-    page = int(observation["page"])
+    page = int(candidate["page"])
     if page not in unit["pages"]:
         unit["pages"].append(page)
-    unit["spans"].extend(_observation_spans(observation))
-    unit["observation_ids"].append(observation["observation_id"])
-    if observation["role_hint"] not in unit["role_hints"]:
-        unit["role_hints"].append(observation["role_hint"])
-    unit["parser_payloads"].append(deepcopy(observation.get("parser_payload") or {}))
+    unit["spans"].extend(deepcopy(candidate["spans"]))
+    unit["observation_ids"].append(candidate["observation_id"])
+    if candidate["role_hint"] not in unit["role_hints"]:
+        unit["role_hints"].append(candidate["role_hint"])
+    unit["parser_payloads"].append(deepcopy(candidate["parser_payload"]))
     unit["attrs"].setdefault("merge_reasons", []).append(merge_reason)
-    _merge_attrs(unit["attrs"], observation, target_text=target_text, source_text=text)
+    _merge_attrs(unit["attrs"], candidate["attrs"], target_text=target_text, source_text=text)
 
 
 def _join_merged_text(target_text: str, source_text: str, merge_reason: str) -> str:
@@ -669,30 +530,22 @@ def _join_merged_text(target_text: str, source_text: str, merge_reason: str) -> 
 
 
 def _merge_attrs(
-    attrs: dict[str, Any],
-    observation: dict[str, Any],
+    attrs: dict[str, Any], candidate_attrs: dict[str, Any],
     *,
     target_text: str,
     source_text: str,
 ) -> None:
-    observation_attrs = observation.get("attrs")
-    if not isinstance(observation_attrs, dict):
-        if "inline_runs" in attrs and source_text:
-            attrs["inline_runs"].append({"type": "text", "text": source_text})
-        return
-    text_line_metrics = observation_attrs.get("text_line_metrics")
+    text_line_metrics = candidate_attrs.get("text_line_metrics_by_observation")
     if isinstance(text_line_metrics, dict):
-        attrs.setdefault("text_line_metrics_by_observation", {})[
-            str(observation["observation_id"])
-        ] = deepcopy(text_line_metrics)
-    inline_runs = observation_attrs.get("inline_runs")
+        attrs.setdefault("text_line_metrics_by_observation", {}).update(deepcopy(text_line_metrics))
+    inline_runs = candidate_attrs.get("inline_runs")
     if isinstance(inline_runs, list):
         if "inline_runs" not in attrs and target_text:
             attrs["inline_runs"] = [{"type": "text", "text": target_text}]
         attrs.setdefault("inline_runs", []).extend(deepcopy(inline_runs))
     elif "inline_runs" in attrs and source_text:
         attrs["inline_runs"].append({"type": "text", "text": source_text})
-    note_refs = observation_attrs.get("note_refs")
+    note_refs = candidate_attrs.get("note_refs")
     if isinstance(note_refs, list):
         attrs.setdefault("note_refs", []).extend(deepcopy(note_refs))
 
