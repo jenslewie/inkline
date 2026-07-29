@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from inkline.canonical import make_observation, make_observed_document, make_observed_page
 from inkline.canonical.text_flow.candidates import build_text_candidates
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -58,3 +59,70 @@ def test_direct_anchor_membership_is_protected_without_aggregation() -> None:
         "obs000104",
     ]
     assert all(candidate["candidate_type"] == "heading" for candidate in protected)
+
+
+def test_direct_anchor_precedes_competing_title_in_same_reading_order_slot() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "en",
+            "source_file": "sample.pdf",
+            "parser_name": "fixture",
+            "parser_mode": "fixture",
+        },
+        [make_observed_page(1, width=1000, height=1000)],
+        [
+            make_observation(
+                "anchor-a",
+                "text_region",
+                text="Chapter",
+                page=1,
+                bbox=[400, 200, 600, 240],
+                role_hint="title_text",
+                attrs={"reading_order": 0},
+            ),
+            make_observation(
+                "competing-title",
+                "text_region",
+                text="Competing title evidence",
+                page=1,
+                bbox=[100, 150, 300, 180],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "anchor-b",
+                "text_region",
+                text="Accepted title",
+                page=1,
+                bbox=[300, 250, 700, 290],
+                role_hint="title_text",
+                attrs={"reading_order": 1},
+            ),
+            make_observation(
+                "body",
+                "text_region",
+                text="Body remains retained.",
+                page=1,
+                bbox=[100, 350, 900, 420],
+                role_hint="body_text",
+                attrs={"reading_order": 2},
+            ),
+        ],
+    )
+    group = ("anchor-a", "anchor-b")
+
+    candidates, ignored = build_text_candidates(
+        document,
+        included_pages={1},
+        anchor_groups_by_observation_id=dict.fromkeys(group, group),
+    )
+
+    assert [candidate["observation_id"] for candidate in candidates] == [
+        "anchor-a",
+        "anchor-b",
+        "competing-title",
+        "body",
+    ]
+    assert ignored == {}

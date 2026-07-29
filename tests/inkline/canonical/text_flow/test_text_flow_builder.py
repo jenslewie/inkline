@@ -6,6 +6,8 @@ from pathlib import Path
 from inkline.canonical import build_page_layout_analysis, build_text_flow
 
 ROOT = Path(__file__).resolve().parents[4]
+AGINCOURT = "阿金库尔战役"
+MIN_KINGDOM = "闽国"
 
 
 def _load(path: Path) -> dict:
@@ -22,6 +24,22 @@ def _middle_kingdom_sources() -> tuple[dict, dict, dict, dict]:
     page_review = _load(
         ROOT / "data/outputs/golden/page-review/中日交流两千年/中日交流两千年_page_review.json"
     )
+    return observed, skeleton, page_review, build_page_layout_analysis(observed)
+
+
+def _agincourt_sources() -> tuple[dict, dict, dict, dict]:
+    observed = _load(ROOT / f"data/outputs/golden/observed/{AGINCOURT}_observed.json")
+    skeleton = _load(ROOT / f"data/outputs/golden/skeleton/{AGINCOURT}_skeleton.json")
+    page_review = _load(
+        ROOT / f"data/outputs/golden/page-review/{AGINCOURT}/{AGINCOURT}_page_review.json"
+    )
+    return observed, skeleton, page_review, build_page_layout_analysis(observed)
+
+
+def _golden_sources(book: str) -> tuple[dict, dict, dict, dict]:
+    observed = _load(ROOT / f"data/outputs/golden/observed/{book}_observed.json")
+    skeleton = _load(ROOT / f"data/outputs/golden/skeleton/{book}_skeleton.json")
+    page_review = _load(ROOT / f"data/outputs/golden/page-review/{book}/{book}_page_review.json")
     return observed, skeleton, page_review, build_page_layout_analysis(observed)
 
 
@@ -97,3 +115,23 @@ def test_text_flow_uses_supplied_page_layout_without_recomputing_profiles(
     flow = build_text_flow(observed, skeleton, page_review, page_layout)
 
     assert flow["metadata"]["doc_id"] == "中日交流两千年"
+
+
+def test_direct_anchor_precedes_same_slot_shadow_without_dropping_it() -> None:
+    flow = build_text_flow(*_agincourt_sources())
+    anchor = _unit_for_observations(flow, ["obs000974", "obs000975"])
+    shadow_units = [unit for unit in flow["text_units"] if "obs003606" in unit["observation_ids"]]
+
+    assert anchor["unit_type"] == "heading"
+    assert len(shadow_units) == 1
+    assert shadow_units[0]["observation_ids"] == ["obs003606"]
+
+
+def test_source_validation_uses_direct_anchor_priority_within_title_slot() -> None:
+    flow = build_text_flow(*_golden_sources(MIN_KINGDOM))
+    anchor = _unit_for_observations(flow, ["obs001732"])
+    shadow_units = [unit for unit in flow["text_units"] if "obs001778" in unit["observation_ids"]]
+
+    assert anchor["unit_type"] == "heading"
+    assert len(shadow_units) == 1
+    assert shadow_units[0]["observation_ids"] == ["obs001778"]

@@ -24,7 +24,10 @@ def build_text_candidates(
         for observation in document["observations"]
         if int(observation["page"]) in included_pages
     ]
-    ordered = _ordered_observations(observations)
+    ordered = order_text_observations(
+        observations,
+        protected_observation_ids=set(anchor_groups_by_observation_id),
+    )
     caption_title_ids = _caption_title_observation_ids(ordered, document["pages"])
     candidates: list[dict[str, Any]] = []
     ignored: Counter[str] = Counter()
@@ -48,8 +51,13 @@ def build_text_candidates(
     return candidates, dict(sorted(ignored.items()))
 
 
-def _ordered_observations(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(
+def order_text_observations(
+    observations: list[dict[str, Any]],
+    *,
+    protected_observation_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    protected = protected_observation_ids or set()
+    ordered = sorted(
         observations,
         key=lambda observation: (
             int(observation["page"]),
@@ -59,6 +67,25 @@ def _ordered_observations(observations: list[dict[str, Any]]) -> list[dict[str, 
             str(observation["observation_id"]),
         ),
     )
+    index = 0
+    while index < len(ordered):
+        if ordered[index].get("role_hint") != "title_text":
+            index += 1
+            continue
+        slot = (int(ordered[index]["page"]), _reading_order(ordered[index]))
+        end = index + 1
+        while (
+            end < len(ordered)
+            and ordered[end].get("role_hint") == "title_text"
+            and (int(ordered[end]["page"]), _reading_order(ordered[end])) == slot
+        ):
+            end += 1
+        ordered[index:end] = sorted(
+            ordered[index:end],
+            key=lambda observation: 0 if str(observation["observation_id"]) in protected else 1,
+        )
+        index = end
+    return ordered
 
 
 def _caption_title_observation_ids(

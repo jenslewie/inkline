@@ -12,6 +12,7 @@ from inkline.canonical.observed.text_units import TEXT_UNIT_TYPES
 from inkline.canonical.page_layout.validation import validate_page_layout_analysis
 from inkline.canonical.page_review import validate_resolved_page_review
 from inkline.canonical.schema import ValidationError
+from inkline.canonical.text_flow.candidates import order_text_observations
 from inkline.canonical.text_flow.contract import TEXT_FLOW_SCHEMA_NAME, TEXT_FLOW_SCHEMA_VERSION
 
 TOP_LEVEL_FIELDS = {
@@ -105,8 +106,16 @@ def validate_text_flow_against_sources(
     if provenance["excluded_pages"] != sorted(excluded_pages):
         raise ValidationError("text_flow provenance excluded_pages differs from PageReview")
 
+    direct_anchor_ids = {
+        observation_id
+        for group in _direct_anchor_groups(skeleton, included_pages)
+        for observation_id in group
+    }
     _validate_units_against_observations(
-        flow["text_units"], index.observations_by_id, included_pages
+        flow["text_units"],
+        index.observations_by_id,
+        included_pages,
+        protected_observation_ids=direct_anchor_ids,
     )
     _validate_anchor_boundaries(flow, skeleton, included_pages)
 
@@ -115,8 +124,13 @@ def _validate_units_against_observations(
     units: list[dict[str, Any]],
     observations: Mapping[str, Mapping[str, Any]],
     included_pages: set[int],
+    *,
+    protected_observation_ids: set[str],
 ) -> None:
-    ordered = sorted(observations.values(), key=_observation_order)
+    ordered = order_text_observations(
+        [dict(observation) for observation in observations.values()],
+        protected_observation_ids=protected_observation_ids,
+    )
     observation_order = {
         str(observation["observation_id"]): order for order, observation in enumerate(ordered)
     }
@@ -429,22 +443,3 @@ def _direct_anchor_groups(
             owners[observation_id] = group
         groups.append(group)
     return groups
-
-
-def _observation_order(observation: Mapping[str, Any]) -> tuple[int, int, float, float, str]:
-    attrs = observation.get("attrs")
-    reading_order = attrs.get("reading_order") if isinstance(attrs, Mapping) else None
-    bbox = observation.get("bbox")
-    valid_bbox = (
-        isinstance(bbox, list)
-        and len(bbox) == 4
-        and all(isinstance(value, int | float) for value in bbox)
-    )
-    bbox_values = bbox if isinstance(bbox, list) else []
-    return (
-        int(observation["page"]),
-        int(reading_order) if isinstance(reading_order, int) else 999999,
-        float(bbox_values[1]) if valid_bbox else float("inf"),
-        float(bbox_values[0]) if valid_bbox else float("inf"),
-        str(observation["observation_id"]),
-    )
