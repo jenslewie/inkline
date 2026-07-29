@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from inkline.canonical import build_page_layout_analysis, make_observed_page
@@ -131,6 +132,62 @@ def _page_layout_with_profile() -> dict[str, Any]:
     return page_layout
 
 
+def _page_layout_for_pages(page_count: int) -> dict[str, Any]:
+    page_layout = _page_layout_with_profile()
+    page_layout["book_layout_profile"]["source_page_count"] = page_count
+    template = page_layout["pages"][0]
+    page_layout["pages"] = []
+    for page in range(1, page_count + 1):
+        record = json.loads(json.dumps(template))
+        record["page"] = page
+        page_layout["pages"].append(record)
+    return page_layout
+
+
+def _decision(
+    classified: list[dict[str, Any]], observation_id: str
+) -> dict[str, Any]:
+    return next(
+        candidate["layout_decision"]
+        for candidate in classified
+        if candidate["observation_id"] == observation_id
+    )
+
+
+def _terminal_right_aligned_candidate_with_body_on_next_page() -> SimpleNamespace:
+    candidates = [
+        _body_candidate("obs000001", page=1, bbox=[100, 100, 900, 750]),
+        _body_candidate("obs000002", page=1, bbox=[600, 820, 900, 850]),
+        _body_candidate("obs000003", page=2, bbox=[100, 100, 900, 300]),
+    ]
+    pages = [
+        make_observed_page(page, width=1000, height=1000) for page in (1, 2)
+    ]
+    return SimpleNamespace(
+        candidates=candidates,
+        pages=pages,
+        page_layout=_page_layout_for_pages(2),
+    )
+
+
+def _classify_three_page_display_fixture() -> list[dict[str, Any]]:
+    candidates = [
+        _body_candidate("obs000001", page=1, bbox=[100, 100, 900, 650]),
+        _body_candidate("obs000002", page=1, bbox=[180, 700, 850, 900]),
+        _body_candidate("obs000003", page=2, bbox=[180, 100, 850, 900]),
+        _body_candidate("obs000004", page=3, bbox=[180, 100, 850, 300]),
+        _body_candidate("obs000005", page=3, bbox=[100, 350, 900, 600]),
+    ]
+    pages = [
+        make_observed_page(page, width=1000, height=1000) for page in (1, 2, 3)
+    ]
+    return classify_text_candidates_by_layout(
+        candidates,
+        pages,
+        page_layout=_page_layout_for_pages(3),
+    )
+
+
 def test_same_page_layout_separates_body_intro_from_short_display_run() -> None:
     decisions = _silk_road_decisions({292})
     assert decisions["obs002504"]["classified_type"] == "paragraph"
@@ -201,3 +258,37 @@ def test_structural_boundary_without_geometric_gap_does_not_create_display_gap()
     decision = classified[1]["layout_decision"]
     assert decision["classified_type"] == "paragraph"
     assert "display_gap_before" not in decision["signals"]
+
+
+def test_cross_page_joint_context_classifies_both_quote_fragments_before_merge() -> None:
+    decisions = _silk_road_decisions({253, 254})
+    left = decisions["obs002159"]
+    right = decisions["obs002163"]
+    assert left["classified_type"] == "display_block"
+    assert right["classified_type"] == "display_block"
+    assert left["cross_page_transitions"] == right["cross_page_transitions"]
+    assert left["cross_page_transitions"][0]["left_page"] == 253
+    assert left["cross_page_transitions"][0]["right_page"] == 254
+
+
+def test_terminal_right_aligned_date_requires_structural_following_boundary() -> None:
+    decisions = _silk_road_decisions({9})
+    assert decisions["obs000111"]["classified_type"] == "display_block"
+    assert "terminal_right_aligned_attribution" in decisions["obs000111"]["signals"]
+
+    unbounded = _terminal_right_aligned_candidate_with_body_on_next_page()
+    classified = classify_text_candidates_by_layout(
+        unbounded.candidates,
+        unbounded.pages,
+        page_layout=unbounded.page_layout,
+    )
+    assert _decision(classified, "obs000002")["classified_type"] == "paragraph"
+
+
+def test_three_page_joint_display_run_records_two_adjacent_transitions() -> None:
+    classified = _classify_three_page_display_fixture()
+    transitions = _decision(classified, "obs000002")["cross_page_transitions"]
+    assert [(item["left_page"], item["right_page"]) for item in transitions] == [
+        (1, 2),
+        (2, 3),
+    ]
