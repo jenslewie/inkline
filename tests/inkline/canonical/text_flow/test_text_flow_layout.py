@@ -100,6 +100,37 @@ def _page_layout_without_profile() -> dict[str, Any]:
     }
 
 
+def _page_layout_with_profile() -> dict[str, Any]:
+    page_layout = _page_layout_without_profile()
+    page_layout["book_layout_profile"] = {
+        "profile_scope": "book",
+        "source_page_count": 1,
+        "body_width": 800.0,
+        "indent_unit": 50.0,
+        "line_height": 30.0,
+        "normal_gap_y": 10.0,
+        "display_gap_y": 40.0,
+    }
+    page_layout["pages"][0]["body_lane"] = {
+        "profile_scope": "page",
+        "profile_source": "local",
+        "page_width": 1000.0,
+        "page_height": 1000.0,
+        "body_left": 100.0,
+        "body_right": 900.0,
+        "body_width": 800.0,
+        "book_body_width": 800.0,
+        "body_width_delta": 0.0,
+        "indent_unit": 50.0,
+        "line_height": 30.0,
+        "normal_gap_y": 10.0,
+        "display_gap_y": 40.0,
+        "reference_fragment_count": 2,
+    }
+    page_layout["pages"][0]["coverage"] = {"profile_status": "profiled"}
+    return page_layout
+
+
 def test_same_page_layout_separates_body_intro_from_short_display_run() -> None:
     decisions = _silk_road_decisions({292})
     assert decisions["obs002504"]["classified_type"] == "paragraph"
@@ -150,3 +181,23 @@ def test_non_body_candidate_keeps_explicit_structural_role() -> None:
     assert decision["classified_type"] == "heading"
     assert decision["status"] == "resolved"
     assert decision["signals"] == ["explicit_structural_role"]
+
+
+def test_structural_boundary_without_geometric_gap_does_not_create_display_gap() -> None:
+    heading = {
+        **_body_candidate("obs000003", page=1, bbox=[100, 100, 900, 130]),
+        "candidate_type": "heading",
+        "role_hint": "title_text",
+        "protected_anchor_group": ["obs000003"],
+    }
+    inset_body = _body_candidate("obs000004", page=1, bbox=[200, 130, 800, 160])
+
+    classified = classify_text_candidates_by_layout(
+        [heading, inset_body],
+        [make_observed_page(1, width=1000, height=1000)],
+        page_layout=_page_layout_with_profile(),
+    )
+
+    decision = classified[1]["layout_decision"]
+    assert decision["classified_type"] == "paragraph"
+    assert "display_gap_before" not in decision["signals"]

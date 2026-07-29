@@ -225,8 +225,6 @@ def _outer_separated(
 ) -> bool:
     if outside is None or int(outside["page"]) != int(edge["page"]):
         return True
-    if outside.get("candidate_type") != BODY_CANDIDATE_TYPE:
-        return True
     outside_bbox = outside.get("bbox")
     edge_bbox = edge.get("bbox")
     if not valid_bbox(outside_bbox) or not valid_bbox(edge_bbox):
