@@ -18,10 +18,9 @@ _UP_PREFIX = re.compile(
     rf"^\s*(?:{_UP_WRAPPED}|接上页(?=$|[{_TOKEN_BOUNDARY}]))\s*"
 )
 _INDEPENDENT_MARKER = re.compile(
-    r"^\s*(?:(?:\[\d{1,3}\]|［\d{1,3}］|【\d{1,3}】|"
+    r"^\s*(?:\[\d{1,3}\]|［\d{1,3}］|【\d{1,3}】|〔\d{1,3}〕|"
     r"\(\d{1,3}\)|（\d{1,3}）|[⁰¹²³⁴⁵⁶⁷⁸⁹]+|"
-    r"[①-⑳㉑-㊿❶-❿⓵-⓾])(?=\s|[、.)）]|$)|"
-    r"\d{1,3}(?=[\s、.)）]|$)|[*†‡](?=\s|$))"
+    r"[①-⑳㉑-㊿❶-❿⓵-⓾]|[*†‡]|\d{1,3}(?=[\s、.)）]|$))"
 )
 _REFERENCE_ROLES = {"reference_text", "footnote_text"}
 _STRUCTURAL_BOUNDARY_TYPES = {
@@ -81,7 +80,8 @@ def reconcile_cross_page_footnotes(
             page_layout=page_layout,
             continuation_lane=continuation_lane,
         )
-        index += 1
+        # The merged right side may itself end with the next explicit marker.
+        # Re-evaluate this same record before advancing to an unrelated record.
     return reconciled
 
 
@@ -124,7 +124,7 @@ def _absorb_same_lane_tail(
     left_index: int,
     tail_index: int,
     page_layout: dict[str, Any],
-    continuation_lane: tuple[float, float, float],
+    continuation_lane: tuple[float, float],
 ) -> None:
     left = records[left_index]
     continuation_page = _last_page(left)
@@ -153,7 +153,7 @@ def _tail_member(
     record: dict[str, Any],
     continuation_page: int | None,
     page_layout: dict[str, Any],
-    continuation_lane: tuple[float, float, float],
+    continuation_lane: tuple[float, float],
 ) -> bool:
     if continuation_page is None or _first_page(record) != continuation_page:
         return False
@@ -192,8 +192,9 @@ def _in_reference_lane(
         return False
     if not require_page_foot:
         return True
-    page_record = _page_record(page_layout, _first_page(record))
-    bbox = record.get("bbox")
+    page = _last_page(record)
+    page_record = _page_record(page_layout, page)
+    bbox = _bbox_on_page(record, page)
     if page_record is None or not _valid_bbox(bbox):
         return False
     body_lane = page_record.get("body_lane")
@@ -218,22 +219,36 @@ def _compatible_reference_lanes(
 
 
 def _compatible_lane_positions(
-    anchor: tuple[float, float, float],
-    candidate: tuple[float, float, float],
+    anchor: tuple[float, float],
+    candidate: tuple[float, float],
 ) -> bool:
-    anchor_left, anchor_right, anchor_width = anchor
-    candidate_left, candidate_right, candidate_width = candidate
-    left_aligned = abs(anchor_left - candidate_left) <= 0.12
-    right_aligned = abs(anchor_right - candidate_right) <= 0.15
-    left_anchored_short_line = candidate_width <= anchor_width * 0.65
-    return left_aligned and (right_aligned or left_anchored_short_line)
+    anchor_side = _lane_anchor(anchor)
+    candidate_side = _lane_anchor(candidate)
+    if anchor_side != candidate_side:
+        return False
+    left_delta = abs(anchor[0] - candidate[0])
+    right_delta = abs(anchor[1] - candidate[1])
+    if anchor_side == "left":
+        return left_delta <= 0.12
+    if anchor_side == "right":
+        return right_delta <= 0.15
+    return left_delta <= 0.12 and right_delta <= 0.15
+
+
+def _lane_anchor(position: tuple[float, float]) -> str:
+    left_inset, right_inset = position
+    if abs(left_inset) <= 0.12:
+        return "left"
+    if abs(right_inset) <= 0.15:
+        return "right"
+    return "inset"
 
 
 def _reference_lane_position(
     record: dict[str, Any], page_layout: dict[str, Any]
-) -> tuple[float, float, float] | None:
-    page = _first_page(record)
-    bbox = record.get("bbox")
+) -> tuple[float, float] | None:
+    page = _last_page(record)
+    bbox = _bbox_on_page(record, page)
     page_record = _page_record(page_layout, page)
     if page_record is None or not _valid_bbox(bbox):
         return None
@@ -255,8 +270,31 @@ def _reference_lane_position(
     return (
         (float(bbox[0]) - body_left) / body_width,
         (body_right - float(bbox[2])) / body_width,
-        width / body_width,
     )
+
+
+def _bbox_on_page(record: dict[str, Any], page: int | None) -> list[float] | None:
+    if page is None:
+        return None
+    bbox = record.get("bbox")
+    if record.get("page") == page and _valid_bbox(bbox):
+        return bbox
+    spans = record.get("spans")
+    span_bboxes = [
+        span["bbox"]
+        for span in spans or []
+        if isinstance(span, dict)
+        and span.get("page") == page
+        and _valid_bbox(span.get("bbox"))
+    ]
+    if span_bboxes:
+        return [
+            min(float(bbox[0]) for bbox in span_bboxes),
+            min(float(bbox[1]) for bbox in span_bboxes),
+            max(float(bbox[2]) for bbox in span_bboxes),
+            max(float(bbox[3]) for bbox in span_bboxes),
+        ]
+    return None
 
 
 def _strip_structural_marker(

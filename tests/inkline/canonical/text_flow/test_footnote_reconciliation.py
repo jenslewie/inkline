@@ -192,6 +192,73 @@ def test_explicit_cross_page_footnote_absorbs_only_same_lane_tail() -> None:
     assert "（接上页）" not in inline_text
 
 
+def test_explicit_cross_page_footnote_reconciles_three_page_marker_chain() -> None:
+    records = [
+        _record(
+            "a",
+            "A（接下页）",
+            page=1,
+            bbox=[100.0, 880.0, 900.0, 920.0],
+        ),
+        _record(
+            "b",
+            "（接上页）B（接下页）",
+            page=2,
+            bbox=[100.0, 850.0, 900.0, 920.0],
+        ),
+        _record(
+            "c",
+            "（接上页）C",
+            page=3,
+            bbox=[100.0, 100.0, 900.0, 140.0],
+        ),
+    ]
+
+    reconciled = reconcile_cross_page_footnotes(records, _page_layout(1, 2, 3))
+
+    assert len(reconciled) == 1
+    assert reconciled[0]["observation_ids"] == ["a", "b", "c"]
+    assert reconciled[0]["pages"] == [1, 2, 3]
+    assert reconciled[0]["text"] == "A\nB\nC"
+    assert [
+        event["reason"] for event in reconciled[0]["attrs"]["merge_events"]
+    ] == [
+        "explicit_cross_page_footnote_continuation",
+        "explicit_cross_page_footnote_continuation",
+    ]
+
+
+def test_marker_chain_uses_latest_page_foot_geometry_for_next_boundary() -> None:
+    records = [
+        _record(
+            "a",
+            "A（接下页）",
+            page=1,
+            bbox=[100.0, 880.0, 900.0, 920.0],
+        ),
+        _record(
+            "b",
+            "（接上页）B（接下页）",
+            page=2,
+            bbox=[100.0, 100.0, 900.0, 140.0],
+        ),
+        _record(
+            "c",
+            "（接上页）C",
+            page=3,
+            bbox=[100.0, 100.0, 900.0, 140.0],
+        ),
+    ]
+
+    reconciled = reconcile_cross_page_footnotes(records, _page_layout(1, 2, 3))
+
+    assert [record["observation_ids"] for record in reconciled] == [
+        ["a", "b"],
+        ["c"],
+    ]
+    assert reconciled[0]["text"] == "A\nB（接下页）"
+
+
 def test_tail_absorption_stops_at_an_independent_reference_marker() -> None:
     records, page_layout = _silk_road_footnote_records()
     after_marker = _record(
@@ -317,7 +384,17 @@ def test_explicit_pair_requires_adjacent_pages_reference_role_and_lane(
 
 @pytest.mark.parametrize(
     "marker",
-    ["¹ Source", "[21] Source", "［2］ Source", "㉑ Source", "❶ Source"],
+    [
+        "¹ Source",
+        "[21] Source",
+        "［2］ Source",
+        "㉑ Source",
+        "❶ Source",
+        "①独立脚注",
+        "[1]独立脚注",
+        "〔1〕独立脚注",
+        "*独立脚注",
+    ],
 )
 def test_tail_absorption_stops_at_conservative_independent_marker_vocabulary(
     marker: str,
@@ -354,6 +431,56 @@ def test_tail_absorption_stops_at_conservative_independent_marker_vocabulary(
     footnote = next(record for record in reconciled if "left" in record["observation_ids"])
     assert "marker" not in footnote["observation_ids"]
     assert "after-marker" not in footnote["observation_ids"]
+
+
+def test_tail_absorption_does_not_treat_ordinary_leading_digits_as_note_marker() -> None:
+    records = [
+        _record(
+            "left",
+            "4 Left（接下页）",
+            page=1,
+            bbox=[100.0, 880.0, 900.0, 920.0],
+        ),
+        _record(
+            "right",
+            "（接上页）Right",
+            page=2,
+            bbox=[100.0, 100.0, 900.0, 140.0],
+        ),
+        _record(
+            "tail",
+            "1987年出版的书目信息。",
+            page=2,
+            bbox=[100.0, 150.0, 900.0, 190.0],
+        ),
+    ]
+
+    reconciled = reconcile_cross_page_footnotes(records, _page_layout(1, 2))
+
+    assert len(reconciled) == 1
+    assert reconciled[0]["observation_ids"] == ["left", "right", "tail"]
+
+
+def test_explicit_pair_accepts_short_left_aligned_line_then_full_same_lane_line() -> None:
+    records = [
+        _record(
+            "left",
+            "4 Short left line（接下页）",
+            page=1,
+            bbox=[100.0, 880.0, 400.0, 920.0],
+        ),
+        _record(
+            "right",
+            "（接上页）Full-width continuation",
+            page=2,
+            bbox=[100.0, 100.0, 900.0, 140.0],
+        ),
+    ]
+
+    reconciled = reconcile_cross_page_footnotes(records, _page_layout(1, 2))
+
+    assert len(reconciled) == 1
+    assert reconciled[0]["observation_ids"] == ["left", "right"]
 
 
 @pytest.mark.parametrize(
