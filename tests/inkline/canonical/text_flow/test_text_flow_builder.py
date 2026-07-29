@@ -16,6 +16,35 @@ def _unit_for_observations(flow: dict, observation_ids: list[str]) -> dict:
     return next(unit for unit in flow["text_units"] if unit["observation_ids"] == observation_ids)
 
 
+def _middle_kingdom_sources() -> tuple[dict, dict, dict, dict]:
+    observed = _load(ROOT / "data/outputs/golden/observed/中日交流两千年_observed.json")
+    skeleton = _load(ROOT / "data/outputs/golden/skeleton/中日交流两千年_skeleton.json")
+    page_review = _load(
+        ROOT / "data/outputs/golden/page-review/中日交流两千年/中日交流两千年_page_review.json"
+    )
+    return observed, skeleton, page_review, build_page_layout_analysis(observed)
+
+
+def test_build_text_flow_never_calls_legacy_text_unit_pipeline(monkeypatch) -> None:
+    sources = _middle_kingdom_sources()
+
+    def fail_legacy_call(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("legacy TextUnit pipeline called")
+
+    for target in (
+        "inkline.canonical.observed.text_units.build_text_units",
+        "inkline.canonical.observed.text_unit_layout.classify_text_units_by_layout",
+        "inkline.canonical.text_flow.builder.build_text_units",
+        "inkline.canonical.text_flow.builder.classify_text_units_by_layout",
+        "inkline.canonical.text_flow.builder.finalize_text_units",
+    ):
+        monkeypatch.setattr(target, fail_legacy_call, raising=False)
+
+    flow = build_text_flow(*sources)
+
+    assert flow["text_units"][0]["unit_id"] == "tu000001"
+
+
 def test_text_flow_preserves_distinct_direct_skeleton_anchor_groups() -> None:
     observed = _load(ROOT / "data/outputs/golden/observed/中日交流两千年_observed.json")
     skeleton = _load(ROOT / "data/outputs/golden/skeleton/中日交流两千年_skeleton.json")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from itertools import pairwise
 from typing import Any
 
 from inkline.canonical.book_skeleton.validation import validate_book_skeleton_against_index
@@ -209,6 +210,7 @@ def _validate_units(value: Any) -> None:
         if not isinstance(unit.get("text"), str):
             raise ValidationError(f"text_flow.text_units[{index}].text must be string")
         _validate_unit_collections(unit, index)
+        _validate_layout_evidence(unit)
     if len(ids) != len(set(ids)):
         raise ValidationError("text_flow unit ids must be unique")
 
@@ -234,6 +236,52 @@ def _validate_unit_collections(unit: dict[str, Any], index: int) -> None:
             raise ValidationError(f"text_flow.text_units[{index}].{field} must be list")
     if not isinstance(unit.get("attrs"), dict):
         raise ValidationError(f"text_flow.text_units[{index}].attrs must be object")
+
+
+def _validate_layout_evidence(unit: dict[str, Any]) -> None:
+    if unit["unit_type"] not in {"paragraph", "display_block"}:
+        return
+    attrs = unit["attrs"]
+    fragments = attrs.get("layout_fragments", [])
+    if not isinstance(fragments, list) or not all(
+        isinstance(fragment, Mapping) for fragment in fragments
+    ):
+        raise ValidationError("TextFlow layout fragment type differs from final unit type")
+    fragment_types = {
+        fragment.get("classified_type") for fragment in fragments
+    }
+    if fragment_types != {unit["unit_type"]}:
+        raise ValidationError("TextFlow layout fragment type differs from final unit type")
+    _validate_adjacent_page_merge_events(unit, attrs)
+
+
+def _validate_adjacent_page_merge_events(
+    unit: dict[str, Any], attrs: dict[str, Any]
+) -> None:
+    transitions = [
+        (left_page, right_page)
+        for left_page, right_page in pairwise(unit["pages"])
+        if right_page == left_page + 1
+    ]
+    if not transitions:
+        return
+    merge_events = attrs.get("merge_events")
+    if not isinstance(merge_events, list):
+        raise ValidationError(
+            "TextFlow requires one merge event per adjacent-page transition"
+        )
+    for left_page, right_page in transitions:
+        matches = [
+            event
+            for event in merge_events
+            if isinstance(event, Mapping)
+            and event.get("left_page") == left_page
+            and event.get("right_page") == right_page
+        ]
+        if len(matches) != 1:
+            raise ValidationError(
+                "TextFlow requires one merge event per adjacent-page transition"
+            )
 
 
 def _validate_index(index: ObservedIndex, document: dict[str, Any]) -> None:

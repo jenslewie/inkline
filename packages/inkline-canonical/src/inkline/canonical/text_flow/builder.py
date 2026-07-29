@@ -6,9 +6,14 @@ from typing import Any, TypeGuard
 
 from inkline.canonical.observed.index import ObservedIndex, build_observed_index
 from inkline.canonical.observed.page_roles import page_roles_by_page
-from inkline.canonical.observed.text_unit_layout import classify_text_units_by_layout
-from inkline.canonical.observed.text_units import build_text_units
+from inkline.canonical.text_flow.aggregation import (
+    aggregate_text_candidates,
+    materialize_text_units,
+)
+from inkline.canonical.text_flow.candidates import build_text_candidates
 from inkline.canonical.text_flow.contract import TEXT_FLOW_SCHEMA_NAME, TEXT_FLOW_SCHEMA_VERSION
+from inkline.canonical.text_flow.layout import classify_text_candidates_by_layout
+from inkline.canonical.text_flow.reconcile import reconcile_text_flow_records
 from inkline.canonical.text_flow.validation import validate_text_flow_against_sources
 
 NON_TEXT_BRIDGE_PAGE_ROLES = {"visual_page", "blank_page"}
@@ -33,22 +38,23 @@ def build_text_flow(
         if isinstance(record, dict) and record.get("text_flow_action") == "include"
     }
     anchor_groups = _direct_anchor_map(skeleton, included_pages)
-    units, ignored_counts = build_text_units(
+    candidates, ignored_counts = build_text_candidates(
         observed_document,
         included_pages=included_pages,
         anchor_groups_by_observation_id=anchor_groups,
     )
-    classified = classify_text_units_by_layout(
-        units,
+    classified = classify_text_candidates_by_layout(
+        candidates,
         observed_document["pages"],
         page_layout=page_layout,
     )
-    final_units = finalize_text_units(
-        classified,
-        observed_document["observations"],
-        page_review["pages"],
+    records = aggregate_text_candidates(classified, observed_document["pages"])
+    records = reconcile_text_flow_records(
+        records,
         observed_document["pages"],
+        page_layout,
     )
+    final_units = materialize_text_units(records)
     metadata_sources = {
         "observed": observed_document["metadata"],
         "skeleton": skeleton["metadata"],

@@ -33,6 +33,64 @@ def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _valid_text_flow_fixture(sources) -> tuple[dict, tuple[dict, dict, dict, dict]]:
+    flow, observed, skeleton, page_review, page_layout = deepcopy(sources)
+    for unit in flow["text_units"]:
+        if unit["unit_type"] not in {"paragraph", "display_block"}:
+            continue
+        unit["attrs"].setdefault(
+            "layout_fragments",
+            [
+                {
+                    "observation_id": observation_id,
+                    "page": unit["page"],
+                    "classified_type": unit["unit_type"],
+                    "status": "resolved",
+                    "layout_form": None,
+                    "signals": [],
+                }
+                for observation_id in unit["observation_ids"]
+            ],
+        )
+    return flow, (observed, skeleton, page_review, page_layout)
+
+
+def _three_page_text_flow_fixture(
+    sources,
+) -> tuple[dict, tuple[dict, dict, dict, dict]]:
+    flow, source_artifacts = _valid_text_flow_fixture(sources)
+    target_ids = {"obs000051", "obs000053", "obs000063"}
+    target = next(
+        unit for unit in flow["text_units"] if "obs000051" in unit["observation_ids"]
+    )
+    target["unit_type"] = "paragraph"
+    target["pages"] = [4, 5, 6]
+    target["observation_ids"] = ["obs000051", "obs000053", "obs000063"]
+    target["attrs"]["layout_fragments"] = [
+        {
+            "observation_id": observation_id,
+            "page": page,
+            "classified_type": "paragraph",
+            "status": "resolved",
+            "layout_form": None,
+            "signals": [],
+        }
+        for observation_id, page in zip(target["observation_ids"], target["pages"], strict=True)
+    ]
+    target["attrs"]["merge_events"] = [
+        {"left_page": 4, "right_page": 5},
+        {"left_page": 5, "right_page": 6},
+    ]
+    flow["text_units"] = [
+        unit
+        for unit in flow["text_units"]
+        if unit is target or target_ids.isdisjoint(unit["observation_ids"])
+    ]
+    for index, unit in enumerate(flow["text_units"], start=1):
+        unit["unit_id"] = f"tu{index:06d}"
+    return flow, source_artifacts
+
+
 def test_text_flow_contract_accepts_built_artifact(sources) -> None:
     flow, observed, skeleton, page_review, page_layout = sources
 
@@ -66,3 +124,22 @@ def test_text_flow_contract_rejects_crossed_direct_anchor_boundary(sources) -> N
 
     with pytest.raises(ValidationError, match=r"exact TextUnit|crosses distinct"):
         validate_text_flow_against_sources(crossed, observed, skeleton, page_review, page_layout)
+
+
+def test_validation_rejects_mixed_layout_fragments(sources) -> None:
+    flow, source_artifacts = _valid_text_flow_fixture(sources)
+    paragraph = next(
+        unit for unit in flow["text_units"] if unit["unit_type"] == "paragraph"
+    )
+    paragraph["attrs"]["layout_fragments"][0]["classified_type"] = "display_block"
+
+    with pytest.raises(ValidationError, match="layout fragment type"):
+        validate_text_flow_against_sources(flow, *source_artifacts)
+
+
+def test_validation_requires_one_event_per_cross_page_transition(sources) -> None:
+    flow, source_artifacts = _three_page_text_flow_fixture(sources)
+    flow["text_units"][4]["attrs"]["merge_events"].pop()
+
+    with pytest.raises(ValidationError, match="adjacent-page transition"):
+        validate_text_flow_against_sources(flow, *source_artifacts)
