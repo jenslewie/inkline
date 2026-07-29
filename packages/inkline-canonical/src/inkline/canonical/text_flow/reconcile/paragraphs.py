@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from copy import deepcopy
 from typing import Any, TypeGuard
 
@@ -88,7 +89,7 @@ def _paragraph_boundary_candidate(
                 return None
             interruptions.append(right)
             continue
-        if right.get("unit_type") != "paragraph":
+        if last_page != right_page or right.get("unit_type") != "paragraph":
             return None
         evidence = _boundary_evidence(
             left,
@@ -394,14 +395,20 @@ def _last_page(record: dict[str, Any]) -> int | None:
 
 def _float(value: Any) -> float | None:
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return None
+    return number if math.isfinite(number) else None
 
 
 def _valid_bbox(value: Any) -> TypeGuard[list[float]]:
+    if not isinstance(value, list) or len(value) != 4:
+        return False
+    if not all(isinstance(number, int | float) for number in value):
+        return False
+    coordinates = [float(number) for number in value]
     return (
-        isinstance(value, list)
-        and len(value) == 4
-        and all(isinstance(number, int | float) for number in value)
+        all(math.isfinite(number) for number in coordinates)
+        and coordinates[0] < coordinates[2]
+        and coordinates[1] < coordinates[3]
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -242,6 +243,23 @@ def test_three_page_paragraph_requires_two_proven_transitions() -> None:
     ] == [["note-1"], ["note-2"]]
 
 
+def test_unproven_multi_page_right_paragraph_is_not_absorbed() -> None:
+    records, _, _ = _cross_page_pair()
+    records[1]["pages"] = [2, 3]
+    records[1]["spans"].append(
+        {"page": 3, "bbox": [100.0, 100.0, 900.0, 160.0]}
+    )
+
+    reconciled = reconcile_cross_page_paragraphs(
+        records,
+        _pages(1, 2, 3),
+        _page_layout(1, 2, 3),
+    )
+
+    assert reconciled == records
+    assert "merge_events" not in reconciled[1]["attrs"]
+
+
 @pytest.mark.parametrize("right_type", ["display_block", "heading", "list_item"])
 def test_paragraph_does_not_cross_different_type(right_type: str) -> None:
     records, pages, page_layout = _cross_page_pair("paragraph", right_type)
@@ -291,6 +309,59 @@ def test_paragraph_requires_complete_boundary_geometry(
     else:
         metrics = records[1]["attrs"]["text_line_metrics_by_observation"]["right"]
         metrics["first_line_indent"] = 60.0
+
+    assert reconcile_cross_page_paragraphs(records, pages, page_layout) == records
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("first_line_indent", math.nan),
+        ("first_line_indent", math.inf),
+        ("first_line_indent", -math.inf),
+        ("char_width", math.nan),
+        ("char_width", math.inf),
+        ("char_width", -math.inf),
+    ],
+)
+def test_non_finite_first_line_metrics_reject_paragraph_merge(
+    field: str,
+    value: float,
+) -> None:
+    records, pages, page_layout = _cross_page_pair()
+    metrics = records[1]["attrs"]["text_line_metrics_by_observation"]["right"]
+    metrics[field] = value
+
+    assert reconcile_cross_page_paragraphs(records, pages, page_layout) == records
+
+
+@pytest.mark.parametrize("coordinate", range(4), ids=["x1", "y1", "x2", "y2"])
+@pytest.mark.parametrize("value", [math.nan, math.inf], ids=["nan", "inf"])
+def test_non_finite_bbox_coordinate_rejects_paragraph_merge(
+    coordinate: int,
+    value: float,
+) -> None:
+    records, pages, page_layout = _cross_page_pair()
+    records[1]["bbox"][coordinate] = value
+    records[1]["spans"][0]["bbox"][coordinate] = value
+
+    assert reconcile_cross_page_paragraphs(records, pages, page_layout) == records
+
+
+@pytest.mark.parametrize(
+    "bbox",
+    [
+        [900.0, 100.0, 900.0, 160.0],
+        [901.0, 100.0, 900.0, 160.0],
+        [100.0, 160.0, 900.0, 160.0],
+        [100.0, 161.0, 900.0, 160.0],
+    ],
+    ids=["zero-width", "negative-width", "zero-height", "negative-height"],
+)
+def test_unordered_bbox_extents_reject_paragraph_merge(bbox: list[float]) -> None:
+    records, pages, page_layout = _cross_page_pair()
+    records[1]["bbox"] = deepcopy(bbox)
+    records[1]["spans"][0]["bbox"] = deepcopy(bbox)
 
     assert reconcile_cross_page_paragraphs(records, pages, page_layout) == records
 
