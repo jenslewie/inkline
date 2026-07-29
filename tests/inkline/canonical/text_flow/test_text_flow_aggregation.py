@@ -113,9 +113,7 @@ def test_aggregation_never_combines_paragraph_and_display_candidates() -> None:
     candidates = _classified_page_292_candidates()
     records = aggregate_text_candidates(candidates, _silk_road_pages())
     by_observation = {
-        observation_id: record
-        for record in records
-        for observation_id in record["observation_ids"]
+        observation_id: record for record in records for observation_id in record["observation_ids"]
     }
     assert by_observation["obs002504"] is not by_observation["obs002505"]
     assert by_observation["obs002505"] is by_observation["obs002506"]
@@ -215,9 +213,7 @@ def test_display_aggregation_rejects_empty_layout_metadata(
         ),
     ]
 
-    records = aggregate_text_candidates(
-        candidates, [{"page": 1, "width": 1000, "height": 1000}]
-    )
+    records = aggregate_text_candidates(candidates, [{"page": 1, "width": 1000, "height": 1000}])
 
     assert [record["observation_ids"] for record in records] == [
         ["obs000001"],
@@ -252,9 +248,7 @@ def test_protected_anchor_member_blocks_interleaved_display_aggregation() -> Non
         ),
     ]
 
-    records = aggregate_text_candidates(
-        candidates, [{"page": 1, "width": 1000, "height": 1000}]
-    )
+    records = aggregate_text_candidates(candidates, [{"page": 1, "width": 1000, "height": 1000}])
 
     assert [record["observation_ids"] for record in records] == [["a"], ["x"], ["b"]]
 
@@ -297,6 +291,19 @@ def test_layout_fragments_preserve_one_exact_decision_per_display_observation() 
             "signals": ["fixture_signal"],
         },
     ]
+
+
+def test_display_record_preserves_resolved_alignment_for_reconciliation() -> None:
+    candidate = _classified_candidate(
+        "obs000001",
+        classified_type="display_block",
+        layout_form="set_off_prose",
+        alignment="left",
+    )
+
+    record = aggregate_text_candidates([candidate], [{"page": 1, "width": 1000, "height": 1000}])[0]
+
+    assert record["attrs"]["alignment"] == "left"
 
 
 def test_materialization_deep_copies_nested_logical_record_state() -> None:

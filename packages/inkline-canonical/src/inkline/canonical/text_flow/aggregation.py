@@ -96,6 +96,9 @@ def _record_from_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("classified candidate is missing layout_decision")
     unit_type = str(decision["classified_type"])
     attrs = deepcopy(_attrs(candidate))
+    alignment = decision.get("alignment")
+    if unit_type == "display_block" and isinstance(alignment, str) and alignment:
+        attrs["alignment"] = alignment
     if unit_type in {"paragraph", "display_block"}:
         attrs["layout_fragments"] = [_layout_fragment(candidate, decision)]
     return {
@@ -137,7 +140,11 @@ def _append_candidate(record: dict[str, Any], candidate: dict[str, Any]) -> None
     if page not in record["pages"]:
         record["pages"].append(page)
     candidate_bbox = candidate.get("bbox")
-    if int(record["page"]) == int(page) and _valid_bbox(record.get("bbox")) and _valid_bbox(candidate_bbox):
+    if (
+        int(record["page"]) == int(page)
+        and _valid_bbox(record.get("bbox"))
+        and _valid_bbox(candidate_bbox)
+    ):
         record["bbox"] = _union_bbox(record["bbox"], candidate_bbox)
     record["spans"].extend(deepcopy(candidate.get("spans") or []))
     record["observation_ids"].append(str(candidate["observation_id"]))
