@@ -16,7 +16,10 @@ def aggregate_text_candidates(
     protected_groups: dict[str, tuple[str, ...]] = {}
     for candidate in candidates:
         _record_protected_group(candidate, protected_groups)
-        if records and _same_homogeneous_display_run(previous, candidate):
+        if records and (
+            _same_homogeneous_display_run(previous, candidate)
+            or _same_homogeneous_heading_run(previous, candidate)
+        ):
             _append_candidate(records[-1], candidate)
         else:
             records.append(_record_from_candidate(candidate))
@@ -76,6 +79,33 @@ def _same_homogeneous_display_run(
         return False
     run_ids = _run_observation_ids(decision)
     return run_ids is not None and run_ids == _run_observation_ids(previous_decision)
+
+
+def _same_homogeneous_heading_run(
+    previous: dict[str, Any] | None,
+    candidate: dict[str, Any],
+) -> bool:
+    if previous is None or int(previous["page"]) != int(candidate["page"]):
+        return False
+    if previous.get("protected_anchor_group") or candidate.get("protected_anchor_group"):
+        return False
+    previous_decision = _layout_decision(previous)
+    decision = _layout_decision(candidate)
+    if previous_decision is None or decision is None:
+        return False
+    if (
+        previous_decision.get("classified_type") != "heading"
+        or decision.get("classified_type") != "heading"
+        or previous_decision.get("status") != "resolved"
+        or decision.get("status") != "resolved"
+    ):
+        return False
+    run_ids = _run_observation_ids(decision)
+    return (
+        run_ids is not None
+        and len(run_ids) > 1
+        and run_ids == _run_observation_ids(previous_decision)
+    )
 
 
 def _layout_decision(candidate: dict[str, Any]) -> dict[str, Any] | None:

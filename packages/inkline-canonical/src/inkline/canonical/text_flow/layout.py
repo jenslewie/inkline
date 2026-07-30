@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import Any
+from typing import Any, cast
 
 from inkline.canonical.observed.layout_geometry import (
     display_gap_threshold,
@@ -47,6 +47,7 @@ def classify_text_candidates_by_layout(
         profiles,
         {int(page["page"]) for page in pages if isinstance(page.get("page"), int)},
     )
+    _apply_title_cluster_groups(classified, list(page_layout["pages"]))
     layout_pages = list(page_layout["pages"])
     _apply_terminal_attributions(classified, layout_pages, profiles, book_profile)
     _apply_terminal_mixed_alignment_short_line_clusters(
@@ -56,6 +57,38 @@ def classify_text_candidates_by_layout(
     )
     _apply_cross_page_display_runs(classified, layout_pages, profiles, book_profile)
     return classified
+
+
+def _apply_title_cluster_groups(
+    candidates: list[dict[str, Any]],
+    page_records: list[dict[str, Any]],
+) -> None:
+    title_cluster_pages = {
+        int(record["page"])
+        for record in page_records
+        if isinstance(record, dict)
+        and isinstance(record.get("coverage"), dict)
+        and record["coverage"].get("profile_status") == "title_cluster"
+    }
+    for page in title_cluster_pages:
+        members = [
+            candidate
+            for candidate in candidates
+            if int(candidate["page"]) == page
+            and candidate.get("candidate_type") in {BODY_CANDIDATE_TYPE, "heading"}
+        ]
+        page_candidates = [candidate for candidate in candidates if int(candidate["page"]) == page]
+        if not 2 <= len(members) <= 4 or len(members) != len(page_candidates):
+            continue
+        run_ids = [str(candidate["observation_id"]) for candidate in members]
+        for candidate in members:
+            decision = candidate["layout_decision"]
+            decision["classified_type"] = "heading"
+            decision["status"] = "resolved"
+            decision["layout_form"] = None
+            decision["alignment"] = None
+            decision["signals"] = ["title_cluster_page"]
+            decision["same_page_run_observation_ids"] = run_ids
 
 
 def _apply_terminal_mixed_alignment_short_line_clusters(
@@ -212,7 +245,10 @@ def _apply_cross_page_display_runs(
     profiles: dict[int, dict[str, Any]],
     book_profile: dict[str, Any],
 ) -> None:
-    runs = _ordered_body_runs(candidates, profiles, book_profile)
+    runs = _coalesce_cross_page_display_runs(
+        _ordered_body_runs(candidates, profiles, book_profile),
+        book_profile,
+    )
     compatible: list[tuple[_SamePageRun, _SamePageRun, dict[str, Any]]] = []
     for left, right in pairwise(runs):
         evidence = _joint_display_evidence(
@@ -226,6 +262,53 @@ def _apply_cross_page_display_runs(
             continue
         compatible.append((left, right, evidence))
     _apply_transition_components(compatible, book_profile)
+
+
+def _coalesce_cross_page_display_runs(
+    runs: list[_SamePageRun],
+    book_profile: dict[str, Any],
+) -> list[_SamePageRun]:
+    """Join a page-edge short fragment to its same-page set-off prose continuation."""
+
+    result: list[_SamePageRun] = []
+    gap_limit = max(
+        18.0,
+        (_positive_float(book_profile.get("normal_gap_y")) or 0.0) * 2.0,
+    )
+    for run in runs:
+        if result and _coalescible_set_off_runs(result[-1], run, gap_limit):
+            previous = result[-1]
+            result[-1] = _SamePageRun(
+                candidates=[*previous.candidates, *run.candidates],
+                previous=previous.previous,
+                following=run.following,
+                lane="left_set_off",
+                short_line_alignment=None,
+                status="resolved",
+            )
+        else:
+            result.append(run)
+    return result
+
+
+def _coalescible_set_off_runs(
+    left: _SamePageRun,
+    right: _SamePageRun,
+    gap_limit: float,
+) -> bool:
+    left_bbox = left.candidates[-1].get("bbox")
+    right_bbox = right.candidates[0].get("bbox")
+    return (
+        int(left.candidates[0]["page"]) == int(right.candidates[0]["page"])
+        and {left.lane, right.lane}.issubset({"body_indent", "left_set_off"})
+        and "left_set_off" in {left.lane, right.lane}
+        and (left.short_line_alignment is not None or right.short_line_alignment is not None)
+        and not _has_protected_member(left)
+        and not _has_protected_member(right)
+        and valid_bbox(left_bbox)
+        and valid_bbox(right_bbox)
+        and 0.0 <= float(right_bbox[1]) - float(left_bbox[3]) <= gap_limit
+    )
 
 
 def _ordered_body_runs(
@@ -259,7 +342,12 @@ def _joint_display_evidence(
     if _has_protected_member(left) or _has_protected_member(right):
         return None
     page_records = {int(page["page"]): page for page in pages}
-    if not _at_page_edge(left, page_records.get(left_page), bottom=True):
+    if not _at_page_bottom_content_boundary(
+        left,
+        right,
+        candidates,
+        page_records,
+    ):
         return None
     if not _at_page_edge(right, page_records.get(right_page), bottom=False):
         return None
@@ -284,6 +372,52 @@ def _joint_display_evidence(
             "combined_outer_display_gaps",
         ],
     }
+
+
+def _at_page_bottom_content_boundary(
+    left: _SamePageRun,
+    right: _SamePageRun,
+    candidates: list[dict[str, Any]],
+    page_records: dict[int, dict[str, Any]],
+) -> bool:
+    left_page = int(left.candidates[0]["page"])
+    page_record = page_records.get(left_page)
+    if _at_page_edge(left, page_record, bottom=True):
+        return True
+    if page_record is None:
+        return False
+    page_height = _page_height(page_record)
+    edge_bbox = left.candidates[-1].get("bbox")
+    if page_height is None or not valid_bbox(edge_bbox):
+        return False
+    interruptions = _candidates_between(left, right, candidates)
+    footnote_bboxes = [
+        cast(list[float], candidate.get("bbox"))
+        for candidate in interruptions
+        if candidate.get("candidate_type") == "footnote"
+        and int(candidate["page"]) == left_page
+        and valid_bbox(candidate.get("bbox"))
+    ]
+    return (
+        len(footnote_bboxes) == len(interruptions)
+        and bool(footnote_bboxes)
+        and float(edge_bbox[3]) < min(float(bbox[1]) for bbox in footnote_bboxes)
+        and min(float(bbox[1]) for bbox in footnote_bboxes) >= page_height * 0.70
+        and max(float(bbox[3]) for bbox in footnote_bboxes) >= page_height * 0.85
+    )
+
+
+def _candidates_between(
+    left: _SamePageRun,
+    right: _SamePageRun,
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    indexes = {
+        str(candidate["observation_id"]): index for index, candidate in enumerate(candidates)
+    }
+    left_end = indexes[str(left.candidates[-1]["observation_id"])]
+    right_start = indexes[str(right.candidates[0]["observation_id"])]
+    return candidates[left_end + 1 : right_start]
 
 
 def _has_protected_member(run: _SamePageRun) -> bool:
@@ -320,12 +454,7 @@ def _has_only_recorded_page_foot_interruptions(
     candidates: list[dict[str, Any]],
     page_records: dict[int, dict[str, Any]],
 ) -> bool:
-    indexes = {
-        str(candidate["observation_id"]): index for index, candidate in enumerate(candidates)
-    }
-    left_end = indexes[str(left.candidates[-1]["observation_id"])]
-    right_start = indexes[str(right.candidates[0]["observation_id"])]
-    interruptions = candidates[left_end + 1 : right_start]
+    interruptions = _candidates_between(left, right, candidates)
     if not interruptions:
         return True
     left_page = int(left.candidates[0]["page"])
@@ -335,17 +464,19 @@ def _has_only_recorded_page_foot_interruptions(
         candidate.get("candidate_type") == "footnote"
         and int(candidate["page"]) == left_page
         and valid_bbox(candidate.get("bbox"))
-        and float(candidate["bbox"][1]) >= page_height * 0.75
+        and float(candidate["bbox"][1]) >= page_height * 0.70
         for candidate in interruptions
     )
 
 
 def _promote_run_decision(run: _SamePageRun) -> None:
+    run_ids = [str(candidate["observation_id"]) for candidate in run.candidates]
     for candidate in run.candidates:
         decision = candidate["layout_decision"]
         decision["classified_type"] = "display_block"
         decision["layout_form"] = _layout_form(run)
         decision["alignment"] = _layout_alignment(run)
+        decision["same_page_run_observation_ids"] = run_ids
 
 
 def _apply_transition_components(

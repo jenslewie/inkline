@@ -25,11 +25,18 @@ def reconcile_text_flow_records(
     records: list[dict[str, Any]],
     pages: list[dict[str, Any]],
     page_layout: dict[str, Any],
+    *,
+    bridge_pages: set[int] | None = None,
 ) -> list[dict[str, Any]]:
     """Run parser-neutral record reconciliation in dependency order."""
 
     reconciled = reconcile_cross_page_footnotes(records, page_layout)
-    reconciled = reconcile_cross_page_paragraphs(reconciled, pages, page_layout)
+    reconciled = reconcile_cross_page_paragraphs(
+        reconciled,
+        pages,
+        page_layout,
+        bridge_pages=bridge_pages,
+    )
     return reconcile_cross_page_displays(reconciled, pages, page_layout)
 
 
@@ -37,8 +44,15 @@ def reconcile_text_records(
     records: list[dict[str, Any]],
     pages: list[dict[str, Any]],
     page_layout: dict[str, Any],
+    *,
+    bridge_pages: set[int] | None = None,
 ) -> list[dict[str, Any]]:
     """Run the original footnote and paragraph reconciliation passes."""
 
     reconciled = reconcile_cross_page_footnotes(records, page_layout)
-    return reconcile_cross_page_paragraphs(reconciled, pages, page_layout)
+    return reconcile_cross_page_paragraphs(
+        reconciled,
+        pages,
+        page_layout,
+        bridge_pages=bridge_pages,
+    )

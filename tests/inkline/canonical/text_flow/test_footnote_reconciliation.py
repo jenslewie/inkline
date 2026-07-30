@@ -547,6 +547,71 @@ def test_unmarked_cross_page_reference_is_not_guessed() -> None:
     ]
 
 
+def test_same_page_unmarked_footnote_paragraph_is_absorbed() -> None:
+    records = [
+        _record(
+            "marked",
+            "3 第一段脚注。",
+            page=1,
+            bbox=[100.0, 760.0, 900.0, 830.0],
+            unit_type="footnote",
+            role_hint="footnote_text",
+        ),
+        _record(
+            "continuation",
+            "第二段脚注没有重复编号。",
+            page=1,
+            bbox=[110.0, 832.0, 900.0, 910.0],
+            unit_type="footnote",
+            role_hint="footnote_text",
+        ),
+    ]
+
+    reconciled = reconcile_cross_page_footnotes(records, _page_layout(1))
+
+    assert len(reconciled) == 1
+    assert reconciled[0]["observation_ids"] == ["marked", "continuation"]
+    assert reconciled[0]["attrs"]["merge_events"][0]["reason"] == (
+        "same_page_footnote_continuation"
+    )
+
+
+@pytest.mark.parametrize(
+    ("right_text", "right_top"),
+    [
+        ("4 独立脚注。", 832.0),
+        ("4《无空格的独立脚注》", 832.0),
+        ("译注：独立的译者注。", 832.0),
+        ("* 独立星号注。", 832.0),
+        ("无编号但与上一注间距过大。", 880.0),
+    ],
+)
+def test_same_page_footnote_stops_at_marker_or_large_gap(
+    right_text: str,
+    right_top: float,
+) -> None:
+    records = [
+        _record(
+            "left",
+            "3 第一条脚注。",
+            page=1,
+            bbox=[100.0, 760.0, 900.0, 830.0],
+            unit_type="footnote",
+            role_hint="footnote_text",
+        ),
+        _record(
+            "right",
+            right_text,
+            page=1,
+            bbox=[100.0, right_top, 900.0, right_top + 40.0],
+            unit_type="footnote",
+            role_hint="footnote_text",
+        ),
+    ]
+
+    assert reconcile_cross_page_footnotes(records, _page_layout(1)) == records
+
+
 def test_merge_records_preserves_source_collections_and_boundary_audit() -> None:
     left = _record(
         "left",

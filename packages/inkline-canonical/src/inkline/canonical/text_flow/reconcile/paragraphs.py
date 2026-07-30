@@ -22,8 +22,10 @@ def reconcile_cross_page_paragraphs(
     records: list[dict[str, Any]],
     pages: list[dict[str, Any]],
     page_layout: dict[str, Any],
+    *,
+    bridge_pages: set[int] | None = None,
 ) -> list[dict[str, Any]]:
-    """Merge only proven adjacent-page paragraph continuations."""
+    """Merge only structurally proven cross-page paragraph continuations."""
 
     reconciled = deepcopy(records)
     source_pages = _source_page_numbers(pages)
@@ -35,6 +37,7 @@ def reconcile_cross_page_paragraphs(
             source_pages,
             pages,
             page_layout,
+            bridge_pages or set(),
         )
         if candidate is None:
             index += 1
@@ -60,6 +63,7 @@ def _paragraph_boundary_candidate(
     source_pages: set[int],
     pages: list[dict[str, Any]],
     page_layout: dict[str, Any],
+    bridge_pages: set[int],
 ) -> tuple[int, list[dict[str, Any]], dict[str, Any]] | None:
     left = records[left_index]
     if left.get("unit_type") != "paragraph":
@@ -67,26 +71,25 @@ def _paragraph_boundary_candidate(
     left_page = _last_page(left)
     if left_page is None:
         return None
-    right_page = left_page + 1
-    if left_page not in source_pages or right_page not in source_pages:
+    if left_page not in source_pages:
         return None
 
     interruptions: list[dict[str, Any]] = []
     for right_index in range(left_index + 1, len(records)):
         right = records[right_index]
-        first_page = _first_page(right)
-        last_page = _last_page(right)
-        if first_page is None or last_page is None:
-            return None
-        if _prior_transition_footnote(right, first_page, last_page, left_page):
+        position, right_page = _paragraph_scan_position(right, left_page)
+        if position == "prior_footnote":
             continue
-        if first_page < left_page or first_page > right_page:
+        if position == "invalid" or right_page is None:
             return None
-        if first_page == left_page:
-            if not _page_foot_interruption(right, left_page, pages, page_layout):
-                return None
-            if last_page > right_page:
-                return None
+        if position == "left_footnote":
+            interruptions.append(right)
+            continue
+        if right_page not in source_pages or not _bridge_pages_allowed(
+            left_page, right_page, bridge_pages
+        ):
+            return None
+        if _visual_interruption(right, right_page, page_layout):
             interruptions.append(right)
             continue
         if (
@@ -102,11 +105,31 @@ def _paragraph_boundary_candidate(
             right_page,
             pages,
             page_layout,
+            bridge_pages=sorted(range(left_page + 1, right_page)),
         )
         if evidence is None:
             return None
         return right_index, interruptions, evidence
     return None
+
+
+def _paragraph_scan_position(
+    record: dict[str, Any],
+    left_page: int,
+) -> tuple[str, int | None]:
+    first_page = _first_page(record)
+    last_page = _last_page(record)
+    if first_page is None or last_page is None:
+        return "invalid", None
+    if _prior_transition_footnote(record, first_page, last_page, left_page):
+        return "prior_footnote", None
+    if first_page < left_page:
+        return "invalid", None
+    if first_page > left_page:
+        return "future", first_page
+    if record.get("unit_type") == "footnote" and last_page <= left_page + 1:
+        return "left_footnote", left_page
+    return "invalid", None
 
 
 def _prior_transition_footnote(
@@ -128,15 +151,29 @@ def _boundary_evidence(
     right_page: int,
     pages: list[dict[str, Any]],
     page_layout: dict[str, Any],
+    *,
+    bridge_pages: list[int],
 ) -> dict[str, Any] | None:
+    footnote_interruptions = [
+        record for record in interruptions if record.get("unit_type") == "footnote"
+    ]
+    visual_interruptions = [
+        record for record in interruptions if record.get("unit_type") == "display_block"
+    ]
     left_edge = _left_edge_evidence(
         left,
-        interruptions,
+        footnote_interruptions,
         left_page,
         pages,
         page_layout,
     )
-    right_top = _right_starts_at_page_top(right, right_page, pages, page_layout)
+    right_boundary = _right_content_boundary_evidence(
+        right,
+        visual_interruptions,
+        right_page,
+        pages,
+        page_layout,
+    )
     body_lane = _compatible_body_lanes(
         left,
         right,
@@ -145,7 +182,7 @@ def _boundary_evidence(
         page_layout,
     )
     indent = _right_first_line_indent(right)
-    if left_edge is None or not right_top or body_lane is None or indent is None:
+    if left_edge is None or right_boundary is None or body_lane is None or indent is None:
         return None
     indent_value, indent_threshold = indent
     if indent_value >= indent_threshold:
@@ -158,8 +195,115 @@ def _boundary_evidence(
         "body_lane": body_lane,
         "right_first_line_indent": indent_value,
         "right_first_line_indent_threshold": indent_threshold,
-        "across_page_footnotes": bool(interruptions),
+        "across_page_footnotes": bool(footnote_interruptions),
+        "visual_interruption_observation_ids": [
+            observation_id
+            for record in visual_interruptions
+            for observation_id in record.get("observation_ids") or []
+        ],
+        "visual_region_observation_ids": right_boundary["visual_region_observation_ids"],
+        "bridge_pages": bridge_pages,
     }
+
+
+def _bridge_pages_allowed(
+    left_page: int,
+    right_page: int,
+    bridge_pages: set[int],
+) -> bool:
+    if right_page <= left_page:
+        return False
+    required = set(range(left_page + 1, right_page))
+    return required.issubset(bridge_pages)
+
+
+def _visual_interruption(
+    record: dict[str, Any],
+    page: int,
+    page_layout: dict[str, Any],
+) -> bool:
+    if record.get("unit_type") != "display_block" or _first_page(record) != page:
+        return False
+    bbox = _bbox_on_page(record, page)
+    if not _valid_bbox(bbox):
+        return False
+    attrs = record.get("attrs")
+    if isinstance(attrs, dict) and attrs.get("layout_role") == "caption_candidate":
+        return bool(_associated_visual_regions(bbox, page, page_layout))
+    return bool(_associated_visual_regions(bbox, page, page_layout))
+
+
+def _right_content_boundary_evidence(
+    right: dict[str, Any],
+    visual_interruptions: list[dict[str, Any]],
+    page: int,
+    pages: list[dict[str, Any]],
+    page_layout: dict[str, Any],
+) -> dict[str, Any] | None:
+    if _right_starts_at_page_top(right, page, pages, page_layout):
+        return {"visual_region_observation_ids": []}
+    bbox = _bbox_on_page(right, page)
+    page_height = _page_height(page, pages, page_layout)
+    if not _valid_bbox(bbox) or page_height is None:
+        return None
+    visual_regions = _visual_regions(page_layout, page)
+    if not visual_regions:
+        return None
+    associated_ids: list[str] = []
+    content_bottom = 0.0
+    for region in visual_regions:
+        region_bbox = region.get("bbox")
+        if not _valid_bbox(region_bbox) or float(region_bbox[1]) > page_height * _PAGE_TOP_RATIO:
+            continue
+        content_bottom = max(content_bottom, float(region_bbox[3]))
+        associated_ids.append(str(region["observation_id"]))
+    for interruption in visual_interruptions:
+        interruption_bbox = _bbox_on_page(interruption, page)
+        if not _valid_bbox(interruption_bbox):
+            return None
+        associated = _associated_visual_regions(interruption_bbox, page, page_layout)
+        if not associated:
+            return None
+        content_bottom = max(content_bottom, float(interruption_bbox[3]))
+        for region in associated:
+            observation_id = str(region["observation_id"])
+            if observation_id not in associated_ids:
+                associated_ids.append(observation_id)
+    if not associated_ids:
+        return None
+    gap_limit = max(page_height * 0.08, 40.0)
+    if 0.0 <= float(bbox[1]) - content_bottom <= gap_limit:
+        return {"visual_region_observation_ids": associated_ids}
+    return None
+
+
+def _associated_visual_regions(
+    bbox: list[float],
+    page: int,
+    page_layout: dict[str, Any],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for region in _visual_regions(page_layout, page):
+        region_bbox = region.get("bbox")
+        if not _valid_bbox(region_bbox):
+            continue
+        vertical_gap = max(
+            float(bbox[1]) - float(region_bbox[3]),
+            float(region_bbox[1]) - float(bbox[3]),
+            0.0,
+        )
+        if vertical_gap <= 32.0:
+            result.append(region)
+    return result
+
+
+def _visual_regions(
+    page_layout: dict[str, Any],
+    page: int,
+) -> list[dict[str, Any]]:
+    page_record = _page_record(page_layout, page)
+    regions = page_record.get("visual_regions") if page_record is not None else None
+    return [region for region in regions or [] if isinstance(region, dict)]
 
 
 def _left_edge_evidence(
@@ -185,7 +329,7 @@ def _left_edge_evidence(
     band_bottom = max(float(value[3]) for value in typed_bboxes)
     if (
         float(bbox[3]) < band_top
-        and band_top >= page_height * _PAGE_FOOT_BAND_START_RATIO
+        and band_top >= page_height * 0.60
         and band_bottom >= page_height * _PAGE_FOOT_BAND_END_RATIO
     ):
         return "footnote_band"

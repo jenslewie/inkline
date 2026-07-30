@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from inkline.canonical.page_layout.contract import (
@@ -8,7 +9,14 @@ from inkline.canonical.page_layout.contract import (
 )
 from inkline.canonical.schema import ValidationError
 
-PAGE_RECORD_FIELDS = {"page", "page_size", "body_lane", "coverage", "role_signals"}
+PAGE_RECORD_FIELDS = {
+    "page",
+    "page_size",
+    "body_lane",
+    "coverage",
+    "role_signals",
+    "visual_regions",
+}
 BODY_LANE_FIELDS = {
     "profile_scope",
     "profile_source",
@@ -101,7 +109,56 @@ def _validate_page_record(record: dict[str, Any], index: int) -> None:
     role_signals = record.get("role_signals")
     if not isinstance(role_signals, dict) or set(role_signals) != ROLE_SIGNAL_FIELDS:
         raise ValidationError(f"page layout analysis pages[{index}].role_signals is invalid")
+    _validate_visual_regions(record.get("visual_regions"), index)
     _validate_body_lane(record.get("body_lane"), index)
+
+
+def _validate_visual_regions(value: Any, index: int) -> None:
+    if not isinstance(value, list):
+        raise ValidationError(f"page layout analysis pages[{index}].visual_regions must be list")
+    for region_index, region in enumerate(value):
+        if not isinstance(region, dict) or set(region) != {
+            "observation_id",
+            "kind",
+            "bbox",
+            "reading_order",
+        }:
+            raise ValidationError(
+                f"page layout analysis pages[{index}].visual_regions[{region_index}] is invalid"
+            )
+        if not isinstance(region.get("observation_id"), str) or not region["observation_id"]:
+            raise ValidationError(
+                f"page layout analysis pages[{index}].visual_regions[{region_index}]"
+                ".observation_id is invalid"
+            )
+        if region.get("kind") not in {"image_region", "table_region"}:
+            raise ValidationError(
+                f"page layout analysis pages[{index}].visual_regions[{region_index}].kind is invalid"
+            )
+        bbox = region.get("bbox")
+        if (
+            not isinstance(bbox, list)
+            or len(bbox) != 4
+            or not all(
+                isinstance(number, int | float)
+                and not isinstance(number, bool)
+                and math.isfinite(float(number))
+                for number in bbox
+            )
+            or float(bbox[0]) >= float(bbox[2])
+            or float(bbox[1]) >= float(bbox[3])
+        ):
+            raise ValidationError(
+                f"page layout analysis pages[{index}].visual_regions[{region_index}].bbox is invalid"
+            )
+        reading_order = region.get("reading_order")
+        if reading_order is not None and (
+            not isinstance(reading_order, int) or isinstance(reading_order, bool)
+        ):
+            raise ValidationError(
+                f"page layout analysis pages[{index}].visual_regions[{region_index}]"
+                ".reading_order is invalid"
+            )
 
 
 def _validate_body_lane(value: Any, index: int) -> None:

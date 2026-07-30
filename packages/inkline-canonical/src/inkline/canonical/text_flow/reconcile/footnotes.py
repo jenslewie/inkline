@@ -16,9 +16,10 @@ _DOWN_SUFFIX = re.compile(
 )
 _UP_PREFIX = re.compile(rf"^\s*(?:{_UP_WRAPPED}|接上页(?=$|[{_TOKEN_BOUNDARY}]))\s*")
 _INDEPENDENT_MARKER = re.compile(
-    r"^\s*(?:\[\d{1,3}\]|［\d{1,3}］|【\d{1,3}】|〔\d{1,3}〕|"
+    r"^\s*(?:(?:译注|原注|编者注|作者注)[:：]|"
+    r"\[\d{1,3}\]|［\d{1,3}］|【\d{1,3}】|〔\d{1,3}〕|"
     r"\(\d{1,3}\)|（\d{1,3}）|[⁰¹²³⁴⁵⁶⁷⁸⁹]+(?=[\s、.)）]|$)|"
-    r"[①-⑳㉑-㊿❶-❿⓵-⓾]|[*†‡]|\d{1,3}(?=[\s、.)）]|$))"
+    r"[①-⑳㉑-㊿❶-❿⓵-⓾]|[*†‡]|\d{1,3}(?=\D|$))"
 )
 _REFERENCE_ROLES = {"reference_text", "footnote_text"}
 _STRUCTURAL_BOUNDARY_TYPES = {
@@ -36,9 +37,9 @@ def reconcile_cross_page_footnotes(
     records: list[dict[str, Any]],
     page_layout: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Return copied records with explicit cross-page footnotes reconciled."""
+    """Return copied records with same-page and explicit cross-page footnotes reconciled."""
 
-    reconciled = deepcopy(records)
+    reconciled = _reconcile_same_page_footnotes(deepcopy(records), page_layout)
     index = 0
     while index < len(reconciled):
         left = reconciled[index]
@@ -79,6 +80,95 @@ def reconcile_cross_page_footnotes(
         # The merged right side may itself end with the next explicit marker.
         # Re-evaluate this same record before advancing to an unrelated record.
     return reconciled
+
+
+def _reconcile_same_page_footnotes(
+    records: list[dict[str, Any]],
+    page_layout: dict[str, Any],
+) -> list[dict[str, Any]]:
+    index = 0
+    while index + 1 < len(records):
+        left = records[index]
+        right = records[index + 1]
+        evidence = _same_page_continuation_evidence(
+            left,
+            right,
+            page_layout,
+            records,
+        )
+        if evidence is None:
+            index += 1
+            continue
+        merge_records(
+            left,
+            right,
+            reason="same_page_footnote_continuation",
+            joiner="\n",
+            interruptions=[],
+            boundary_evidence=evidence,
+        )
+        del records[index + 1]
+    return records
+
+
+def _same_page_continuation_evidence(
+    left: dict[str, Any],
+    right: dict[str, Any],
+    page_layout: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    page = _last_page(left)
+    if (
+        left.get("unit_type") != "footnote"
+        or right.get("unit_type") != "footnote"
+        or page is None
+        or _first_page(right) != page
+        or _last_page(right) != page
+        or not _INDEPENDENT_MARKER.search(str(left.get("text") or ""))
+        or _INDEPENDENT_MARKER.search(str(right.get("text") or ""))
+        or not _in_reference_lane(left, page_layout, require_page_foot=False)
+        or not _in_reference_lane(right, page_layout, require_page_foot=False)
+        or not _compatible_reference_lanes(left, right, page_layout)
+        or _page_markers_account_for_each_footnote(records, page)
+    ):
+        return None
+    left_bbox = _bbox_on_page(left, page)
+    right_bbox = _bbox_on_page(right, page)
+    if not _valid_bbox(left_bbox) or not _valid_bbox(right_bbox):
+        return None
+    gap = float(right_bbox[1]) - float(left_bbox[3])
+    left_height = float(left_bbox[3]) - float(left_bbox[1])
+    right_height = float(right_bbox[3]) - float(right_bbox[1])
+    gap_limit = max(8.0, min(24.0, min(left_height, right_height) * 0.35))
+    if gap < -2.0 or gap > gap_limit:
+        return None
+    return {
+        "lane": "same_page_reference",
+        "vertical_gap": gap,
+        "vertical_gap_limit": gap_limit,
+        "right_has_independent_marker": False,
+    }
+
+
+def _page_markers_account_for_each_footnote(
+    records: list[dict[str, Any]],
+    page: int,
+) -> bool:
+    markers: list[str] = []
+    footnote_count = 0
+    for record in records:
+        if _first_page(record) != page:
+            continue
+        if record.get("unit_type") == "footnote":
+            footnote_count += 1
+            continue
+        attrs = record.get("attrs")
+        note_refs = attrs.get("note_refs") if isinstance(attrs, dict) else None
+        for note_ref in note_refs or []:
+            marker = note_ref.get("marker") if isinstance(note_ref, dict) else None
+            if isinstance(marker, str) and marker and marker not in markers:
+                markers.append(marker)
+    return footnote_count > 0 and len(markers) >= footnote_count
 
 
 def _explicit_continuation_match(

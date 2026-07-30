@@ -53,6 +53,13 @@ def build_text_flow(
         records,
         observed_document["pages"],
         page_layout,
+        bridge_pages={
+            int(record["page"])
+            for record in page_review.get("pages") or []
+            if isinstance(record, dict)
+            and record.get("text_flow_action") == "exclude"
+            and record.get("page_role") in NON_TEXT_BRIDGE_PAGE_ROLES
+        },
     )
     final_units = materialize_text_units(records)
     metadata_sources = {

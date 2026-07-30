@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 from inkline.canonical import build_page_layout_analysis, build_text_flow
@@ -128,7 +129,14 @@ def test_direct_anchor_precedes_same_slot_shadow_without_dropping_it() -> None:
 
 
 def test_source_validation_uses_direct_anchor_priority_within_title_slot() -> None:
-    flow = build_text_flow(*_golden_sources(MIN_KINGDOM))
+    observed, skeleton, page_review, page_layout = _golden_sources(MIN_KINGDOM)
+    page_review = deepcopy(page_review)
+    page_record = next(record for record in page_review["pages"] if record["page"] == 211)
+    page_record["page_role"] = "text_flow_page"
+    page_record["text_flow_action"] = "include"
+    page_record["visual_asset_action"] = "not_needed"
+
+    flow = build_text_flow(observed, skeleton, page_review, page_layout)
     anchor = _unit_for_observations(flow, ["obs001732"])
     shadow_units = [unit for unit in flow["text_units"] if "obs001778" in unit["observation_ids"]]
 

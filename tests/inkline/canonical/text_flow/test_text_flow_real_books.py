@@ -33,6 +33,26 @@ def test_silk_road_text_flow_reconciles_accepted_layout_and_cross_page_cases() -
     assert by_observation["obs000748"] is not by_observation["obs000747"]
     assert by_observation["obs000749"] is not by_observation["obs000747"]
     assert by_observation["obs001399"] is by_observation["obs001405"]
+    assert by_observation["obs000419"] is by_observation["obs000420"]
+    assert by_observation["obs000419"]["unit_type"] == "footnote"
+    assert by_observation["obs000258"] is not by_observation["obs000259"]
+    assert by_observation["obs000511"] is by_observation["obs000512"]
+    display = by_observation["obs000480"]
+    assert by_observation["obs000485"] is display
+    assert by_observation["obs000486"] is display
+    assert by_observation["obs000487"] is display
+    assert display["unit_type"] == "display_block"
+    assert by_observation["obs000249"] is by_observation["obs000256"]
+    assert by_observation["obs000254"] is not by_observation["obs000249"]
+    assert by_observation["obs000255"] is not by_observation["obs000249"]
+    assert by_observation["obs000378"] is by_observation["obs000383"]
+    assert by_observation["obs000384"] is by_observation["obs000388"]
+    assert by_observation["obs000416"] is by_observation["obs000428"]
+    assert by_observation["obs000509"] is by_observation["obs000517"]
+    title_cluster = by_observation["obs002251"]
+    assert by_observation["obs002252"] is title_cluster
+    assert by_observation["obs002253"] is title_cluster
+    assert title_cluster["unit_type"] == "heading"
 
     assert set(Counter(observation_ids).values()) == {1}
     assert len(by_observation) == len(observation_ids)

@@ -84,6 +84,7 @@ def _page_layout_without_profile() -> dict[str, Any]:
                 "page": 1,
                 "page_size": {"width": 1000.0, "height": 1000.0},
                 "body_lane": None,
+                "visual_regions": [],
                 "coverage": {"profile_status": "paragraph_without_profile"},
                 "role_signals": {
                     "kind_counts": {},

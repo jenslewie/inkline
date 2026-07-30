@@ -2,7 +2,8 @@
 
 ## Status
 
-Approved direction, pending written-spec review, 2026-07-29.
+Approved direction, implementation and 13-book TextFlow acceptance in progress,
+2026-07-30.
 
 ## Problem
 
@@ -33,6 +34,10 @@ The result has five related defect patterns across two phases:
    additional unmarked reference fragments on the continuation page.
 5. A display block continues across one or more page boundaries, optionally
    with page-foot notes between its physical fragments.
+6. A paragraph is physically interrupted by an image and its caption, or by
+   one or more excluded visual pages, while remaining one logical paragraph.
+7. A multi-paragraph footnote is split into consecutive same-page observations
+   because the second paragraph does not repeat the note marker.
 
 In `丝绸之路新史`, physical pages 81 and 82 expose the cross-page paragraph
 defect. The paragraph ending with `大多数人改走塔克` and the next-page fragment
@@ -112,6 +117,32 @@ logical-unit identity.
 14. `PageLayoutAnalysis` remains page/body-lane evidence. It does not become a
     second per-text classification artifact; candidate-level decisions belong
     to TextFlow construction and its audit evidence.
+15. Ordered image/table observation ids and bboxes are preserved in
+    `PageLayoutAnalysis` as parser-neutral visual-region evidence. This proves
+    interruption topology; it does not perform semantic image-caption pairing.
+16. A visual interruption is transparent only when both paragraph endpoints
+    remain type-homogeneous and geometry proves that the intervening display
+    records occupy the visual region's caption corridor. The caption remains an
+    independent display TextUnit.
+17. Consecutive excluded `visual_page` or `blank_page` records may bridge a
+    paragraph across more than one physical page. Every skipped page must be
+    explicitly supplied by PageReview; a missing, included, or differently
+    classified page is a hard boundary.
+
+## Canonical v1 capability matrix
+
+Canonical v1 is a characterization baseline, not a runtime dependency:
+
+| Capability | Canonical v1 behavior reused | Parser-neutral TextFlow owner |
+| --- | --- | --- |
+| Paragraph across page-foot notes | Body ending above a bottom note band can resume on the next page | Paragraph reconciliation |
+| Paragraph across image/float interruption | Next body fragment can resume after top-of-page visual material | PageLayout visual regions + paragraph reconciliation |
+| Paragraph across one or more visual pages | Consecutive float pages are transparent when both text endpoints prove continuation | PageReview bridge-page set + paragraph reconciliation |
+| Same-page multi-paragraph footnote | Unmarked immediately adjacent reference-lane tail belongs to the marked note | Footnote reconciliation |
+| Explicit cross-page footnote | `接下页`/`接上页` pair and same-lane tail are one note | Footnote reconciliation |
+| Cross-page display block | Compatible set-off fragments are jointly classified and then merged | Layout classification, then display reconciliation |
+| Paragraph misread as display or vice versa | v1 sometimes repaired type during merge | Rejected: classification must be correct before aggregation |
+| Image-caption semantic relation | Parser-specific float/caption structures could imply pairing | Deferred to VisualRelationReview |
 
 ## Considered Approaches
 
@@ -184,8 +215,9 @@ RAG, and EPUB will consume the corrected artifacts in later tasks, but are not
 implemented or acceptance-tested here.
 
 `PageLayoutAnalysis` is an input to layout segmentation and classification. It
-provides normalized page dimensions, body lanes, and profile provenance, while
-the TextFlow builder owns candidate-level type decisions and boundary evidence.
+provides normalized page dimensions, body lanes, ordered visual-region
+geometry, and profile provenance, while the TextFlow builder owns
+candidate-level type decisions and boundary evidence.
 
 Footnote reconciliation runs before content reconciliation, matching the
 dependency that page-foot units must be reliably identified before they can be
@@ -344,9 +376,14 @@ The merged unit records:
   `explicit_cross_page_footnote_continuation`; and
 - provenance for every absorbed source fragment.
 
-Ordinary same-page footnote deduplication and unmarked cross-page guessing are
-outside this task. Only an explicit cross-page pair may activate tail-fragment
-absorption.
+Before the explicit cross-page pass, a same-page pass may absorb an immediately
+following unmarked footnote paragraph when both records are already footnotes,
+remain in a compatible reference lane, have a small measured vertical gap, and
+the left record begins with an independent note marker. It stops at a numeric,
+symbolic, or star marker, a lane break, a large gap, or any non-footnote
+record. This is continuation of one multi-paragraph footnote, not generic
+semantic deduplication. Unmarked cross-page guessing remains outside this
+task.
 
 ### Homogeneous cross-page content pass
 
@@ -357,7 +394,8 @@ either of these ordered patterns:
 ```text
 paragraph on page N
   -> zero or more page-foot footnotes
-  -> paragraph on page N+1
+  -> optional image/caption corridor or PageReview-approved visual pages
+  -> paragraph on page N+1 or the next retained text-flow page
 
 display_block on page N
   -> zero or more page-foot footnotes
@@ -381,6 +419,19 @@ For either type, a merge is allowed only when:
 - the fragments occupy compatible horizontal lanes for their type; and
 - no heading, direct Skeleton anchor, differently typed content unit, list
   item, table-related content, or unrelated unit intervenes.
+
+For paragraphs only, a sequence of display records on the right page may be
+transparent when each record is geometrically associated with an ordered
+`image_region` or `table_region`, the visual starts in the page-top content
+zone, and the right paragraph starts immediately after the combined
+visual/caption corridor. Those display records remain independent TextUnits.
+The same evidence allows a top-of-page image with no caption. It does not
+permit a paragraph to merge with a display block.
+
+For a multi-page visual bridge, the missing physical pages must exactly equal
+the `visual_page`/`blank_page` exclusions supplied by PageReview. The merge
+event records every bridge page. This is the only permitted non-adjacent
+physical-page transition.
 
 Paragraph-specific eligibility additionally requires:
 
@@ -511,12 +562,31 @@ Implementation follows RED-GREEN TDD.
    - the paragraph retains the page-82 marker-1 note reference;
    - observations `obs001399`, `obs001405`, and their continuation tail form
      one cross-page footnote matching the canonical v1 behavior.
-14. Regenerate all 13 PageReview-dependent TextFlows and SectionMaps. Compare
+14. Add real-book regressions from the 2026-07-29 audit:
+   - `obs000249` and `obs000256` are one paragraph while `obs000254` and
+     `obs000255` remain independent caption/display units;
+   - `obs000378`/`obs000383` and `obs000384`/`obs000388` are paragraph
+     continuations across top-of-page images;
+   - `obs000419` and `obs000420` are one same-page multi-paragraph footnote;
+   - `obs000480`, `obs000485`, `obs000486`, and `obs000487` are classified
+     before aggregation and materialize as one cross-page display block;
+   - `obs000509` and `obs000517` are one paragraph across a page-foot note
+     band; and
+   - `obs000416` and `obs000428` are one paragraph across two
+     PageReview-excluded visual pages.
+15. Add negative tests proving that an independent marked footnote, large
+   same-page footnote gap, indented new paragraph, heading, non-approved bridge
+   page, and `paragraph`/`display_block` type mismatch all stop reconciliation.
+16. Regenerate all 13 PageReview-dependent TextFlows. Compare classification,
+   logical boundaries, observation coverage, unconsumed evidence, and changed
+   units against the immediately preceding accepted artifacts. Freeze TextFlow
+   only after every unexplained change is resolved.
+17. Only after the TextFlow freeze, regenerate all 13 SectionMaps. Compare
    counts, ownership, unresolved boundaries, observation coverage, and changed
    units against the immediately preceding accepted artifacts. Stop on any
    unexplained change.
-15. Run focused pytest, the 13-book real-book suite, Ruff, Pylint, and Pyright.
-16. Present the refreshed Task 4 manual checkpoint before committing the active
+18. Run focused pytest, the 13-book real-book suite, Ruff, Pylint, and Pyright.
+19. Present the refreshed Task 4 manual checkpoint before committing the active
    SectionMap implementation.
 
 ## Non-goals
@@ -524,10 +594,10 @@ Implementation follows RED-GREEN TDD.
 - Reusing MinerU canonical blocks as TextFlow input.
 - Semantic sentence-completion or topic-based merging.
 - Guessing unmarked cross-page footnote continuation.
-- A general redesign of heading, list, table, figure-caption, or visual-page
-  classification beyond the protected boundaries required by this pipeline.
+- Semantic image-caption pairing or a general redesign of heading, list,
+  table, figure-caption, or visual-page classification.
 - Reclassifying paragraph/display types during reconciliation.
-- Table continuation and figure-caption reconciliation.
+- Table continuation.
 - Changing SectionMap membership rules.
 - Implementing final BookGraph `contains` edges, RAG chunking, or EPUB
   rendering.

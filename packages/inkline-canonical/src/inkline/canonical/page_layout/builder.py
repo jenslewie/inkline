@@ -393,6 +393,7 @@ def _page_record(
         "page": page,
         "page_size": page_size,
         "body_lane": body_lane,
+        "visual_regions": _visual_regions(observations),
         "coverage": {
             "profile_status": "profiled"
             if body_lane is not None
@@ -400,6 +401,27 @@ def _page_record(
         },
         "role_signals": _role_signals(page_size, observations),
     }
+
+
+def _visual_regions(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Preserve ordered parser-neutral visual geometry for downstream layout proofs."""
+
+    regions: list[dict[str, Any]] = []
+    for observation in sorted(observations, key=_observation_order):
+        if observation.get("kind") not in VISUAL_KINDS or not _valid_bbox(observation.get("bbox")):
+            continue
+        attrs_value = observation.get("attrs")
+        attrs = attrs_value if isinstance(attrs_value, dict) else {}
+        reading_order = attrs.get("reading_order")
+        regions.append(
+            {
+                "observation_id": str(observation["observation_id"]),
+                "kind": str(observation["kind"]),
+                "bbox": [float(value) for value in observation["bbox"]],
+                "reading_order": reading_order if isinstance(reading_order, int) else None,
+            }
+        )
+    return regions
 
 
 def _body_lane_record(profile: dict[str, Any], book_profile: dict[str, Any]) -> dict[str, Any]:

@@ -356,6 +356,18 @@ def _validate_adjacent_page_merge_events(unit: dict[str, Any], attrs: dict[str, 
                     "TextFlow requires one merge event per adjacent-page transition"
                 )
             continue
+        if transition[1] > transition[0] + 1:
+            boundary_evidence = event.get("boundary_evidence")
+            bridge_pages = (
+                boundary_evidence.get("bridge_pages")
+                if isinstance(boundary_evidence, Mapping)
+                else None
+            )
+            if bridge_pages != list(range(transition[0] + 1, transition[1])):
+                raise ValidationError(
+                    "TextFlow requires one merge event per adjacent-page transition"
+                )
+            continue
         event_transitions.append(transition)
     if Counter(event_transitions) != Counter(transitions):
         raise ValidationError("TextFlow requires one merge event per adjacent-page transition")

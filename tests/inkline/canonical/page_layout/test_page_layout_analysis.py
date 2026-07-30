@@ -147,6 +147,15 @@ def test_page_layout_analysis_characterizes_profiles_coverage_and_role_signals()
         "centered_text_ratio": 1.0,
         "tall_text_count": 0,
     }
+    assert analysis["pages"][1]["visual_regions"] == []
+    assert analysis["pages"][2]["visual_regions"] == [
+        {
+            "observation_id": "obs000003",
+            "kind": "image_region",
+            "bbox": [100.0, 100.0, 900.0, 700.0],
+            "reading_order": None,
+        }
+    ]
     assert analysis["audit"] == {
         "total_pages": 4,
         "pages_with_profiles": 1,
