@@ -57,7 +57,6 @@ _FRONT_MATTER_SPECIAL_PAGE_KINDS = {
     "epigraph_page",
     "dedication_page",
     "acknowledgments_page",
-    "copyright_page",
     "toc_page",
     "blank_page",
 }
@@ -76,7 +75,6 @@ _VISUAL_SPECIAL_PAGE_KINDS = {
 }
 _COPYRIGHT_PAGE_POLICY = {
     "page_role": "visual_page",
-    "book_block_position": "front_matter",
     "text_flow_action": "metadata_only",
     "visual_asset_action": "retain",
 }
@@ -261,6 +259,8 @@ def _normalized_page_fields(record: dict[str, Any], path: str) -> dict[str, str 
         fields.update(_EXTERNAL_WRAP_PAGE_POLICY)
     if special_page_kind in _VISUAL_SPECIAL_PAGE_KINDS:
         fields.update(_VISUAL_SPECIAL_PAGE_POLICY)
+    if fields["page_role"] == "text_flow_page" and fields["text_flow_action"] == "include":
+        fields["visual_asset_action"] = "not_needed"
     return fields
 
 
@@ -294,3 +294,9 @@ def _validate_special_page_position(
         and book_block_position != "front_matter"
     ):
         raise ValidationError(f"{path}.special_page_kind requires front_matter")
+    if (
+        required
+        and special_page_kind == "copyright_page"
+        and book_block_position not in {"front_matter", "back_matter"}
+    ):
+        raise ValidationError(f"{path}.copyright_page requires front_matter or back_matter")

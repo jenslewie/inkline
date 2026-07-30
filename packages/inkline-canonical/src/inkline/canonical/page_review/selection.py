@@ -25,6 +25,12 @@ _LAYOUT_SPECIAL_PAGE_KINDS = {
     "blank_page": "blank_page",
 }
 _RASTER_VISUAL_SIGNALS = {"raster_dark_visual_layout"}
+# Keep the window bounded while allowing publication metadata to precede a
+# short run of blank leaves, covers, flaps, or other outer-wrap pages.
+_TERMINAL_REVIEW_WINDOW = 8
+_TERMINAL_RISK_ROLE_HINTS = {"footer", "title_text", "unknown"}
+_PAGINATION_ROLE_HINTS = {"header", "page_number"}
+_TEXT_OBSERVATION_KINDS = {"footnote_region", "text_region"}
 
 
 def build_page_review_plan(
@@ -56,6 +62,8 @@ def build_page_review_plan(
             visual_kinds_by_page.get(page, []),
         )
         records.append(record)
+    terminal_review_pages = _terminal_review_pages(document, records)
+    _select_terminal_reviews(records, terminal_review_pages)
     _defer_non_pre_body_reviews(records)
     candidate_pages = [
         int(record["page"]) for record in records if record["llm_review_status"] == "pending"
@@ -79,13 +87,76 @@ def _defer_non_pre_body_reviews(records: list[dict[str, Any]]) -> None:
     for record in records:
         context = record.get("skeleton_context")
         matter = context.get("matter") if isinstance(context, dict) else None
-        if matter == "pre_body" or record.get("llm_review_status") != "pending":
+        signals = set(record.get("signals") or [])
+        if (
+            matter == "pre_body"
+            or "terminal_page_risk" in signals
+            or record.get("llm_review_status") != "pending"
+        ):
             continue
         record["text_flow_action"], record["visual_asset_action"] = _layout_actions(
             str(record["page_role"])
         )
         record["decision_source"] = "layout_and_skeleton"
         record["llm_review_status"] = "not_selected"
+
+
+def _terminal_review_pages(document: dict[str, Any], records: list[dict[str, Any]]) -> set[int]:
+    """Route only structurally suspicious pages at the physical document tail."""
+
+    page_numbers = sorted(int(page["page"]) for page in document["pages"])
+    terminal_pages = set(page_numbers[-_TERMINAL_REVIEW_WINDOW:])
+    observations_by_page: dict[int, list[dict[str, Any]]] = {}
+    for observation in document["observations"]:
+        observations_by_page.setdefault(int(observation["page"]), []).append(observation)
+    selected: set[int] = set()
+    for record in records:
+        page = int(record["page"])
+        context = record.get("skeleton_context")
+        is_verified_body_start = (
+            isinstance(context, dict)
+            and context.get("matter") == "body"
+            and context.get("is_body_section_start") is True
+        )
+        if (
+            page not in terminal_pages
+            or record.get("special_page_kind")
+            in {
+                "blank_page",
+                "toc_page",
+            }
+            or is_verified_body_start
+        ):
+            continue
+        observations = observations_by_page.get(page, [])
+        kinds = {str(observation.get("kind") or "") for observation in observations}
+        role_hints = {str(observation.get("role_hint") or "") for observation in observations}
+        has_text = bool(kinds & _TEXT_OBSERVATION_KINDS)
+        lacks_pagination = has_text and role_hints.isdisjoint(_PAGINATION_ROLE_HINTS)
+        if (
+            record.get("llm_review_status") == "pending"
+            or bool(kinds & _VISUAL_OBSERVATION_KINDS)
+            or bool(role_hints & _TERMINAL_RISK_ROLE_HINTS)
+            or lacks_pagination
+        ):
+            selected.add(page)
+    return selected
+
+
+def _select_terminal_reviews(
+    records: list[dict[str, Any]], terminal_review_pages: set[int]
+) -> None:
+    for record in records:
+        if int(record["page"]) not in terminal_review_pages:
+            continue
+        record["text_flow_action"] = "needs_review"
+        record["visual_asset_action"] = "needs_review"
+        record["decision_source"] = "llm_page_review"
+        record["llm_review_status"] = "pending"
+        signals = list(record.get("signals") or [])
+        if "terminal_page_risk" not in signals:
+            signals.append("terminal_page_risk")
+        record["signals"] = signals
 
 
 def _layout_actions(page_role: str) -> tuple[str, str]:

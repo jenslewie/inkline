@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-PAGE_REVIEW_PROMPT_VERSION = "4.2-genealogy-chart"
+PAGE_REVIEW_PROMPT_VERSION = "4.4-terminal-readable-chronology"
 
 _PROMPT_PROFILES = {
     "front_special",
@@ -20,6 +20,7 @@ _PROMPT_PROFILES = {
     "visual_sparse_text",
     "mixed_visual_body",
     "textual_table",
+    "terminal_special",
     "general",
 }
 
@@ -33,6 +34,8 @@ def page_review_prompt_profile(page_record: dict[str, Any]) -> str:
     if context.get("matter") == "pre_body":
         has_visual_evidence = bool(visual_kinds) or "raster_dark_visual_layout" in signals
         return "front_visual_identity" if has_visual_evidence else "front_special"
+    if "terminal_page_risk" in signals:
+        return "terminal_special"
     if "table_region" in visual_kinds:
         return "textual_table"
     if "image_region" in visual_kinds:
@@ -74,8 +77,9 @@ def page_review_llm_prompt(input_data: dict[str, Any], *, profile: str = "genera
         "Use external_wrap only for a cover, back cover, or cover flap that belongs to the outer "
         "binding rather than the book block. Use front_matter for a book-internal preliminary page. "
         "Required pairs: front_exterior_page/back_exterior_page/cover_flap/dust_jacket_spread -> external_wrap; "
-        "half_title_page/title_page/decorative_preliminary_page/decorative_title_page/epigraph_page/dedication_page/acknowledgments_page/copyright_page/toc_page/blank_page -> front_matter.\n"
-        "For copyright_page, use visual_page, front_matter, metadata_only, and retain.\n"
+        "half_title_page/title_page/decorative_preliminary_page/decorative_title_page/epigraph_page/dedication_page/acknowledgments_page/toc_page/blank_page -> front_matter. "
+        "copyright_page may be front_matter or back_matter according to its physical location in "
+        "the book block; use visual_page, metadata_only, and retain.\n"
         "special_page_kind must be one of: front_exterior_page, back_exterior_page, cover_flap, dust_jacket_spread, half_title_page, "
         "title_page, decorative_preliminary_page, decorative_title_page, epigraph_page, dedication_page, acknowledgments_page, copyright_page, toc_page, blank_page, plate_page, chronology_chart_page, genealogy_chart_page, or null. It describes a special "
         "page identity and must not be used for ordinary body pages. When it is absent, emit the JSON "
@@ -86,6 +90,9 @@ def page_review_llm_prompt(input_data: dict[str, Any], *, profile: str = "genera
         f"Review profile: {profile}.\n"
         f"Profile instruction: {_profile_instruction(profile)}\n"
         "- text_flow_action=include: the page OCR text remains eligible for reading-flow nodes.\n"
+        "- text_flow_page with text_flow_action=include must use "
+        "visual_asset_action=not_needed; ordinary reading-flow pages do not require a rendered "
+        "full-page visual asset.\n"
         "- text_flow_action=exclude: do not turn page OCR text into reading-flow nodes.\n"
         "- visual_page must use text_flow_action=exclude. Captions and labels alone are not "
         "independent body paragraphs.\n"
@@ -240,6 +247,21 @@ def _profile_instruction(profile: str) -> str:
             "A table_region is presumed to be a readable cell-based table or its continuation. Return "
             "text_flow_page/include, including when the table fills the page. Return visual_page/exclude "
             "only when the apparent table has labels or captions but no readable rows, columns, or cells."
+        ),
+        "terminal_special": (
+            "Terminal position is only a routing signal, never a page identity. Keep independent "
+            "narrative, index, note, or reference text in reading flow even when it is the final page. "
+            "A readable chronology or timeline consisting of dated text rows is "
+            "text_flow_page/include, not chronology_chart_page. Use chronology_chart_page only when "
+            "understanding depends on non-linear visual axes, connectors, or diagram relationships. "
+            "A terminal page consisting of publication metadata such as CIP, ISBN, copyright, edition, "
+            "printing, publisher, imprint, price, or production credits is copyright_page under the "
+            "required copyright policy, not ordinary prose; publication metadata after the body is "
+            "back_matter. A visible rear binding panel with a blurb, "
+            "barcode, ISBN, price, or publisher mark is back_exterior_page with "
+            "external_wrap/visual_page/exclude/retain. Parser, scanner or extraction diagnostics that "
+            "are not printed book content use special_page_kind=null and must be excluded from reading "
+            "flow; do not preserve them merely because OCR labeled them as body text."
         ),
         "general": (
             "Return text_flow_page/include for independent body prose; otherwise return visual_page/exclude "

@@ -129,7 +129,7 @@ def test_page_review_plan_is_independent_of_selected_start_anchor_provenance() -
     )
 
 
-def test_page_review_resolves_non_pre_body_visual_pages_from_layout() -> None:
+def test_page_review_selects_terminal_non_pre_body_visual_page() -> None:
     document = make_observed_document(
         {
             "doc_id": "sample",
@@ -156,9 +156,175 @@ def test_page_review_resolves_non_pre_body_visual_pages_from_layout() -> None:
     plan = build_page_review_plan(document, skeleton, page_roles)
     page_three = next(record for record in plan["pages"] if record["page"] == 3)
 
-    assert page_three["llm_review_status"] == "not_selected"
-    assert page_three["text_flow_action"] == "exclude"
-    assert page_three["visual_asset_action"] == "retain"
+    assert plan["candidate_pages"] == [3]
+    assert page_three["llm_review_status"] == "pending"
+    assert page_three["text_flow_action"] == "needs_review"
+    assert page_three["visual_asset_action"] == "needs_review"
+    assert "terminal_page_risk" in page_three["signals"]
+
+
+def test_page_review_selects_terminal_structural_risk_without_selecting_ordinary_flow() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "zh-CN",
+            "source_file": "sample.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        [make_observed_page(page, width=1000, height=1400) for page in range(1, 6)],
+        [
+            make_observation(
+                "obs000001", "text_region", text="ordinary body", page=3, role_hint="body_text"
+            ),
+            make_observation("obs000002", "page_marker", text="3", page=3, role_hint="page_number"),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="ordinary back matter",
+                page=4,
+                role_hint="body_text",
+            ),
+            make_observation("obs000004", "page_marker", text="4", page=4, role_hint="page_number"),
+            make_observation(
+                "obs000005",
+                "text_region",
+                text="publication metadata",
+                page=5,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000006", "text_region", text="imprint", page=5, role_hint="footer"
+            ),
+        ],
+    )
+    skeleton = {
+        "boundaries": {"first_body_page": 2, "first_back_matter_page": 4},
+        "toc_pages": [],
+        "toc_entries": [
+            {"role": "body", "selected_start_page": 2},
+            {"role": "back_matter", "selected_start_page": 4},
+        ],
+    }
+    page_roles = [
+        {"page": page, "page_role": "text_flow_page", "signals": ["body_profile"]}
+        for page in range(1, 6)
+    ]
+
+    plan = build_page_review_plan(document, skeleton, page_roles)
+    by_page = {record["page"]: record for record in plan["pages"]}
+
+    assert plan["candidate_pages"] == [5]
+    assert by_page[3]["llm_review_status"] == "not_selected"
+    assert by_page[4]["llm_review_status"] == "not_selected"
+    assert by_page[5]["llm_review_status"] == "pending"
+    assert by_page[5]["text_flow_action"] == "needs_review"
+    assert "terminal_page_risk" in by_page[5]["signals"]
+
+
+def test_page_review_keeps_terminal_visual_and_unpaginated_pages_pending() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "zh-CN",
+            "source_file": "sample.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        [make_observed_page(page, width=1000, height=1400) for page in range(1, 6)],
+        [
+            make_observation(
+                "obs000001", "text_region", text="ordinary body", page=3, role_hint="body_text"
+            ),
+            make_observation("obs000002", "page_marker", text="3", page=3, role_hint="page_number"),
+            make_observation("obs000003", "image_region", page=4, bbox=[100, 100, 900, 1200]),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="scanner metadata",
+                page=5,
+                role_hint="body_text",
+            ),
+        ],
+    )
+    skeleton = {
+        "boundaries": {"first_body_page": 2, "first_back_matter_page": 4},
+        "toc_pages": [],
+        "toc_entries": [
+            {"role": "body", "selected_start_page": 2},
+            {"role": "back_matter", "selected_start_page": 4},
+        ],
+    }
+    page_roles = [
+        {"page": 1, "page_role": "text_flow_page", "signals": ["body_profile"]},
+        {"page": 2, "page_role": "text_flow_page", "signals": ["body_profile"]},
+        {"page": 3, "page_role": "text_flow_page", "signals": ["body_profile"]},
+        {"page": 4, "page_role": "visual_page", "signals": ["visual_dominant"]},
+        {"page": 5, "page_role": "text_flow_page", "signals": ["body_profile"]},
+    ]
+
+    plan = build_page_review_plan(document, skeleton, page_roles)
+    by_page = {record["page"]: record for record in plan["pages"]}
+
+    assert plan["candidate_pages"] == [4, 5]
+    assert by_page[3]["llm_review_status"] == "not_selected"
+    assert by_page[4]["llm_review_status"] == "pending"
+    assert by_page[5]["llm_review_status"] == "pending"
+    assert by_page[4]["signals"][-1] == "terminal_page_risk"
+    assert by_page[5]["signals"][-1] == "terminal_page_risk"
+
+
+def test_page_review_finds_terminal_metadata_before_trailing_wrap_pages() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "zh-CN",
+            "source_file": "sample.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        [make_observed_page(page, width=1000, height=1400) for page in range(1, 10)],
+        [
+            make_observation(
+                "obs000001", "text_region", text="ordinary body", page=4, role_hint="body_text"
+            ),
+            make_observation("obs000002", "page_marker", text="4", page=4, role_hint="page_number"),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="publication metadata",
+                page=5,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000004", "text_region", text="imprint", page=5, role_hint="footer"
+            ),
+            make_observation("obs000005", "image_region", page=8, bbox=[100, 100, 900, 1200]),
+            make_observation("obs000006", "image_region", page=9, bbox=[100, 100, 900, 1200]),
+        ],
+    )
+    skeleton = {
+        "boundaries": {"first_body_page": 2, "first_back_matter_page": 4},
+        "toc_pages": [],
+        "toc_entries": [
+            {"role": "body", "selected_start_page": 2},
+            {"role": "back_matter", "selected_start_page": 4},
+        ],
+    }
+    page_roles = [
+        {"page": page, "page_role": "text_flow_page", "signals": ["body_profile"]}
+        for page in range(1, 8)
+    ] + [
+        {"page": 8, "page_role": "visual_page", "signals": ["visual_dominant"]},
+        {"page": 9, "page_role": "visual_page", "signals": ["visual_dominant"]},
+    ]
+
+    plan = build_page_review_plan(document, skeleton, page_roles)
+
+    assert plan["candidate_pages"] == [5, 8, 9]
 
 
 def test_page_review_includes_title_like_body_section_start_as_text_flow() -> None:
@@ -202,8 +368,9 @@ def test_page_review_includes_title_like_body_section_start_as_text_flow() -> No
     assert by_page[2]["decision_source"] == "layout_and_skeleton"
     assert by_page[2]["llm_review_status"] == "not_selected"
     assert by_page[3]["page_role"] == "visual_page"
-    assert by_page[3]["text_flow_action"] == "exclude"
-    assert by_page[3]["visual_asset_action"] == "retain"
+    assert by_page[3]["text_flow_action"] == "needs_review"
+    assert by_page[3]["visual_asset_action"] == "needs_review"
+    assert by_page[3]["llm_review_status"] == "pending"
 
 
 def test_page_review_does_not_select_unindexed_front_matter_text_for_llm_review() -> None:
@@ -610,7 +777,7 @@ def test_page_review_derives_copyright_page_consumption_policy() -> None:
                 "include",
                 "not_needed",
                 "high",
-                book_block_position="external_wrap",
+                book_block_position="front_matter",
             )
         ],
         llm_model="qwen-test",
@@ -622,6 +789,95 @@ def test_page_review_derives_copyright_page_consumption_policy() -> None:
     assert page["book_block_position"] == "front_matter"
     assert page["text_flow_action"] == "metadata_only"
     assert page["visual_asset_action"] == "retain"
+
+
+def test_page_review_derives_text_flow_page_asset_policy() -> None:
+    plan = {
+        "metadata": {"schema_name": "inkline_page_review", "schema_version": "0.4-shadow"},
+        "candidate_pages": [519],
+        "pages": [_record(519, "text_flow_page", "needs_review", "needs_review", "pending")],
+    }
+
+    resolved = resolve_page_review(
+        plan,
+        [
+            _decision(
+                519,
+                "text_flow_page",
+                None,
+                "include",
+                "retain",
+                "high",
+                book_block_position="back_matter",
+            )
+        ],
+        llm_model="qwen-test",
+        llm_prompt_version="test-prompt-v1",
+    )
+
+    page = resolved["pages"][0]
+    assert page["page_role"] == "text_flow_page"
+    assert page["text_flow_action"] == "include"
+    assert page["visual_asset_action"] == "not_needed"
+
+
+def test_page_review_preserves_back_matter_position_for_terminal_copyright_page() -> None:
+    plan = {
+        "metadata": {"schema_name": "inkline_page_review", "schema_version": "0.4-shadow"},
+        "candidate_pages": [520],
+        "pages": [_record(520, "text_flow_page", "needs_review", "needs_review", "pending")],
+    }
+
+    resolved = resolve_page_review(
+        plan,
+        [
+            _decision(
+                520,
+                "text_flow_page",
+                "copyright_page",
+                "include",
+                "not_needed",
+                "high",
+                book_block_position="back_matter",
+            )
+        ],
+        llm_model="qwen-test",
+        llm_prompt_version="test-prompt-v1",
+    )
+
+    page = resolved["pages"][0]
+    assert page["page_role"] == "visual_page"
+    assert page["book_block_position"] == "back_matter"
+    assert page["text_flow_action"] == "metadata_only"
+    assert page["visual_asset_action"] == "retain"
+
+
+def test_page_review_rejects_external_wrap_position_for_copyright_page() -> None:
+    plan = {
+        "metadata": {"schema_name": "inkline_page_review", "schema_version": "0.4-shadow"},
+        "candidate_pages": [520],
+        "pages": [_record(520, "text_flow_page", "needs_review", "needs_review", "pending")],
+    }
+
+    with pytest.raises(
+        ValidationError, match="copyright_page requires front_matter or back_matter"
+    ):
+        resolve_page_review(
+            plan,
+            [
+                _decision(
+                    520,
+                    "visual_page",
+                    "copyright_page",
+                    "metadata_only",
+                    "retain",
+                    "high",
+                    book_block_position="external_wrap",
+                )
+            ],
+            llm_model="qwen-test",
+            llm_prompt_version="test-prompt-v1",
+        )
 
 
 def test_page_review_normalizes_string_null_special_page_kind() -> None:

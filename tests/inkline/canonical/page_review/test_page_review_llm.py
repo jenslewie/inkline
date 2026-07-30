@@ -94,6 +94,24 @@ def test_page_review_prompt_profiles_define_body_and_table_precedence() -> None:
     assert "A table_region is presumed to be a readable cell-based table" in table_prompt
 
 
+def test_terminal_page_prompt_distinguishes_metadata_from_ordinary_flow() -> None:
+    record = {
+        "skeleton_context": {"matter": "back_matter"},
+        "signals": ["body_profile", "terminal_page_risk"],
+        "visual_kinds": [],
+    }
+
+    assert page_review_prompt_profile(record) == "terminal_special"
+    prompt = page_review_llm_prompt({"pages": [record]}, profile="terminal_special")
+    assert "Terminal position is only a routing signal" in prompt
+    assert "publication metadata" in prompt
+    assert "after the body is back_matter" in prompt
+    assert "readable chronology or timeline consisting of dated text rows" in prompt
+    assert "non-linear visual axes, connectors, or diagram relationships" in prompt
+    assert "scanner or extraction diagnostics" in prompt
+    assert "independent narrative, index, note, or reference text" in prompt
+
+
 def test_page_review_prompt_defines_the_strict_decision_contract() -> None:
     prompt = page_review_llm_prompt(
         {
@@ -120,6 +138,9 @@ def test_page_review_prompt_defines_the_strict_decision_contract() -> None:
     assert "Only classify the supplied candidate pages" in prompt
     assert '"text_flow_action"' in prompt
     assert '"visual_asset_action"' in prompt
+    assert (
+        "text_flow_page with text_flow_action=include must use visual_asset_action=not_needed"
+    ) in prompt
     assert '"special_page_kind"' in prompt
     assert "The input is structural evidence, not a prior decision" in prompt
     assert "Review profile: general" in prompt
@@ -137,7 +158,8 @@ def test_front_special_prompt_distinguishes_pre_body_from_front_matter() -> None
         "half_title_page/title_page/decorative_preliminary_page/decorative_title_page/epigraph_page"
         in prompt
     )
-    assert "For copyright_page, use visual_page, front_matter, metadata_only, and retain." in prompt
+    assert "copyright_page may be front_matter or back_matter" in prompt
+    assert "use visual_page, metadata_only, and retain" in prompt
     assert "not dedication_page" in prompt
     assert "A page headed Acknowledgments, Acknowledgements, 致谢, or 鸣谢" in prompt
     assert "bibliographic title page" in prompt
