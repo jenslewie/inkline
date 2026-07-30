@@ -142,7 +142,7 @@ Canonical v1 is a characterization baseline, not a runtime dependency:
 | Explicit cross-page footnote | `接下页`/`接上页` pair and same-lane tail are one note | Footnote reconciliation |
 | Cross-page display block | Compatible set-off fragments are jointly classified and then merged | Layout classification, then display reconciliation |
 | Paragraph misread as display or vice versa | v1 sometimes repaired type during merge | Rejected: classification must be correct before aggregation |
-| Image-caption semantic relation | Parser-specific float/caption structures could imply pairing | Deferred to VisualRelationReview |
+| Image-caption semantic relation | Preserve image observations and caption display TextUnits without inventing an edge | Deferred to VisualRelationReview; its body-visual acceptance set includes physical page 25 of 《丝绸之路新史》 |
 
 ## Considered Approaches
 

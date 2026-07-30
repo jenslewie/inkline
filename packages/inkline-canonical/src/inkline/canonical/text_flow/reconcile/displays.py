@@ -82,7 +82,12 @@ def _display_boundary_candidate(
     if left_page not in source_pages or right_page not in source_pages:
         return None
 
-    interruptions: list[dict[str, Any]] = []
+    interruptions = _relocated_page_foot_interruptions(
+        records[:left_index],
+        left_page,
+        pages,
+        page_layout,
+    )
     for right_index in range(left_index + 1, len(records)):
         right = records[right_index]
         first_page = _first_page(right)
@@ -123,6 +128,24 @@ def _display_boundary_candidate(
         evidence, layout_form = boundary
         return right_index, interruptions, evidence, layout_form
     return None
+
+
+def _relocated_page_foot_interruptions(
+    prior_records: list[dict[str, Any]],
+    page: int,
+    pages: list[dict[str, Any]],
+    page_layout: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Recover page-foot evidence relocated by an earlier cross-page note merge."""
+
+    return [
+        record
+        for record in prior_records
+        if record.get("unit_type") == "footnote"
+        and (_first_page(record) or page) < page
+        and _last_page(record) == page
+        and _page_foot_interruption(record, page, pages, page_layout)
+    ]
 
 
 def _prior_transition_footnote(

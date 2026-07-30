@@ -596,6 +596,16 @@ The initial scope will process only `pre_body` pages that PageReview resolves as
 matter. That expansion requires real book samples and a separate candidate
 selection audit.
 
+This initial slice is not sufficient for BookGraph completion. A subsequent
+body-visual slice must select retained body pages that contain `image_region`
+evidence plus nearby caption candidates. Its acceptance set must include the
+two-part caption on physical page 25 of 《丝绸之路新史》
+(`obs000253` as the image and `obs000254`/`obs000255` as caption text).
+SectionMap keeps those caption observations as independent display TextUnits
+and owns only their section membership; it must not manufacture `caption_of`.
+VisualRelationReview must emit the image-to-caption relation before BookGraph
+can expose the corresponding asset and caption edge.
+
 For each selected physical page, the multimodal request must receive the full
 page image and a parser-neutral manifest of same-page observations:
 `observation_id`, `kind`, `bbox`, and `text`. The model must select existing
@@ -623,8 +633,10 @@ page, the asset endpoint is an `image_region`, and every caption endpoint is a
 text observation. A caption may combine multiple text observations; an
 unpaired asset or caption must remain explicit rather than being guessed.
 Cross-page image/caption relationships, plate-section grouping, OCR repair,
-image descriptions, and body/back-matter visual-page selection are non-goals
-for this first 4B slice.
+image descriptions, and body/back-matter visual-page selection remain
+non-goals for the first pre-body slice. Body visual selection and relation
+review are a required follow-up slice, not an implicit capability of
+SectionMap or BookGraph assembly.
 
 ### Phase 4C SectionMap (planned, not implemented)
 

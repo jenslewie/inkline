@@ -42,7 +42,12 @@ def merge_records(
     _extend_unique(left, right, "role_hints")
     _extend_collection(left, right, "parser_payloads")
     attrs = _attrs(left)
-    _merge_attrs(attrs, _source_attrs(right))
+    source_attrs = _source_attrs(right)
+    _merge_inline_runs(attrs, source_attrs, joiner=joiner)
+    _merge_attrs(
+        attrs,
+        {field: value for field, value in source_attrs.items() if field != "inline_runs"},
+    )
     attrs.setdefault("merge_events", []).append(event)
 
 
@@ -116,6 +121,45 @@ def _merge_attrs(target: dict[str, Any], source: dict[str, Any]) -> None:
     _merge_attr_mapping(target, source, path=(), conflicts=conflicts)
     if conflicts:
         target.setdefault("attribute_merge_conflicts", []).extend(conflicts)
+
+
+def _merge_inline_runs(
+    target: dict[str, Any],
+    source: dict[str, Any],
+    *,
+    joiner: str,
+) -> None:
+    """Merge inline provenance while joining only a continuous text boundary."""
+
+    source_runs = source.get("inline_runs")
+    if not isinstance(source_runs, list):
+        return
+    target_runs = target.get("inline_runs")
+    if not isinstance(target_runs, list):
+        target["inline_runs"] = deepcopy(source_runs)
+        return
+    copied = deepcopy(source_runs)
+    if (
+        joiner == ""
+        and target_runs
+        and copied
+        and _text_inline_run(target_runs[-1])
+        and _text_inline_run(copied[0])
+    ):
+        target_runs[-1]["text"] = (
+            str(target_runs[-1].get("text") or "")
+            + str(copied[0].get("text") or "")
+        )
+        copied = copied[1:]
+    target_runs.extend(copied)
+
+
+def _text_inline_run(value: Any) -> TypeGuard[dict[str, Any]]:
+    return (
+        isinstance(value, dict)
+        and value.get("type") == "text"
+        and isinstance(value.get("text"), str)
+    )
 
 
 def _merge_attr_mapping(

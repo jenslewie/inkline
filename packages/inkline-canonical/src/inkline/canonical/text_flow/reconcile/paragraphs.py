@@ -13,7 +13,7 @@ _MIN_BODY_LANE_OVERLAP = 0.7
 _MIN_BODY_LANE_WIDTH_RATIO = 0.75
 _MIN_FIRST_LINE_INDENT = 8.0
 _PAGE_BOTTOM_RATIO = 0.8
-_PAGE_FOOT_BAND_START_RATIO = 0.75
+_PAGE_FOOT_BAND_START_RATIO = 0.55
 _PAGE_FOOT_BAND_END_RATIO = 0.85
 _PAGE_TOP_RATIO = 0.2
 
@@ -329,7 +329,7 @@ def _left_edge_evidence(
     band_bottom = max(float(value[3]) for value in typed_bboxes)
     if (
         float(bbox[3]) < band_top
-        and band_top >= page_height * 0.60
+        and band_top >= page_height * _PAGE_FOOT_BAND_START_RATIO
         and band_bottom >= page_height * _PAGE_FOOT_BAND_END_RATIO
     ):
         return "footnote_band"

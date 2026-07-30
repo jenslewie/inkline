@@ -63,6 +63,24 @@ def _body_candidate(
     }
 
 
+def _reference_candidate(
+    observation_id: str,
+    *,
+    page: int,
+    bbox: list[float],
+    marker_sequence: list[str] | None,
+) -> dict[str, Any]:
+    parser_raw: dict[str, Any] = {}
+    if marker_sequence is not None:
+        parser_raw["_middle_page_inline_markers"] = marker_sequence
+    return {
+        **_body_candidate(observation_id, page=page, bbox=bbox),
+        "candidate_type": "list_item",
+        "role_hint": "reference_text",
+        "parser_payload": {"raw_type": "ref_text", "raw": parser_raw},
+    }
+
+
 def _page_layout_without_profile() -> dict[str, Any]:
     return {
         "metadata": {
@@ -235,6 +253,62 @@ def test_non_body_candidate_keeps_explicit_structural_role() -> None:
     assert decision["classified_type"] == "heading"
     assert decision["status"] == "resolved"
     assert decision["signals"] == ["explicit_structural_role"]
+
+
+def test_parser_marked_trailing_reference_block_is_classified_as_footnotes() -> None:
+    markers = ["1", "2"]
+    candidates = [
+        _body_candidate("body", page=1, bbox=[100, 100, 900, 500]),
+        _reference_candidate(
+            "note-1",
+            page=1,
+            bbox=[100, 650, 900, 720],
+            marker_sequence=markers,
+        ),
+        _reference_candidate(
+            "note-2",
+            page=1,
+            bbox=[100, 730, 900, 800],
+            marker_sequence=markers,
+        ),
+    ]
+
+    classified = classify_text_candidates_by_layout(
+        candidates,
+        [make_observed_page(1, width=1000, height=1000)],
+        page_layout=_page_layout_with_profile(),
+    )
+
+    note_decisions = [_decision(classified, observation_id) for observation_id in ("note-1", "note-2")]
+    assert all(decision["classified_type"] == "footnote" for decision in note_decisions)
+    assert all(
+        decision["signals"] == ["parser_marked_trailing_page_reference_block"]
+        for decision in note_decisions
+    )
+    assert all(
+        decision["same_page_run_observation_ids"] == ["note-1", "note-2"]
+        for decision in note_decisions
+    )
+
+
+def test_reference_list_without_complete_parser_marker_evidence_stays_list_items() -> None:
+    candidates = [
+        _body_candidate("body", page=1, bbox=[100, 100, 900, 500]),
+        _reference_candidate(
+            "reference",
+            page=1,
+            bbox=[100, 650, 900, 720],
+            marker_sequence=None,
+        ),
+    ]
+
+    classified = classify_text_candidates_by_layout(
+        candidates,
+        [make_observed_page(1, width=1000, height=1000)],
+        page_layout=_page_layout_with_profile(),
+    )
+
+    assert _decision(classified, "reference")["classified_type"] == "list_item"
 
 
 def test_structural_boundary_without_geometric_gap_does_not_create_display_gap() -> None:

@@ -39,6 +39,7 @@ def classify_text_candidates_by_layout(
     classified = deepcopy(candidates)
     profiles = page_layout_profile_map(page_layout)
     book_profile = dict(page_layout["book_layout_profile"])
+    _promote_trailing_page_reference_blocks(classified, list(page_layout["pages"]))
     for run in _same_page_runs(classified, profiles, book_profile):
         _classify_same_page_run(run, profiles, book_profile)
     _mark_non_body_decisions(classified)
@@ -57,6 +58,94 @@ def classify_text_candidates_by_layout(
     )
     _apply_cross_page_display_runs(classified, layout_pages, profiles, book_profile)
     return classified
+
+
+def _promote_trailing_page_reference_blocks(
+    candidates: list[dict[str, Any]],
+    page_records: list[dict[str, Any]],
+) -> None:
+    """Promote parser-supported trailing reference blocks to page footnotes."""
+
+    page_heights = {
+        int(record["page"]): _page_height(record)
+        for record in page_records
+        if isinstance(record, dict) and isinstance(record.get("page"), int)
+    }
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        grouped.setdefault(int(candidate["page"]), []).append(candidate)
+    for page_candidates in grouped.values():
+        reference_start = next(
+            (
+                index
+                for index, candidate in enumerate(page_candidates)
+                if _reference_list_candidate(candidate)
+            ),
+            None,
+        )
+        if reference_start is None:
+            continue
+        body = page_candidates[:reference_start]
+        references = page_candidates[reference_start:]
+        page = int(references[0]["page"])
+        height = page_heights.get(page)
+        if (
+            not body
+            or not all(_reference_list_candidate(candidate) for candidate in references)
+            or not all(valid_bbox(candidate.get("bbox")) for candidate in references)
+            or not any(
+                candidate.get("candidate_type") == BODY_CANDIDATE_TYPE
+                and valid_bbox(candidate.get("bbox"))
+                for candidate in body
+            )
+            or height is None
+            or float(references[0]["bbox"][1]) < height * 0.5
+            or not _parser_markers_cover_reference_block(references)
+        ):
+            continue
+        body_bottom = max(
+            float(candidate["bbox"][3])
+            for candidate in body
+            if candidate.get("candidate_type") == BODY_CANDIDATE_TYPE
+            and valid_bbox(candidate.get("bbox"))
+        )
+        if body_bottom > float(references[0]["bbox"][1]):
+            continue
+        run_ids = [str(candidate["observation_id"]) for candidate in references]
+        for candidate in references:
+            candidate["candidate_type"] = "footnote"
+            candidate["classification_signals"] = [
+                "parser_marked_trailing_page_reference_block"
+            ]
+            candidate["classification_run_ids"] = run_ids
+
+
+def _reference_list_candidate(candidate: dict[str, Any]) -> bool:
+    return (
+        candidate.get("candidate_type") == "list_item"
+        and candidate.get("role_hint") == "reference_text"
+    )
+
+
+def _parser_markers_cover_reference_block(
+    candidates: list[dict[str, Any]],
+) -> bool:
+    marker_sequences = {
+        tuple(str(marker) for marker in markers)
+        for candidate in candidates
+        if (
+            isinstance((raw := candidate.get("parser_payload")), dict)
+            and isinstance((payload := raw.get("raw")), dict)
+            and isinstance(
+                (markers := payload.get("_middle_page_inline_markers")),
+                list,
+            )
+            and markers
+        )
+    }
+    return len(marker_sequences) == 1 and len(next(iter(marker_sequences), ())) == len(
+        candidates
+    )
 
 
 def _apply_title_cluster_groups(
@@ -754,9 +843,11 @@ def _mark_non_body_decisions(candidates: list[dict[str, Any]]) -> None:
             status="resolved",
             layout_form=None,
             alignment=None,
-            signals=["explicit_structural_role"],
+            signals=list(candidate.get("classification_signals") or [])
+            or ["explicit_structural_role"],
             profile_source=None,
-            run_ids=[str(candidate["observation_id"])],
+            run_ids=list(candidate.get("classification_run_ids") or [])
+            or [str(candidate["observation_id"])],
         )
 
 

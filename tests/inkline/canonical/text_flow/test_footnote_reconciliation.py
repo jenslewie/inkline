@@ -17,7 +17,11 @@ def _record(
     bbox: list[float],
     unit_type: str = "list_item",
     role_hint: str = "reference_text",
+    parser_markers: list[str] | None = None,
 ) -> dict[str, Any]:
+    parser_payload: dict[str, Any] = {"source": observation_id}
+    if parser_markers is not None:
+        parser_payload["raw"] = {"_middle_page_inline_markers": parser_markers}
     return {
         "unit_type": unit_type,
         "text": text,
@@ -32,7 +36,7 @@ def _record(
             "note_refs": [{"observation_id": observation_id}],
             "source_tags": [observation_id],
         },
-        "parser_payloads": [{"source": observation_id}],
+        "parser_payloads": [parser_payload],
     }
 
 
@@ -214,6 +218,38 @@ def test_explicit_cross_page_footnote_reconciles_three_page_marker_chain() -> No
         "explicit_cross_page_footnote_continuation",
         "explicit_cross_page_footnote_continuation",
     ]
+
+
+def test_explicit_pair_accepts_tall_page_foot_record_ending_near_page_bottom() -> None:
+    records = [
+        _record(
+            "left-a",
+            "3 脚注第一段。",
+            page=1,
+            bbox=[100.0, 700.0, 900.0, 760.0],
+            unit_type="footnote",
+            role_hint="footnote_text",
+        ),
+        _record(
+            "left-b",
+            "脚注第二段（接下页）",
+            page=1,
+            bbox=[100.0, 762.0, 900.0, 920.0],
+            unit_type="footnote",
+            role_hint="footnote_text",
+        ),
+        _record(
+            "right",
+            "（接上页）续页内容。",
+            page=2,
+            bbox=[100.0, 100.0, 900.0, 160.0],
+        ),
+    ]
+
+    reconciled = reconcile_cross_page_footnotes(records, _page_layout(1, 2))
+
+    assert len(reconciled) == 1
+    assert reconciled[0]["observation_ids"] == ["left-a", "left-b", "right"]
 
 
 def test_marker_chain_uses_latest_page_foot_geometry_for_next_boundary() -> None:
@@ -612,6 +648,57 @@ def test_same_page_footnote_stops_at_marker_or_large_gap(
     assert reconcile_cross_page_footnotes(records, _page_layout(1)) == records
 
 
+def test_same_page_footnote_uses_parser_sequence_to_restore_dropped_marker() -> None:
+    parser_markers = ["2", "*", "3"]
+    records = [
+        _record(
+            "note-1",
+            "1 First note.",
+            page=1,
+            bbox=[100.0, 740.0, 900.0, 770.0],
+            unit_type="footnote",
+            role_hint="footnote_text",
+            parser_markers=parser_markers,
+        ),
+        _record(
+            "note-2",
+            "2 Second note.",
+            page=1,
+            bbox=[100.0, 772.0, 900.0, 802.0],
+            unit_type="footnote",
+            role_hint="footnote_text",
+            parser_markers=parser_markers,
+        ),
+        _record(
+            "star-note",
+            "A dropped star must still start an independent note.",
+            page=1,
+            bbox=[100.0, 804.0, 900.0, 834.0],
+            unit_type="footnote",
+            role_hint="footnote_text",
+            parser_markers=parser_markers,
+        ),
+        _record(
+            "note-3",
+            "3 Third note.",
+            page=1,
+            bbox=[100.0, 836.0, 900.0, 866.0],
+            unit_type="footnote",
+            role_hint="footnote_text",
+            parser_markers=parser_markers,
+        ),
+    ]
+
+    reconciled = reconcile_cross_page_footnotes(records, _page_layout(1))
+
+    assert [record["observation_ids"] for record in reconciled] == [
+        ["note-1"],
+        ["note-2"],
+        ["star-note"],
+        ["note-3"],
+    ]
+
+
 def test_merge_records_preserves_source_collections_and_boundary_audit() -> None:
     left = _record(
         "left",
@@ -682,6 +769,40 @@ def test_merge_records_preserves_source_collections_and_boundary_audit() -> None
                 "right_marker": "接上页",
             },
         },
+    ]
+
+
+def test_merge_records_coalesces_only_continuous_inline_text_boundary() -> None:
+    left = _record(
+        "left",
+        "Left",
+        page=1,
+        bbox=[100.0, 880.0, 900.0, 920.0],
+    )
+    right = _record(
+        "right",
+        "Right tail",
+        page=2,
+        bbox=[100.0, 100.0, 900.0, 140.0],
+    )
+    right["attrs"]["inline_runs"] = [
+        {"type": "text", "text": "Right"},
+        {"type": "note_ref", "text": "1", "marker": "1"},
+        {"type": "text", "text": " tail"},
+    ]
+
+    merge_records(
+        left,
+        right,
+        reason="cross_page_paragraph",
+        joiner="",
+        interruptions=[],
+    )
+
+    assert left["attrs"]["inline_runs"] == [
+        {"type": "text", "text": "LeftRight"},
+        {"type": "note_ref", "text": "1", "marker": "1"},
+        {"type": "text", "text": " tail"},
     ]
 
 

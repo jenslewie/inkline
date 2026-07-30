@@ -36,7 +36,7 @@ def test_silk_road_text_flow_reconciles_accepted_layout_and_cross_page_cases() -
     assert by_observation["obs000419"] is by_observation["obs000420"]
     assert by_observation["obs000419"]["unit_type"] == "footnote"
     assert by_observation["obs000258"] is not by_observation["obs000259"]
-    assert by_observation["obs000511"] is by_observation["obs000512"]
+    assert by_observation["obs000511"] is not by_observation["obs000512"]
     display = by_observation["obs000480"]
     assert by_observation["obs000485"] is display
     assert by_observation["obs000486"] is display
@@ -66,6 +66,58 @@ def test_silk_road_text_flow_reconciles_accepted_layout_and_cross_page_cases() -
     assert title["unit_type"] == "heading"
     assert title["observation_ids"] == ["obs000395", "obs000396", "obs000397"]
     assert title["text"] == "第一章\n楼兰\n中亚的十字路口"
+
+
+def test_silk_road_text_flow_reconciles_task4_manual_feedback() -> None:
+    flow = _build_silk_road_text_flow()
+    observed = _load(ROOT / f"data/outputs/golden/observed/{BOOK}_observed.json")
+    source_by_id = {
+        observation["observation_id"]: observation for observation in observed["observations"]
+    }
+    by_observation = {
+        observation_id: unit
+        for unit in flow["text_units"]
+        for observation_id in unit["observation_ids"]
+    }
+
+    assert by_observation["obs000257"] is by_observation["obs000262"]
+    assert by_observation["obs000280"] is by_observation["obs000289"]
+    assert by_observation["obs000469"] is by_observation["obs000476"]
+    continued_note = by_observation["obs000472"]
+    assert by_observation["obs000473"] is continued_note
+    assert by_observation["obs000481"] is continued_note
+    assert by_observation["obs000482"] is continued_note
+    assert by_observation["obs000511"] is not by_observation["obs000512"]
+    assert all(
+        by_observation[observation_id]["unit_type"] == "footnote"
+        for observation_id in (
+            "obs000281",
+            "obs000282",
+            "obs000283",
+            "obs000284",
+            "obs000285",
+            "obs000286",
+        )
+    )
+
+    first_paged_paragraph = by_observation["obs000249"]["attrs"]["inline_runs"]
+    assert first_paged_paragraph[0]["text"] == (
+        source_by_id["obs000249"]["attrs"]["inline_runs"][0]["text"]
+        + source_by_id["obs000256"]["attrs"]["inline_runs"][0]["text"]
+    )
+    second_paged_paragraph = by_observation["obs000257"]["attrs"]["inline_runs"]
+    assert second_paged_paragraph[0]["text"] == (
+        source_by_id["obs000257"]["attrs"]["inline_runs"][0]["text"]
+        + source_by_id["obs000262"]["attrs"]["inline_runs"][0]["text"]
+    )
+    display_runs = by_observation["obs000480"]["attrs"]["inline_runs"]
+    assert display_runs[0]["text"] == (
+        source_by_id["obs000480"]["attrs"]["inline_runs"][0]["text"]
+        + source_by_id["obs000485"]["attrs"]["inline_runs"][0]["text"]
+    )
+    assert display_runs[1]["text"] == source_by_id["obs000486"]["attrs"]["inline_runs"][0][
+        "text"
+    ]
 
 
 def _build_silk_road_text_flow() -> dict:

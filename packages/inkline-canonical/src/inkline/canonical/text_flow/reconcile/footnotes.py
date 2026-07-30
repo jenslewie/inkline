@@ -125,7 +125,7 @@ def _same_page_continuation_evidence(
         or _first_page(right) != page
         or _last_page(right) != page
         or not _INDEPENDENT_MARKER.search(str(left.get("text") or ""))
-        or _INDEPENDENT_MARKER.search(str(right.get("text") or ""))
+        or _has_independent_marker(right, records, page)
         or not _in_reference_lane(left, page_layout, require_page_foot=False)
         or not _in_reference_lane(right, page_layout, require_page_foot=False)
         or not _compatible_reference_lanes(left, right, page_layout)
@@ -169,6 +169,96 @@ def _page_markers_account_for_each_footnote(
             if isinstance(marker, str) and marker and marker not in markers:
                 markers.append(marker)
     return footnote_count > 0 and len(markers) >= footnote_count
+
+
+def _has_independent_marker(
+    record: dict[str, Any],
+    records: list[dict[str, Any]],
+    page: int,
+) -> bool:
+    if _INDEPENDENT_MARKER.search(str(record.get("text") or "")):
+        return True
+    inferred = _inferred_parser_markers(records, page)
+    return any(
+        inferred.get(observation_id)
+        for observation_id in _string_list(record.get("observation_ids"))
+    )
+
+
+def _inferred_parser_markers(
+    records: list[dict[str, Any]],
+    page: int,
+) -> dict[str, str]:
+    footnotes = [
+        record
+        for record in records
+        if record.get("unit_type") == "footnote"
+        and _first_page(record) == page
+        and _last_page(record) == page
+    ]
+    sequences = {
+        tuple(markers)
+        for record in footnotes
+        if (markers := _parser_marker_sequence(record))
+    }
+    if len(sequences) != 1:
+        return {}
+    sequence = next(iter(sequences))
+    if not sequence or len(sequence) > len(footnotes):
+        return {}
+    matching_windows: list[int] = []
+    for start in range(len(footnotes) - len(sequence) + 1):
+        window = footnotes[start : start + len(sequence)]
+        if all(
+            (explicit := _leading_marker_token(record)) is None
+            or explicit == _normalize_marker(marker)
+            for record, marker in zip(window, sequence, strict=True)
+        ):
+            matching_windows.append(start)
+    if len(matching_windows) != 1:
+        return {}
+    inferred: dict[str, str] = {}
+    start = matching_windows[0]
+    for record, marker in zip(
+        footnotes[start : start + len(sequence)],
+        sequence,
+        strict=True,
+    ):
+        if _leading_marker_token(record) is not None:
+            continue
+        for observation_id in _string_list(record.get("observation_ids")):
+            inferred[observation_id] = marker
+    return inferred
+
+
+def _parser_marker_sequence(record: dict[str, Any]) -> list[str]:
+    sequences: list[list[str]] = []
+    for payload in record.get("parser_payloads") or []:
+        raw = payload.get("raw") if isinstance(payload, dict) else None
+        markers = raw.get("_middle_page_inline_markers") if isinstance(raw, dict) else None
+        if isinstance(markers, list) and markers:
+            sequences.append([_normalize_marker(marker) for marker in markers])
+    if not sequences or any(sequence != sequences[0] for sequence in sequences[1:]):
+        return []
+    return sequences[0]
+
+
+def _leading_marker_token(record: dict[str, Any]) -> str | None:
+    text = str(record.get("text") or "").lstrip()
+    match = re.match(
+        r"(?:(\d{1,3})|([*†‡])|[\[［【〔(（](\d{1,3})[\]］】〕)）])",
+        text,
+    )
+    if match is None:
+        return None
+    return next(
+        (_normalize_marker(value) for value in match.groups() if value is not None),
+        None,
+    )
+
+
+def _normalize_marker(value: Any) -> str:
+    return str(value).strip()
 
 
 def _explicit_continuation_match(
@@ -283,7 +373,7 @@ def _in_reference_lane(
     if not isinstance(body_lane, dict):
         return False
     page_height = _page_height(page_record, body_lane)
-    return page_height is not None and float(bbox[1]) >= page_height * 0.75
+    return page_height is not None and float(bbox[3]) >= page_height * 0.85
 
 
 def _compatible_reference_lanes(
@@ -456,6 +546,12 @@ def _float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
 
 
 def _valid_bbox(value: Any) -> TypeGuard[list[float]]:
