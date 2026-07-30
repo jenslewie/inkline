@@ -324,6 +324,100 @@ def test_build_book_skeleton_preserves_exact_split_anchor_evidence_order() -> No
     assert anchor["title_observation_ids"] == ["obs000010", "obs000002"]
 
 
+def test_llm_composite_toc_entry_anchors_same_page_contiguous_title_cluster() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "composite-chapter-title",
+            "title": "Composite Chapter Title",
+            "language": "zh-CN",
+            "source_file": "composite-chapter-title.pdf",
+            "parser_name": "test-parser",
+            "parser_mode": "structured",
+        },
+        [
+            make_observed_page(1, width=1000, height=1400),
+            make_observed_page(2, width=1000, height=1400),
+            make_observed_page(3, width=1000, height=1400),
+        ],
+        [
+            make_observation(
+                "obs000001",
+                "text_region",
+                text=(
+                    "目录\n"
+                    "第1章 哈里发与他的首都 1\n"
+                    "曼苏尔与巴格达的建立，750—775年\n"
+                    "第2章 后续章节 2"
+                ),
+                page=1,
+                role_hint="toc_text",
+            ),
+            make_observation(
+                "obs000002",
+                "text_region",
+                text="第1章",
+                page=2,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000003",
+                "text_region",
+                text="哈里发与他的首都",
+                page=2,
+                role_hint="title_text",
+            ),
+            make_observation(
+                "obs000004",
+                "text_region",
+                text="曼苏尔与巴格达的建立，750—775年",
+                page=2,
+                role_hint="body_text",
+            ),
+            make_observation(
+                "obs000005",
+                "text_region",
+                text="第2章 后续章节",
+                page=3,
+                role_hint="title_text",
+            ),
+        ],
+    )
+
+    skeleton = build_book_skeleton_from_observed(
+        document,
+        llm_toc_entries=[
+            {
+                "entry_index": 0,
+                "display_title": "第1章 哈里发与他的首都\n曼苏尔与巴格达的建立，750—775年",
+                "level": 1,
+                "parent_entry_index": None,
+                "role": "body",
+            },
+            {
+                "entry_index": 1,
+                "display_title": "第2章 后续章节",
+                "level": 1,
+                "parent_entry_index": None,
+                "role": "body",
+            },
+        ],
+        llm_model="qwen-test",
+        llm_source="toc_image_llm",
+    )
+
+    entries = skeleton["toc_entries"]
+    assert [entry["display_title"] for entry in entries] == [
+        "第1章 哈里发与他的首都\n曼苏尔与巴格达的建立，750—775年",
+        "第2章 后续章节",
+    ]
+    assert entries[0]["selected_start_page"] == 2
+    assert entries[0]["selected_start_anchor"]["title_observation_ids"] == [
+        "obs000002",
+        "obs000003",
+        "obs000004",
+    ]
+
+
 def test_parse_toc_entries_keeps_printed_page_as_internal_evidence() -> None:
     entries = parse_toc_entries("亚瑟／3\n主教座堂／15")
 

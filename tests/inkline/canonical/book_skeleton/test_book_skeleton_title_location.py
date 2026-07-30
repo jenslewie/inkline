@@ -199,7 +199,7 @@ def test_toc_llm_prompt_keeps_aligned_back_matter_top_level() -> None:
     assert "Entries with the same left alignment must have the same level" in prompt
 
 
-def test_toc_llm_prompt_makes_visual_indent_decisive() -> None:
+def test_toc_llm_prompt_requires_entry_identity_before_indent_sets_hierarchy() -> None:
     prompt = book_skeleton_toc_llm_prompt(
         {
             "mode": "toc_image_extraction",
@@ -208,8 +208,13 @@ def test_toc_llm_prompt_makes_visual_indent_decisive() -> None:
         }
     )
 
-    assert "Treat visual indentation as decisive" in prompt
-    assert "semantic relationship is unclear" in prompt
+    assert "Indentation determines hierarchy only after a line is established" in prompt
+    assert "Once independent entry identity is established" in prompt
+    assert "visual indentation is decisive for hierarchy" in prompt
+    assert "independently numbered or locator-bearing entry" in prompt
+    assert "does not become a separate entry merely because it is indented" in prompt
+    assert "has no independent page locator" in prompt
+    assert "Treat visual indentation as decisive" not in prompt
 
 
 def test_toc_llm_prompt_requires_attachment_order_and_role_sequence() -> None:

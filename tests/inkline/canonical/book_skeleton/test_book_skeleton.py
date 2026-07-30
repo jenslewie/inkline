@@ -1318,6 +1318,8 @@ def test_book_skeleton_toc_llm_prompt_defines_output_field_contract() -> None:
     assert "unknown" in prompt
     assert "Do not output physical PDF page numbers" in prompt
     assert "Do not insert spaces between Chinese characters inside names or words" in prompt
+    assert "Do not preserve typographic tracking between Chinese characters" in prompt
+    assert "Normalize '终 章', '后 记', and '注 释'" in prompt
     assert "第一章 楼兰：中亚的十字路口" in prompt
 
 
