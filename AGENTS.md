@@ -19,8 +19,8 @@ For work that is explicitly split across sequential Codex sessions:
    review artifacts.
 7. After validation and the final local commit, write a factual handoff and the next
    session prompt under
-   `data/outputs/workspace/session-handoffs/<run-id>/`, using the tracked templates
-   in [`docs/templates`](docs/templates/).
+   `docs/handovers/session-handoffs/<run-id>/`, using the tracked templates in
+   [`docs/templates`](docs/templates/).
 8. The generated next-session prompt must contain the actual result commit and real
    paths, contain no unresolved placeholders, and require the next session to verify
    its baseline before acting.

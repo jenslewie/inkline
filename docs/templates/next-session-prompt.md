@@ -96,7 +96,7 @@
    - `docs/templates/next-session-prompt.md`
 6. 在以下目录生成本轮 handoff 和下一轮提示词：
 
-   `data/outputs/workspace/session-handoffs/{{HANDOFF_RUN_ID}}/`
+   `docs/handovers/session-handoffs/{{HANDOFF_RUN_ID}}/`
 
 7. handoff 必须记录实际 commit、验证结果、产物路径、regression、未解决问题
    和下一任务前置条件。

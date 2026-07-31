@@ -47,7 +47,7 @@ The workflow itself is version controlled:
 Per-session results are local review artifacts and are not committed:
 
 ```text
-data/outputs/workspace/session-handoffs/<run-id>/
+docs/handovers/session-handoffs/<run-id>/
 ├── handoff.md
 └── next-session-prompt.md
 ```
@@ -58,15 +58,16 @@ Use a sortable run id such as:
 2026-07-31T153000-contract-freeze
 ```
 
-All other user-reviewable outputs belong under:
+Book-processing data, acceptance reports, and other user-reviewable data outputs
+belong under:
 
 ```text
 data/outputs/workspace/<task>/<run-id>/
 ```
 
-Do not place review artifacts in `/private/tmp`. Temporary caches and test
-intermediates that the user is not expected to inspect may still use temporary
-directories.
+Do not mix session handoffs into the data workspace. Do not place any review
+artifacts in `/private/tmp`. Temporary caches and test intermediates that the user is
+not expected to inspect may still use temporary directories.
 
 ## Session lifecycle
 
@@ -201,7 +202,7 @@ Validate generated files before finishing:
 
 ```bash
 rg -n '\{\{[A-Z0-9_]+\}\}' \
-  data/outputs/workspace/session-handoffs/<run-id>/
+  docs/handovers/session-handoffs/<run-id>/
 ```
 
 The command must return no matches.
