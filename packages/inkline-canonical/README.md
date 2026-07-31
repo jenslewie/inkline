@@ -162,6 +162,7 @@ construct that index upstream and is not passed into SectionMap. This keeps raw
 evidence auditing separate from section-assignment decisions.
 
 The detailed target contracts are in
+[the frozen BookGraph upstream artifact contracts](../../docs/bookgraph-upstream-artifact-contracts.md),
 [VisualRelationReview before TextFlow](../../docs/visual-relation-review-design.md),
 [note processing before and after SectionMap](../../docs/note-processing-design.md),
 and [the SectionMap upstream replan](../../docs/section-map-upstream-replan.md).

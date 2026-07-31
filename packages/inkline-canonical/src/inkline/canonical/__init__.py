@@ -1,4 +1,10 @@
-from inkline.canonical.artifact_dag import CanonicalArtifactBundle
+from inkline.canonical.artifact_dag import (
+    CANONICAL_ARTIFACT_CONTRACTS,
+    ArtifactContract,
+    CanonicalArtifactBundle,
+    artifact_contract,
+    validate_complete_artifact_bundle,
+)
 from inkline.canonical.book_skeleton import (
     BOOK_SKELETON_SCHEMA_NAME,
     BOOK_SKELETON_SCHEMA_VERSION,
@@ -34,6 +40,34 @@ from inkline.canonical.bookgraph import (
     strip_footnote_marker,
     validate_bookgraph,
     validate_internal_canonical,
+)
+from inkline.canonical.note_inventory import (
+    NOTE_INVENTORY_SCHEMA_NAME,
+    NOTE_INVENTORY_SCHEMA_VERSION,
+    validate_note_inventory,
+    validate_note_inventory_against_sources,
+)
+from inkline.canonical.note_marker_review import (
+    NOTE_MARKER_REVIEW_PLAN_SCHEMA_NAME,
+    NOTE_MARKER_REVIEW_PLAN_SCHEMA_VERSION,
+    NOTE_MARKER_REVIEW_SCHEMA_NAME,
+    NOTE_MARKER_REVIEW_SCHEMA_VERSION,
+    validate_note_marker_review,
+    validate_note_marker_review_against_plan,
+    validate_note_marker_review_plan,
+    validate_note_marker_review_plan_against_sources,
+)
+from inkline.canonical.note_resolution import (
+    NOTE_RESOLUTION_SCHEMA_NAME,
+    NOTE_RESOLUTION_SCHEMA_VERSION,
+    validate_note_resolution,
+    validate_note_resolution_against_sources,
+)
+from inkline.canonical.note_system import (
+    NOTE_SYSTEM_REVIEW_SCHEMA_NAME,
+    NOTE_SYSTEM_REVIEW_SCHEMA_VERSION,
+    validate_note_system_review,
+    validate_note_system_review_against_sources,
 )
 from inkline.canonical.observed import (
     OBSERVED_SCHEMA_NAME,
@@ -84,6 +118,7 @@ from inkline.canonical.section_map import (
     build_section_map_placements,
     validate_section_map,
     validate_section_map_against_sources,
+    validate_section_map_artifact_links,
     validate_section_map_evidence,
     validate_section_map_placements,
     validate_section_map_sources,
@@ -99,10 +134,17 @@ from inkline.canonical.text_flow import (
     TEXT_FLOW_SCHEMA_NAME,
     TEXT_FLOW_SCHEMA_VERSION,
     build_text_flow,
+    validate_final_text_flow_artifact_links,
     validate_text_flow,
     validate_text_flow_against_sources,
 )
 from inkline.canonical.types import CanonicalBlock, CanonicalSource, NoteRef
+from inkline.canonical.visual_relations import (
+    VISUAL_RELATION_REVIEW_SCHEMA_NAME,
+    VISUAL_RELATION_REVIEW_SCHEMA_VERSION,
+    validate_visual_relation_review,
+    validate_visual_relation_review_against_sources,
+)
 
 __all__ = [
     "BLOCK_TYPES",
@@ -110,8 +152,19 @@ __all__ = [
     "BOOKGRAPH_SCHEMA_VERSION",
     "BOOK_SKELETON_SCHEMA_NAME",
     "BOOK_SKELETON_SCHEMA_VERSION",
+    "CANONICAL_ARTIFACT_CONTRACTS",
     "INTERNAL_CANONICAL_SCHEMA_NAME",
     "INTERNAL_CANONICAL_SCHEMA_VERSION",
+    "NOTE_INVENTORY_SCHEMA_NAME",
+    "NOTE_INVENTORY_SCHEMA_VERSION",
+    "NOTE_MARKER_REVIEW_PLAN_SCHEMA_NAME",
+    "NOTE_MARKER_REVIEW_PLAN_SCHEMA_VERSION",
+    "NOTE_MARKER_REVIEW_SCHEMA_NAME",
+    "NOTE_MARKER_REVIEW_SCHEMA_VERSION",
+    "NOTE_RESOLUTION_SCHEMA_NAME",
+    "NOTE_RESOLUTION_SCHEMA_VERSION",
+    "NOTE_SYSTEM_REVIEW_SCHEMA_NAME",
+    "NOTE_SYSTEM_REVIEW_SCHEMA_VERSION",
     "OBSERVED_SCHEMA_NAME",
     "OBSERVED_SCHEMA_VERSION",
     "PAGE_LAYOUT_ANALYSIS_SCHEMA_NAME",
@@ -126,6 +179,9 @@ __all__ = [
     "TEXT_FLOW_SCHEMA_NAME",
     "TEXT_FLOW_SCHEMA_VERSION",
     "TEXT_UNIT_TYPES",
+    "VISUAL_RELATION_REVIEW_SCHEMA_NAME",
+    "VISUAL_RELATION_REVIEW_SCHEMA_VERSION",
+    "ArtifactContract",
     "CanonicalArtifactBundle",
     "CanonicalBlock",
     "CanonicalSource",
@@ -134,6 +190,7 @@ __all__ = [
     "ObservedIndex",
     "SectionMapSources",
     "ValidationError",
+    "artifact_contract",
     "audit_book_skeleton",
     "audit_bookgraph",
     "audit_bookgraph_notes",
@@ -179,14 +236,27 @@ __all__ = [
     "validate_book_skeleton_against_index",
     "validate_book_skeleton_against_observed",
     "validate_bookgraph",
+    "validate_complete_artifact_bundle",
     "validate_document",
+    "validate_final_text_flow_artifact_links",
     "validate_internal_canonical",
+    "validate_note_inventory",
+    "validate_note_inventory_against_sources",
+    "validate_note_marker_review",
+    "validate_note_marker_review_against_plan",
+    "validate_note_marker_review_plan",
+    "validate_note_marker_review_plan_against_sources",
+    "validate_note_resolution",
+    "validate_note_resolution_against_sources",
+    "validate_note_system_review",
+    "validate_note_system_review_against_sources",
     "validate_observed_document",
     "validate_page_layout_analysis",
     "validate_page_review_decisions",
     "validate_resolved_page_review",
     "validate_section_map",
     "validate_section_map_against_sources",
+    "validate_section_map_artifact_links",
     "validate_section_map_evidence",
     "validate_section_map_placements",
     "validate_section_map_sources",
@@ -194,4 +264,6 @@ __all__ = [
     "validate_table_flow_against_sources",
     "validate_text_flow",
     "validate_text_flow_against_sources",
+    "validate_visual_relation_review",
+    "validate_visual_relation_review_against_sources",
 ]

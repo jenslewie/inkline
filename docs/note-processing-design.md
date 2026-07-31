@@ -1,6 +1,10 @@
 # Note Processing Before and After SectionMap
 
-**Status:** Approved architecture; implementation not started.
+**Status:** Frozen contracts; implementation not started.
+
+The exact schemas, dependency, validator, and 13-book acceptance boundaries are
+frozen in
+[BookGraph upstream artifact contracts](bookgraph-upstream-artifact-contracts.md).
 
 ## Decision
 

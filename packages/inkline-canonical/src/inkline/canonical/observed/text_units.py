@@ -5,7 +5,14 @@ from typing import Any, TypeGuard
 
 from inkline.canonical.observed.schema import validate_observed_document
 
-TEXT_UNIT_TYPES = {"heading", "paragraph", "display_block", "list_item", "footnote"}
+TEXT_UNIT_TYPES = {
+    "heading",
+    "paragraph",
+    "display_block",
+    "caption",
+    "list_item",
+    "footnote",
+}
 _MIN_FIRST_LINE_INDENT = 8.0
 
 

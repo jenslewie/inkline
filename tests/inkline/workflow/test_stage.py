@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from inkline.workflow import Stage, run_stages
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -68,6 +70,25 @@ def test_runner_uses_validated_artifact_store_value_without_executing_stage() ->
     assert artifacts["derived"] == 7
     assert calls == []
     assert validated == [7]
+
+
+def test_runner_rejects_builder_mutation_of_upstream_artifact() -> None:
+    source = {"items": [1]}
+
+    def mutating_builder(source):
+        source["items"].append(2)
+        return {"derived": True}
+
+    stage = Stage(
+        name="derive",
+        inputs=("source",),
+        output="derived",
+        run=mutating_builder,
+        validate=lambda value: None,
+    )
+
+    with pytest.raises(ValueError, match="mutated upstream artifact source"):
+        run_stages({"source": source}, [stage])
 
 
 def test_workflow_package_has_no_parser_or_agent_framework_dependency() -> None:

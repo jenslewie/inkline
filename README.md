@@ -36,6 +36,7 @@ revised target. The release EPUB/RAG path and legacy BookGraph projections have 
 yet been switched to the artifact bundle.
 
 The new pre-SectionMap boundaries are documented in
+[the frozen BookGraph upstream artifact contracts](docs/bookgraph-upstream-artifact-contracts.md),
 [VisualRelationReview before TextFlow](docs/visual-relation-review-design.md),
 [note processing before and after SectionMap](docs/note-processing-design.md), and
 [the revised implementation plan](docs/section-map-upstream-replan.md).

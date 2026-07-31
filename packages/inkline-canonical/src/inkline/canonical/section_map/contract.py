@@ -18,11 +18,13 @@ SECTION_MAP_TEXT_FLOW_STATUSES = {
 SECTION_MAP_PLACEMENTS = {"section_member", "standalone", "unresolved"}
 SECTION_MAP_CONFIDENCES = {"high", "medium", "low"}
 SECTION_MAP_DECISION_SOURCES = {"structural_rule", "bounded_llm_boundary_verifier"}
+SECTION_MAP_RESOURCE_TYPES = {"text_unit", "table", "visual_group", "note_group"}
 
 REQUIRED_TOP_LEVEL_FIELDS: dict[str, type[Any]] = {
     "metadata": dict,
     "sections": list,
     "page_placements": list,
+    "resource_placements": list,
 }
 
 REQUIRED_METADATA_FIELDS: dict[str, type[Any]] = {
@@ -41,7 +43,21 @@ REQUIRED_SECTION_FIELDS: dict[str, type[Any] | tuple[type[Any], ...]] = {
     "title_text_unit_ids": list,
     "physical_ranges": list,
     "text_unit_ids": list,
+    "table_ids": list,
+    "visual_group_ids": list,
+    "note_group_ids": list,
     "attached_visual_pages": list,
+    "evidence_ids": list,
+    "decision_source": str,
+    "confidence": str,
+}
+
+REQUIRED_RESOURCE_PLACEMENT_FIELDS: dict[str, type[Any] | tuple[type[Any], ...]] = {
+    "resource_type": str,
+    "resource_id": str,
+    "placement": str,
+    "section_id": (str, type(None)),
+    "reason": str,
     "evidence_ids": list,
     "decision_source": str,
     "confidence": str,

@@ -125,6 +125,7 @@ The important boundaries are:
 
 Detailed contracts and the revised implementation order are recorded in:
 
+- [the frozen BookGraph upstream artifact contracts](bookgraph-upstream-artifact-contracts.md)
 - [VisualRelationReview before TextFlow](visual-relation-review-design.md)
 - [note processing before and after SectionMap](note-processing-design.md)
 - [the SectionMap upstream replan](section-map-upstream-replan.md)
@@ -145,7 +146,6 @@ flowchart TD
     assets["PageAssets"]
     currentFlow["Current TextFlow foundation"]
     currentTables["In-progress TableFlow"]
-    currentSection["In-progress SectionMap"]
     missing["Missing target inputs:<br/>VisualRelationReview and note artifacts"]
 
     observed --> index
@@ -162,19 +162,15 @@ flowchart TD
     observed --> currentTables
     index --> currentTables
     review --> currentTables
-    currentFlow --> currentSection
-    currentTables --> currentSection
-    skeleton --> currentSection
-    review --> currentSection
     missing -.-> currentFlow
-    missing -.-> currentSection
 ```
 
 The framework-neutral `build_canonical_artifacts()` workflow currently materializes
 `ObservedIndex`, `PageLayoutAnalysis`, resolved `PageReview`, a TextFlow foundation,
-`TableFlow`, and the in-progress SectionMap bundle. It does not yet materialize
-VisualRelationReview, the note review artifacts, or NoteInventory. Consequently, its
-current TextFlow and SectionMap outputs are development review artifacts, not the
+`TableFlow`, and `PageAssets`. The SectionMap contract exists in
+`inkline-canonical`, but SectionMap is not a live workflow stage. The workflow does
+not yet materialize VisualRelationReview, the note review artifacts, or NoteInventory.
+Consequently, its current TextFlow output is a development foundation, not the
 accepted final forms described by the target DAG. The release-facing observed
 BookGraph and internal-canonical builders still use their separate legacy path and
 may rebuild their own units. Switching those projections remains later work.

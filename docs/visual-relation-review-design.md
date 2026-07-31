@@ -1,6 +1,9 @@
 # VisualRelationReview Before TextFlow
 
-**Status:** Approved architecture; implementation not started.
+**Status:** Frozen contract; implementation not started.
+
+The exact schema, dependency, validator, and 13-book acceptance boundary is frozen in
+[BookGraph upstream artifact contracts](bookgraph-upstream-artifact-contracts.md).
 
 ## Decision
 

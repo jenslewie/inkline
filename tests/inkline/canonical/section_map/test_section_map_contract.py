@@ -54,6 +54,9 @@ def _section_map() -> dict:
                 "title_text_unit_ids": ["tu000001"],
                 "physical_ranges": [[3, 4]],
                 "text_unit_ids": ["tu000001", "tu000002"],
+                "table_ids": [],
+                "visual_group_ids": [],
+                "note_group_ids": [],
                 "attached_visual_pages": [],
                 "evidence_ids": ["sa000000", "tu000001", "tu000002"],
                 "decision_source": "structural_rule",
@@ -71,6 +74,7 @@ def _section_map() -> dict:
                 "confidence": "high",
             }
         ],
+        "resource_placements": [],
     }
 
 
@@ -111,6 +115,9 @@ def test_validate_section_map_rejects_invalid_section_tree() -> None:
             "level": 2,
             "title_text_unit_ids": [],
             "text_unit_ids": [],
+            "table_ids": [],
+            "visual_group_ids": [],
+            "note_group_ids": [],
             "attached_visual_pages": [],
         }
     )
@@ -128,6 +135,9 @@ def test_validate_section_map_rejects_invalid_section_tree() -> None:
             "level": 1,
             "title_text_unit_ids": [],
             "text_unit_ids": [],
+            "table_ids": [],
+            "visual_group_ids": [],
+            "note_group_ids": [],
             "attached_visual_pages": [],
         }
     )
@@ -337,6 +347,9 @@ def _map_for_entry(skeleton: dict, text_units: list[dict], entry_index: int = 0)
                 "title_text_unit_ids": [title_unit["unit_id"]],
                 "physical_ranges": [[anchor["page"], anchor["page"] + 1]],
                 "text_unit_ids": [title_unit["unit_id"]],
+                "table_ids": [],
+                "visual_group_ids": [],
+                "note_group_ids": [],
                 "attached_visual_pages": [],
                 "evidence_ids": [anchor["anchor_id"], title_unit["unit_id"]],
                 "decision_source": "structural_rule",
@@ -354,6 +367,7 @@ def _map_for_entry(skeleton: dict, text_units: list[dict], entry_index: int = 0)
                 "confidence": "high",
             }
         ],
+        "resource_placements": [],
     }
 
 
@@ -385,6 +399,9 @@ def _offset_map(skeleton: dict, text_units: list[dict]) -> dict:
                 "title_text_unit_ids": [],
                 "physical_ranges": [[anchor["page"], anchor["page"]]],
                 "text_unit_ids": [body_unit["unit_id"]],
+                "table_ids": [],
+                "visual_group_ids": [],
+                "note_group_ids": [],
                 "attached_visual_pages": [],
                 "evidence_ids": [anchor["anchor_id"], body_unit["unit_id"]],
                 "decision_source": "structural_rule",
@@ -402,6 +419,7 @@ def _offset_map(skeleton: dict, text_units: list[dict]) -> dict:
                 "confidence": "medium",
             }
         ],
+        "resource_placements": [],
     }
 
 

@@ -2,8 +2,12 @@
 
 **Date:** 2026-07-31
 
-**Status:** Approved dependency direction; implementation must be re-sliced before
-SectionMap continues.
+**Status:** Superseded as the planning source by the frozen upstream contracts;
+historical rationale and implementation slicing remain active.
+
+The authoritative artifact names, inputs, ownership, validators, acceptance matrix,
+and implementation order are now frozen in
+[BookGraph upstream artifact contracts](bookgraph-upstream-artifact-contracts.md).
 
 ## Why the Plan Changed
 
@@ -118,7 +122,7 @@ No named-book production hardcoding is allowed.
 
 **Gate:** clean foundation branch, no lost work, exact commit and artifact handoff.
 
-### Step 1 — Freeze the revised contracts
+### Step 1 — Freeze the revised contracts (complete)
 
 - add contracts and validators for `VisualRelationReview`, `NoteSystemReview`,
   `NoteMarkerReviewPlan`, `NoteMarkerReview`, `NoteInventory`, and
@@ -127,8 +131,9 @@ No named-book production hardcoding is allowed.
 - update `CanonicalArtifactBundle` dependencies;
 - enforce immutable upstream inputs and new artifact outputs.
 
-**Gate:** contract tests reject dangling ids, incompatible endpoint kinds, invented
-markers, invalid scopes, and attempts to encode resolved targets without evidence.
+**Gate:** the frozen schema validators reject dangling ids, incompatible endpoint
+kinds, invented markers, invalid scopes, conflicting ownership, incomplete placement,
+and attempts to encode resolved targets without evidence.
 
 ### Step 2 — Implement VisualRelationReview
 

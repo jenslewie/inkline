@@ -9,11 +9,13 @@ from inkline.canonical.schema import ValidationError
 from inkline.canonical.section_map.contract import (
     REQUIRED_METADATA_FIELDS,
     REQUIRED_PAGE_PLACEMENT_FIELDS,
+    REQUIRED_RESOURCE_PLACEMENT_FIELDS,
     REQUIRED_SECTION_FIELDS,
     REQUIRED_TOP_LEVEL_FIELDS,
     SECTION_MAP_CONFIDENCES,
     SECTION_MAP_DECISION_SOURCES,
     SECTION_MAP_PLACEMENTS,
+    SECTION_MAP_RESOURCE_TYPES,
     SECTION_MAP_SCHEMA_NAME,
     SECTION_MAP_SCHEMA_VERSION,
 )
@@ -27,6 +29,7 @@ def validate_section_map(section_map: dict[str, Any]) -> None:
     sections_by_id = _validate_sections(section_map["sections"])
     _validate_section_range_relationships(sections_by_id)
     _validate_page_placements(section_map["page_placements"], sections_by_id)
+    _validate_resource_placements(section_map["resource_placements"], sections_by_id)
 
 
 def validate_section_map_against_sources(
@@ -80,7 +83,7 @@ def _validate_required_fields(
     fields: Mapping[str, type[Any] | tuple[type[Any], ...]],
     path: str,
 ) -> None:
-    if not isinstance(value, dict):
+    if not isinstance(value, dict) or set(value) != set(fields):
         raise ValidationError(f"{path} must be object")
     for field, expected_type in fields.items():
         if field not in value or not isinstance(value[field], expected_type):
@@ -100,6 +103,9 @@ def _validate_metadata(metadata: dict[str, Any]) -> None:
 def _validate_sections(sections: list[Any]) -> dict[str, dict[str, Any]]:
     sections_by_id: dict[str, dict[str, Any]] = {}
     text_unit_owners: dict[str, str] = {}
+    table_owners: dict[str, str] = {}
+    visual_group_owners: dict[str, str] = {}
+    note_group_owners: dict[str, str] = {}
     visual_page_owners: dict[int, str] = {}
     for index, section in enumerate(sections):
         _validate_required_fields(section, REQUIRED_SECTION_FIELDS, f"sections[{index}]")
@@ -110,6 +116,13 @@ def _validate_sections(sections: list[Any]) -> dict[str, dict[str, Any]]:
         sections_by_id[section_id] = section
         _validate_unique_assignment(
             section["text_unit_ids"], text_unit_owners, section_id, "TextUnit"
+        )
+        _validate_unique_assignment(section["table_ids"], table_owners, section_id, "table")
+        _validate_unique_assignment(
+            section["visual_group_ids"], visual_group_owners, section_id, "visual group"
+        )
+        _validate_unique_assignment(
+            section["note_group_ids"], note_group_owners, section_id, "note group"
         )
         _validate_unique_assignment(
             section["attached_visual_pages"], visual_page_owners, section_id, "visual page"
@@ -139,6 +152,9 @@ def _validate_section_shape(section: dict[str, Any], index: int) -> None:
     _validate_id_list(section["title_text_unit_ids"], f"sections[{index}].title_text_unit_ids")
     _validate_ranges(section["physical_ranges"], f"sections[{index}].physical_ranges")
     _validate_id_list(section["text_unit_ids"], f"sections[{index}].text_unit_ids")
+    _validate_id_list(section["table_ids"], f"sections[{index}].table_ids")
+    _validate_id_list(section["visual_group_ids"], f"sections[{index}].visual_group_ids")
+    _validate_id_list(section["note_group_ids"], f"sections[{index}].note_group_ids")
     _validate_positive_unique_pages(
         section["attached_visual_pages"], f"sections[{index}].attached_visual_pages"
     )
@@ -270,6 +286,45 @@ def _validate_page_placements(
             raise ValidationError(f"duplicate page placement: {page}")
         pages.add(page)
         _validate_placement(placement, sections_by_id, path)
+
+
+def _validate_resource_placements(
+    placements: list[Any], sections_by_id: dict[str, dict[str, Any]]
+) -> None:
+    owners: set[tuple[str, str]] = set()
+    section_fields = {
+        "text_unit": "text_unit_ids",
+        "table": "table_ids",
+        "visual_group": "visual_group_ids",
+        "note_group": "note_group_ids",
+    }
+    for index, placement in enumerate(placements):
+        path = f"resource_placements[{index}]"
+        _validate_required_fields(placement, REQUIRED_RESOURCE_PLACEMENT_FIELDS, path)
+        resource_type = placement["resource_type"]
+        resource_id = placement["resource_id"]
+        if resource_type not in SECTION_MAP_RESOURCE_TYPES:
+            raise ValidationError(f"{path}.resource_type is invalid")
+        if not isinstance(resource_id, str) or not resource_id:
+            raise ValidationError(f"{path}.resource_id is invalid")
+        key = (resource_type, resource_id)
+        if key in owners:
+            raise ValidationError(f"duplicate resource placement: {resource_type}:{resource_id}")
+        owners.add(key)
+        placement_kind = placement["placement"]
+        section_id = placement["section_id"]
+        if placement_kind not in SECTION_MAP_PLACEMENTS:
+            raise ValidationError(f"{path}.placement is invalid")
+        if placement_kind == "section_member":
+            section = sections_by_id.get(section_id)
+            if section is None or resource_id not in section[section_fields[resource_type]]:
+                raise ValidationError(f"{path} differs from section membership")
+        elif section_id is not None:
+            raise ValidationError(f"{path}.section_id must be null for non-member placement")
+        if not placement["reason"]:
+            raise ValidationError(f"{path}.reason must be non-empty")
+        _validate_id_list(placement["evidence_ids"], f"{path}.evidence_ids", required=True)
+        _validate_decision(placement, path)
 
 
 def _validate_placement(

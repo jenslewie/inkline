@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -57,4 +58,13 @@ def _load_or_run(
     if artifact_store is not None and artifact_store.has(stage.output):
         return artifact_store.load(stage.output)
     inputs = {name: artifacts[name] for name in stage.inputs}
-    return stage.run(**inputs)
+    mutable_snapshots = {
+        name: deepcopy(value)
+        for name, value in inputs.items()
+        if isinstance(value, dict | list | set)
+    }
+    output = stage.run(**inputs)
+    for name, snapshot in mutable_snapshots.items():
+        if inputs[name] != snapshot:
+            raise ValueError(f"stage {stage.name} mutated upstream artifact {name}")
+    return output

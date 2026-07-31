@@ -8,6 +8,7 @@ from inkline.canonical.section_map.evidence import (
     build_section_map_evidence,
     validate_section_map_evidence,
 )
+from inkline.canonical.section_map.links import validate_section_map_artifact_links
 from inkline.canonical.section_map.placement import (
     build_section_map_placements,
     validate_section_map_placements,
@@ -28,6 +29,7 @@ __all__ = [
     "build_section_map_placements",
     "validate_section_map",
     "validate_section_map_against_sources",
+    "validate_section_map_artifact_links",
     "validate_section_map_evidence",
     "validate_section_map_placements",
     "validate_section_map_sources",
