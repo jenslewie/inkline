@@ -130,6 +130,9 @@ receive compatibility readers.
   `unresolved_candidates`.
 - Group ids are ordered `vg000001...`; evidence ids are `vre000001...`; unresolved
   candidate ids are `vrc000001...`.
+- Bounded multimodal evidence names an existing PageAssets `image_id`. PageAssets
+  deterministically renders every PageReview-retained page and every page containing
+  an `image_region`, including included body pages; this does not assert a relation.
 - A group contains one or more `image_region` observation ids and one or more
   text/caption observation ids, `relation_type=caption_of`, one initial-contract
   physical page, evidence ids, decision source, and confidence.

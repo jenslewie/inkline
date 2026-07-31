@@ -67,7 +67,7 @@ def test_final_text_flow_rejects_grouped_caption_declared_as_display_block() -> 
                 "kind": "parser_provenance",
                 "observation_ids": ["obs000001", "obs000002"],
                 "pages": [1],
-                "source_asset_ids": [],
+                "page_asset_ids": [],
                 "model_name": None,
                 "prompt_version": None,
             }

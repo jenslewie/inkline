@@ -38,7 +38,7 @@ def materialize_v2_page_assets_value(
 ) -> dict[str, Any]:
     """Build the PageAssets value without mutating or copying ObservedDocument."""
 
-    visual_pages = _visual_asset_pages(page_review)
+    visual_pages = _visual_asset_pages(observed, page_review)
     assets = deepcopy(observed.get("assets") or {})
     if not visual_pages:
         return assets
@@ -63,14 +63,24 @@ def materialize_v2_page_assets_value(
     return assets
 
 
-def _visual_asset_pages(page_review: dict[str, Any]) -> list[int]:
-    return [
+def _visual_asset_pages(
+    observed: dict[str, Any], page_review: dict[str, Any]
+) -> list[int]:
+    retained_pages = {
         int(record["page"])
         for record in page_review.get("pages") or []
         if isinstance(record, dict)
         and isinstance(record.get("page"), int)
         and record.get("visual_asset_action") == "retain"
-    ]
+    }
+    image_region_pages = {
+        int(observation["page"])
+        for observation in observed.get("observations") or []
+        if isinstance(observation, dict)
+        and observation.get("kind") == "image_region"
+        and isinstance(observation.get("page"), int)
+    }
+    return sorted(retained_pages | image_region_pages)
 
 
 def _render_page_assets(

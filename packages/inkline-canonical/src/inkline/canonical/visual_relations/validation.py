@@ -68,6 +68,7 @@ def validate_visual_relation_review_against_sources(
     observed_index: ObservedIndex,
     page_layout: dict[str, Any],
     page_review: dict[str, Any],
+    page_assets: dict[str, Any],
     *,
     table_flow: dict[str, Any] | None = None,
 ) -> None:
@@ -88,6 +89,14 @@ def validate_visual_relation_review_against_sources(
         if isinstance(record, dict)
     }
     table_caption_ids = _table_caption_ids(table_flow)
+    page_assets_by_id = _page_assets_by_id(page_assets)
+    for evidence in review["evidence"]:
+        for page_asset_id in evidence["page_asset_ids"]:
+            asset_page = page_assets_by_id.get(page_asset_id)
+            if asset_page is None or asset_page not in evidence["pages"]:
+                raise ValidationError(
+                    f"visual evidence references invalid page asset: {page_asset_id}"
+                )
     for asset_id in _all_endpoint_ids(review, "asset_observation_ids"):
         observation = observations.get(asset_id)
         if observation is None or observation.get("kind") != "image_region":
@@ -127,11 +136,15 @@ def _validate_evidence(value: Any) -> set[str]:
         kind = validate_choice(record["kind"], VISUAL_EVIDENCE_KINDS, f"{path}.kind")
         validate_id_list(record["observation_ids"], f"{path}.observation_ids", required=True)
         validate_pages(record["pages"], f"{path}.pages", required=True)
-        validate_id_list(record["source_asset_ids"], f"{path}.source_asset_ids")
+        page_asset_ids = validate_id_list(
+            record["page_asset_ids"], f"{path}.page_asset_ids"
+        )
         model = validate_nullable_string(record["model_name"], f"{path}.model_name")
         prompt = validate_nullable_string(record["prompt_version"], f"{path}.prompt_version")
         if kind == "bounded_multimodal_review" and (model is None or prompt is None):
             raise ValidationError(f"{path} model review requires model and prompt provenance")
+        if kind == "bounded_multimodal_review" and not page_asset_ids:
+            raise ValidationError(f"{path} model review requires a PageAssets image")
         if kind == "parser_provenance" and (model is not None or prompt is not None):
             raise ValidationError(f"{path} parser provenance must not claim model provenance")
         ids.add(record["evidence_id"])
@@ -240,6 +253,23 @@ def _table_caption_ids(table_flow: dict[str, Any] | None) -> set[str]:
         for caption_id in table.get("caption_observation_ids", [])
         if isinstance(caption_id, str)
     }
+
+
+def _page_assets_by_id(page_assets: dict[str, Any]) -> dict[str, int]:
+    indexed: dict[str, int] = {}
+    images = page_assets.get("images", [])
+    if not isinstance(images, list):
+        raise ValidationError("PageAssets images must be list")
+    for record in images:
+        image_id = record.get("image_id") if isinstance(record, dict) else None
+        source = record.get("source") if isinstance(record, dict) else None
+        page = source.get("page") if isinstance(source, dict) else None
+        if not isinstance(image_id, str) or not image_id or type(page) is not int or page <= 0:
+            raise ValidationError("PageAssets image record is invalid")
+        if image_id in indexed:
+            raise ValidationError(f"duplicate PageAssets image_id: {image_id}")
+        indexed[image_id] = page
+    return indexed
 
 
 def _all_endpoint_ids(review: dict[str, Any], field: str) -> set[str]:

@@ -19,7 +19,7 @@ EVIDENCE_FIELDS = {
     "kind",
     "observation_ids",
     "pages",
-    "source_asset_ids",
+    "page_asset_ids",
     "model_name",
     "prompt_version",
 }

@@ -44,6 +44,11 @@ VisualRelationReview consumes:
 - resolved `PageReview`, for page consumption and retained-asset policy; and
 - `PageAssets`, for bounded multimodal review of selected physical pages.
 
+PageAssets must include a whole-page image for every PageReview-retained page and
+every physical page containing an `image_region`. This is deterministic evidence
+availability, not a relation decision. Visual review evidence refers to the actual
+PageAssets `image_id`; it never invents a page-image identifier.
+
 It emits immutable visual groups and explicit unresolved endpoints:
 
 ```json

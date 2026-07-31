@@ -109,10 +109,11 @@ The important boundaries are:
   and physical pages to Skeleton sections. It does not classify paragraphs, repair an
   invalid TextFlow boundary, discover image-caption relations, resolve note targets,
   or reinterpret an unresolved table candidate.
-- The current `materialize_v2_page_assets` returns an ObservedDocument copy with
-  retained whole-page PNG records. The target DAG materializes those records as a
-  separate `PageAssets` artifact so ObservedDocument remains immutable. Neither form
-  performs OCR repair, image cropping, caption matching, or section assignment.
+- `materialize_v2_page_assets` can return an ObservedDocument copy for its compatibility
+  wrapper, while the workflow stores its asset value separately so ObservedDocument
+  remains immutable. It renders PageReview-retained pages plus pages containing an
+  `image_region`, ensuring bounded visual review can inspect included body pages.
+  It performs no OCR repair, image cropping, caption matching, or section assignment.
 - Every artifact is immutable after validation. Downstream builders may copy and
   project its facts, but never edit it. In particular, SectionMap does not change
   TextFlow inline runs, NoteResolution does not write targets back into TextFlow, and

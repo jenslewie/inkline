@@ -30,7 +30,7 @@ def _review() -> dict:
                 "kind": "bounded_multimodal_review",
                 "observation_ids": ["obs000001", "obs000002"],
                 "pages": [1],
-                "source_asset_ids": ["page:1"],
+                "page_asset_ids": ["page-0001-review"],
                 "model_name": "test-model",
                 "prompt_version": "visual-relation-v1",
             }
@@ -78,7 +78,15 @@ def _sources() -> tuple:
     )
     page_layout = {"metadata": {"doc_id": "sample"}}
     page_review = {"metadata": {"doc_id": "sample"}, "pages": [{"page": 1}]}
-    return build_observed_index(observed), page_layout, page_review
+    page_assets = {
+        "images": [
+            {
+                "image_id": "page-0001-review",
+                "source": {"page": 1},
+            }
+        ]
+    }
+    return build_observed_index(observed), page_layout, page_review, page_assets
 
 
 def test_visual_relation_review_accepts_same_page_group() -> None:
