@@ -110,8 +110,11 @@ def resolve_page_review(
         if decision is None:
             continue
         record["page_role"] = decision["page_role"]
-        record["book_block_position"] = decision["book_block_position"]
         record["special_page_kind"] = decision["special_page_kind"]
+        record["book_block_position"] = _bounded_book_block_position(
+            record,
+            str(decision["book_block_position"]),
+        )
         record["text_flow_action"] = decision["text_flow_action"]
         record["visual_asset_action"] = decision["visual_asset_action"]
         record["decision_source"] = "llm_page_review"
@@ -119,11 +122,75 @@ def resolve_page_review(
         record["confidence"] = decision["confidence"]
         if _is_ambiguous_front_visual_decision(record):
             record["book_block_position"] = "unknown"
+    _reconcile_table_run_pages(resolved)
     resolved["llm"] = {
         "model": llm_model,
         "prompt_version": llm_prompt_version,
     }
     return resolved
+
+
+def _reconcile_table_run_pages(review: dict[str, Any]) -> None:
+    """Make continuation-page disposition follow its normalized primary table."""
+
+    records = review.get("pages") or []
+    records_by_page = {
+        int(record["page"]): record
+        for record in records
+        if isinstance(record, dict) and isinstance(record.get("page"), int)
+    }
+    action_priority = {
+        "needs_review": 0,
+        "exclude": 1,
+        "metadata_only": 2,
+        "include": 3,
+    }
+    for record in records:
+        primary_pages = record.get("table_run_primary_pages")
+        if not isinstance(primary_pages, list):
+            continue
+        sources = [
+            records_by_page[page]
+            for page in primary_pages
+            if isinstance(page, int) and page in records_by_page
+        ]
+        if not sources:
+            continue
+        source = max(
+            sources,
+            key=lambda item: action_priority.get(
+                str(item.get("text_flow_action")),
+                -1,
+            ),
+        )
+        if source is record and len(sources) == 1:
+            continue
+        record["page_role"] = source["page_role"]
+        record["special_page_kind"] = source["special_page_kind"]
+        record["text_flow_action"] = source["text_flow_action"]
+        record["visual_asset_action"] = source["visual_asset_action"]
+        record["book_block_position"] = _bounded_book_block_position(
+            record,
+            str(source["book_block_position"]),
+        )
+        record["table_run_decision_source_page"] = source["page"]
+
+
+def _bounded_book_block_position(
+    record: dict[str, Any],
+    decided_position: str,
+) -> str:
+    """Prevent semantic review from moving a page across known book-block bounds."""
+
+    if record.get("special_page_kind") in _EXTERNAL_WRAP_SPECIAL_PAGE_KINDS:
+        return decided_position
+    context = record.get("skeleton_context")
+    matter = context.get("matter") if isinstance(context, dict) else None
+    if matter == "body":
+        return "body"
+    if matter == "back_matter":
+        return "back_matter"
+    return decided_position
 
 
 def _is_ambiguous_front_visual_decision(record: dict[str, Any]) -> bool:
@@ -151,6 +218,14 @@ def validate_resolved_page_review(review: dict[str, Any]) -> None:
         for record in page_records
         if isinstance(record, dict) and isinstance(record.get("page"), int)
     }
+    for index, record in enumerate(page_records):
+        primary_pages = record.get("table_run_primary_pages")
+        if isinstance(primary_pages, list) and any(
+            page not in records_by_page for page in primary_pages
+        ):
+            raise ValidationError(
+                f"page_review.pages[{index}].table_run_primary_pages references a missing page"
+            )
     for page in candidate_pages:
         record = records_by_page.get(page)
         if record is None:
@@ -237,7 +312,31 @@ def _validate_page_record(
     visual_asset_action = fields["visual_asset_action"]
     if visual_asset_action not in PAGE_REVIEW_VISUAL_ASSET_ACTIONS:
         raise ValidationError(f"{path}.visual_asset_action is invalid")
+    _validate_table_run_context(record, path)
     return fields
+
+
+def _validate_table_run_context(record: dict[str, Any], path: str) -> None:
+    primary_pages = record.get("table_run_primary_pages")
+    source_page = record.get("table_run_decision_source_page")
+    if primary_pages is None:
+        if source_page is not None:
+            raise ValidationError(
+                f"{path}.table_run_decision_source_page requires table run context"
+            )
+        return
+    if (
+        not isinstance(primary_pages, list)
+        or not primary_pages
+        or not all(
+            isinstance(page, int) and not isinstance(page, bool) and page > 0
+            for page in primary_pages
+        )
+        or primary_pages != sorted(set(primary_pages))
+    ):
+        raise ValidationError(f"{path}.table_run_primary_pages is invalid")
+    if source_page is not None and source_page not in primary_pages:
+        raise ValidationError(f"{path}.table_run_decision_source_page is not a table primary")
 
 
 def _normalized_page_fields(record: dict[str, Any], path: str) -> dict[str, str | None]:

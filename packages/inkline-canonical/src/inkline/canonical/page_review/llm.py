@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-PAGE_REVIEW_PROMPT_VERSION = "4.5-textual-table-before-terminal"
+PAGE_REVIEW_PROMPT_VERSION = "4.8-textual-table-legend-first"
 
 _PROMPT_PROFILES = {
     "front_special",
@@ -244,9 +244,26 @@ def _profile_instruction(profile: str) -> str:
             "text region is a caption, legend, place name, or label."
         ),
         "textual_table": (
-            "A table_region is presumed to be a readable cell-based table or its continuation. Return "
-            "text_flow_page/include, including when the table fills the page. Return visual_page/exclude "
-            "only when the apparent table has labels or captions but no readable rows, columns, or cells."
+            "First apply the copyright policy: a page whose content is publication metadata such as CIP, "
+            "ISBN, copyright, edition, printing, publisher, price, or production credits is "
+            "copyright_page with visual_page/metadata_only/retain, even when MinerU emitted table_region. "
+            "When skeleton_context.matter is back_matter, that copyright page MUST use "
+            "book_block_position=back_matter, never front_matter. "
+            "Second, before presuming this is a table, detect a map key or illustration legend. A "
+            "borderless full-page key made of repeated numeric identifiers paired with place names in "
+            "several parallel columns, without column headers or independent prose, is an illustration "
+            "legend. It MUST use visual_page/exclude/retain even though OCR can serialize the aligned "
+            "labels as HTML table cells. "
+            "Otherwise, a table_region is presumed to be a readable cell-based table or its continuation. "
+            "A visible grid or repeated aligned rows and columns containing readable text MUST be "
+            "text_flow_page/include/not_needed, including when it fills the page or is a continuation. "
+            "Linear dated rows, succession tables, and named-person tables remain readable tables; do not "
+            "classify them as chronology_chart_page or genealogy_chart_page merely because they contain "
+            "dates, rulers, dynasties, or family names. Those chart kinds require non-linear axes, "
+            "connectors, or parent-child branches whose relationships cannot be read as ordinary rows and "
+            "columns. Return visual_page/exclude/retain only when the apparent table is actually a map, "
+            "illustration legend, connected diagram, or other visual with labels but no readable cell or "
+            "row-column structure."
         ),
         "terminal_special": (
             "Terminal position is only a routing signal, never a page identity. Keep independent "

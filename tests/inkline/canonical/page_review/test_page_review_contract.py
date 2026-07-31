@@ -19,7 +19,7 @@ from inkline.canonical.page_review import (
 from inkline.canonical.schema import ValidationError
 
 
-def test_page_review_selects_only_front_matter_visual_observations() -> None:
+def test_page_review_selects_front_visuals_and_body_table_regions() -> None:
     document = make_observed_document(
         {
             "doc_id": "sample",
@@ -55,7 +55,7 @@ def test_page_review_selects_only_front_matter_visual_observations() -> None:
     plan = build_page_review_plan(document, skeleton, page_roles)
     by_page = {record["page"]: record for record in plan["pages"]}
 
-    assert plan["candidate_pages"] == [4]
+    assert plan["candidate_pages"] == [4, 6]
     assert by_page[1]["text_flow_action"] == "exclude"
     assert by_page[1]["visual_asset_action"] == "not_needed"
     assert by_page[1]["page_role"] == "visual_page"
@@ -69,9 +69,110 @@ def test_page_review_selects_only_front_matter_visual_observations() -> None:
     assert by_page[5]["llm_review_status"] == "not_selected"
     assert by_page[5]["text_flow_action"] == "include"
     assert by_page[5]["visual_asset_action"] == "not_needed"
-    assert by_page[6]["llm_review_status"] == "not_selected"
-    assert by_page[6]["text_flow_action"] == "include"
-    assert by_page[6]["visual_asset_action"] == "not_needed"
+    assert by_page[6]["llm_review_status"] == "pending"
+    assert by_page[6]["text_flow_action"] == "needs_review"
+    assert by_page[6]["visual_asset_action"] == "needs_review"
+
+
+def test_page_review_continuation_follows_primary_table_disposition() -> None:
+    document = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "zh-CN",
+            "source_file": "sample.pdf",
+            "parser_name": "mineru",
+            "parser_mode": "vlm",
+        },
+        [make_observed_page(page, width=1000, height=1400) for page in range(1, 4)],
+        [
+            make_observation(
+                "obs000001",
+                "table_region",
+                page=2,
+                bbox=[100, 100, 900, 1200],
+                attrs={
+                    "reading_order": 1,
+                    "table": {
+                        "html": "<table><tr><td>A</td></tr></table>",
+                        "is_continuation": False,
+                    },
+                },
+            ),
+            make_observation(
+                "obs000002",
+                "table_region",
+                page=3,
+                bbox=[100, 100, 900, 1200],
+                attrs={
+                    "reading_order": 1,
+                    "table": {
+                        "html": "",
+                        "is_continuation": True,
+                    },
+                },
+            ),
+        ],
+    )
+    skeleton = {
+        "boundaries": {"first_body_page": 2},
+        "toc_pages": [],
+        "toc_entries": [{"role": "body", "selected_start_page": 2}],
+    }
+    page_roles = [
+        {"page": 1, "page_role": "text_flow_page", "signals": ["body_profile"]},
+        {"page": 2, "page_role": "visual_page", "signals": ["visual_dominant"]},
+        {"page": 3, "page_role": "visual_page", "signals": ["visual_dominant"]},
+    ]
+
+    plan = build_page_review_plan(document, skeleton, page_roles)
+    by_page = {record["page"]: record for record in plan["pages"]}
+
+    assert plan["candidate_pages"] == [2, 3]
+    assert by_page[2]["table_run_primary_pages"] == [2]
+    assert by_page[3]["table_run_primary_pages"] == [2]
+
+    resolved = resolve_page_review(
+        plan,
+        [
+            _decision(
+                2,
+                "text_flow_page",
+                None,
+                "include",
+                "not_needed",
+                "high",
+                book_block_position="body",
+            ),
+            _decision(
+                3,
+                "visual_page",
+                "chronology_chart_page",
+                "exclude",
+                "retain",
+                "medium",
+                book_block_position="body",
+            ),
+        ],
+        llm_model="qwen-test",
+        llm_prompt_version="test-prompt-v1",
+    )
+    resolved_by_page = {record["page"]: record for record in resolved["pages"]}
+
+    assert resolved_by_page[3]["page_role"] == "text_flow_page"
+    assert resolved_by_page[3]["special_page_kind"] is None
+    assert resolved_by_page[3]["text_flow_action"] == "include"
+    assert resolved_by_page[3]["visual_asset_action"] == "not_needed"
+    assert resolved_by_page[3]["table_run_decision_source_page"] == 2
+    validate_resolved_page_review(resolved)
+
+    invalid = deepcopy(resolved)
+    invalid["pages"][2]["table_run_decision_source_page"] = 99
+    with pytest.raises(
+        ValidationError,
+        match="table_run_decision_source_page is not a table primary",
+    ):
+        validate_resolved_page_review(invalid)
 
 
 def test_page_review_plan_is_independent_of_selected_start_anchor_provenance() -> None:
@@ -822,10 +923,15 @@ def test_page_review_derives_text_flow_page_asset_policy() -> None:
 
 
 def test_page_review_preserves_back_matter_position_for_terminal_copyright_page() -> None:
+    record = _record(520, "text_flow_page", "needs_review", "needs_review", "pending")
+    record["skeleton_context"] = {
+        "matter": "back_matter",
+        "is_body_section_start": False,
+    }
     plan = {
         "metadata": {"schema_name": "inkline_page_review", "schema_version": "0.4-shadow"},
         "candidate_pages": [520],
-        "pages": [_record(520, "text_flow_page", "needs_review", "needs_review", "pending")],
+        "pages": [record],
     }
 
     resolved = resolve_page_review(
@@ -838,7 +944,7 @@ def test_page_review_preserves_back_matter_position_for_terminal_copyright_page(
                 "include",
                 "not_needed",
                 "high",
-                book_block_position="back_matter",
+                book_block_position="front_matter",
             )
         ],
         llm_model="qwen-test",

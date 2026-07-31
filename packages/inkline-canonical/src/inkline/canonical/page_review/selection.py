@@ -62,6 +62,7 @@ def build_page_review_plan(
             visual_kinds_by_page.get(page, []),
         )
         records.append(record)
+    _attach_table_run_context(records, document)
     terminal_review_pages = _terminal_review_pages(document, records)
     _select_terminal_reviews(records, terminal_review_pages)
     _defer_non_pre_body_reviews(records)
@@ -81,16 +82,88 @@ def build_page_review_plan(
     }
 
 
+def _attach_table_run_context(
+    records: list[dict[str, Any]],
+    document: dict[str, Any],
+) -> None:
+    """Record normalized primary/continuation relationships for table pages."""
+
+    primary_pages_by_page: dict[int, set[int]] = {}
+    current_primary_page: int | None = None
+    last_page: int | None = None
+    observations = sorted(
+        (
+            observation
+            for observation in document.get("observations") or []
+            if isinstance(observation, dict) and observation.get("kind") == "table_region"
+        ),
+        key=_table_observation_order,
+    )
+    for observation in observations:
+        page = int(observation["page"])
+        table = _normalized_table_attrs(observation)
+        if table is None:
+            current_primary_page = None
+            last_page = None
+            continue
+        if str(table["html"]).strip():
+            current_primary_page = page
+            last_page = page
+            primary_pages_by_page.setdefault(page, set()).add(page)
+            continue
+        if current_primary_page is not None and last_page is not None and page == last_page + 1:
+            primary_pages_by_page.setdefault(page, set()).add(current_primary_page)
+            last_page = page
+            continue
+        current_primary_page = None
+        last_page = None
+
+    records_by_page = {int(record["page"]): record for record in records}
+    for page, primary_pages in primary_pages_by_page.items():
+        records_by_page[page]["table_run_primary_pages"] = sorted(primary_pages)
+
+
+def _table_observation_order(observation: dict[str, Any]) -> tuple[int, int, str]:
+    attrs = observation.get("attrs")
+    reading_order = attrs.get("reading_order") if isinstance(attrs, dict) else None
+    return (
+        int(observation["page"]),
+        int(reading_order) if isinstance(reading_order, int) else 1_000_000,
+        str(observation["observation_id"]),
+    )
+
+
+def _normalized_table_attrs(observation: dict[str, Any]) -> dict[str, Any] | None:
+    attrs = observation.get("attrs")
+    table = attrs.get("table") if isinstance(attrs, dict) else None
+    if not isinstance(table, dict):
+        return None
+    html = table.get("html")
+    is_continuation = table.get("is_continuation")
+    if not isinstance(html, str) or not isinstance(is_continuation, bool):
+        return None
+    if is_continuation != (not html.strip()):
+        return None
+    return table
+
+
 def _defer_non_pre_body_reviews(records: list[dict[str, Any]]) -> None:
-    """Keep body and back-matter layout ambiguity out of the Phase 4A LLM scope."""
+    """Keep unrelated body/back visual ambiguity out of bounded LLM review.
+
+    Table regions remain candidates in every matter position. MinerU can use the
+    same observation kind for readable cell tables and for maps or diagrams with
+    aligned labels, so layout alone cannot safely include or exclude their text.
+    """
 
     for record in records:
         context = record.get("skeleton_context")
         matter = context.get("matter") if isinstance(context, dict) else None
         signals = set(record.get("signals") or [])
+        visual_kinds = set(record.get("visual_kinds") or [])
         if (
             matter == "pre_body"
             or "terminal_page_risk" in signals
+            or "table_region" in visual_kinds
             or record.get("llm_review_status") != "pending"
         ):
             continue

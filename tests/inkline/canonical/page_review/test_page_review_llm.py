@@ -91,7 +91,12 @@ def test_page_review_prompt_profiles_define_body_and_table_precedence() -> None:
 
     assert "A continuous body paragraph wins over visual area." in mixed_prompt
     assert "A narrow explanatory block directly attached to an image is a caption" in mixed_prompt
-    assert "A table_region is presumed to be a readable cell-based table" in table_prompt
+    assert "a table_region is presumed to be a readable cell-based table" in table_prompt
+    assert "Linear dated rows, succession tables" in table_prompt
+    assert "First apply the copyright policy" in table_prompt
+    assert "before presuming this is a table, detect a map key" in table_prompt
+    assert "repeated numeric identifiers paired with place names" in table_prompt
+    assert "MUST use book_block_position=back_matter" in table_prompt
 
 
 def test_terminal_page_prompt_distinguishes_metadata_from_ordinary_flow() -> None:
