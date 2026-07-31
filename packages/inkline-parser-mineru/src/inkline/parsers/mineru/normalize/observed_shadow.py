@@ -7,6 +7,7 @@ from inkline.canonical.observed import (
     make_observation,
     make_observed_document,
     make_observed_page,
+    validate_observed_document,
 )
 
 from ..extraction.io import middle_bbox_to_content_bbox
@@ -68,6 +69,26 @@ def build_observed_document_shadow(
         observations,
         assets=assets,
     )
+
+
+def upgrade_mineru_observed_table_attrs(
+    observed_document: dict[str, Any],
+) -> dict[str, Any]:
+    """Upgrade a pre-TableFlow MinerU shadow artifact at the adapter boundary."""
+
+    validate_observed_document(observed_document)
+    upgraded = deepcopy(observed_document)
+    for observation in upgraded["observations"]:
+        if observation["kind"] != "table_region":
+            continue
+        payload = observation.get("parser_payload")
+        raw_type = payload.get("raw_type") if isinstance(payload, dict) else None
+        raw = payload.get("raw") if isinstance(payload, dict) else None
+        if raw_type != "table" or not isinstance(raw, dict):
+            continue
+        observation["attrs"]["table"] = _table_attrs(raw)
+    validate_observed_document(upgraded)
+    return upgraded
 
 
 def _observed_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -218,6 +239,8 @@ def _is_front_edge_page(page: int, total_pages: int) -> bool:
 
 def _attrs(block: RawBlock, *, text_line_metrics: dict[str, Any] | None = None) -> dict[str, Any]:
     attrs: dict[str, Any] = {"reading_order": block.index}
+    if block.raw_type == "table":
+        attrs["table"] = _table_attrs(block.raw)
     if text_line_metrics:
         attrs["text_line_metrics"] = deepcopy(text_line_metrics)
     if block.inline_runs:
@@ -225,6 +248,25 @@ def _attrs(block: RawBlock, *, text_line_metrics: dict[str, Any] | None = None) 
     if block.note_refs:
         attrs["note_refs"] = [_note_ref_dict(note_ref) for note_ref in block.note_refs]
     return attrs
+
+
+def _table_attrs(raw: dict[str, Any]) -> dict[str, Any]:
+    content = raw.get("content") if isinstance(raw, dict) else None
+    content = content if isinstance(content, dict) else {}
+    html = content.get("html")
+    normalized_html = html if isinstance(html, str) else ""
+    table_type = content.get("table_type")
+    nest_level = content.get("table_nest_level")
+    return {
+        "html": normalized_html,
+        "caption_texts": _caption_text_items(raw, "table_caption"),
+        "footnote_texts": _caption_text_items(raw, "table_footnote"),
+        "table_type": table_type if isinstance(table_type, str) else None,
+        "nest_level": (
+            nest_level if isinstance(nest_level, int) and not isinstance(nest_level, bool) else None
+        ),
+        "is_continuation": not normalized_html.strip(),
+    }
 
 
 def _note_ref_dict(note_ref: NoteRef) -> dict[str, str]:

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from inkline.canonical.observed import validate_observed_document
-from inkline.parsers.mineru.normalize.observed_shadow import build_observed_document_shadow
+from inkline.parsers.mineru.normalize.observed_shadow import (
+    build_observed_document_shadow,
+    upgrade_mineru_observed_table_attrs,
+)
 from inkline.parsers.mineru.schema.models import NoteRef, RawBlock
 
 
@@ -443,8 +448,78 @@ def test_build_observed_document_shadow_uses_table_caption_as_table_region_text(
     assert observation["kind"] == "table_region"
     assert observation["text"] == "资料来源"
     assert observation["role_hint"] == "unknown"
+    assert observation["attrs"]["table"] == {
+        "html": "<table></table>",
+        "caption_texts": ["资料来源"],
+        "footnote_texts": [],
+        "table_type": None,
+        "nest_level": None,
+        "is_continuation": False,
+    }
     assert observation["parser_payload"]["raw_type"] == "table"
     assert "raw_type" not in observation
+
+
+def test_build_observed_document_shadow_normalizes_table_content_without_parser_payload() -> None:
+    table = _raw("table", "", [10, 20, 900, 500], page=2, index=3)
+    table.raw = {
+        "type": "table",
+        "content": {
+            "table_caption": [{"type": "text", "content": "人口统计"}],
+            "table_footnote": [{"type": "text", "content": "资料来源：年鉴"}],
+            "html": "<table><tr><td>甲</td><td>1</td></tr></table>",
+            "table_type": "body",
+            "table_nest_level": 2,
+        },
+    }
+
+    document = build_observed_document_shadow(
+        pages={2: [table]},
+        page_sizes={2: (1000, 1000)},
+        metadata=_metadata(),
+    )
+
+    assert document["observations"][0]["attrs"]["table"] == {
+        "html": "<table><tr><td>甲</td><td>1</td></tr></table>",
+        "caption_texts": ["人口统计"],
+        "footnote_texts": ["资料来源：年鉴"],
+        "table_type": "body",
+        "nest_level": 2,
+        "is_continuation": False,
+    }
+
+
+def test_build_observed_document_shadow_marks_empty_html_table_as_continuation() -> None:
+    table = _raw("table", "", [10, 20, 900, 500], page=2, index=3)
+    table.raw = {"type": "table", "content": {"html": ""}}
+
+    document = build_observed_document_shadow(
+        pages={2: [table]},
+        page_sizes={2: (1000, 1000)},
+        metadata=_metadata(),
+    )
+
+    assert document["observations"][0]["attrs"]["table"]["is_continuation"] is True
+
+
+def test_upgrade_mineru_observed_table_attrs_only_reads_payload_inside_adapter() -> None:
+    table = _raw("table", "", [10, 20, 900, 500], page=2, index=3)
+    table.raw = {
+        "type": "table",
+        "content": {"html": "<table><tr><td>A</td></tr></table>"},
+    }
+    document = build_observed_document_shadow(
+        pages={2: [table]},
+        page_sizes={2: (1000, 1000)},
+        metadata=_metadata(),
+    )
+    legacy = deepcopy(document)
+    del legacy["observations"][0]["attrs"]["table"]
+
+    upgraded = upgrade_mineru_observed_table_attrs(legacy)
+
+    assert "table" not in legacy["observations"][0]["attrs"]
+    assert upgraded["observations"][0]["attrs"]["table"]["html"].startswith("<table>")
 
 
 def test_build_observed_document_shadow_deduplicates_middle_title_observation() -> None:

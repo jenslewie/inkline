@@ -10,12 +10,15 @@ from inkline.canonical import (
     build_observed_index,
     build_page_layout_analysis,
     build_page_review_plan,
+    build_table_flow,
     build_text_flow,
     classify_observed_page_roles,
     validate_book_skeleton_against_index,
     validate_observed_document,
     validate_page_layout_analysis,
     validate_resolved_page_review,
+    validate_table_flow,
+    validate_table_flow_against_sources,
     validate_text_flow_against_sources,
 )
 from inkline.canonical.observed.index import ObservedIndex
@@ -65,6 +68,13 @@ def canonical_artifact_stages(
             _validate_page_review_artifact,
         ),
         Stage(
+            "table_flow",
+            ("observed", "observed_index", "page_review"),
+            "table_flow",
+            _build_table_flow_if_resolved,
+            _validate_optional_table_flow,
+        ),
+        Stage(
             "text_flow",
             ("observed", "observed_index", "skeleton", "page_review", "page_layout"),
             "text_flow",
@@ -104,6 +114,7 @@ def build_canonical_artifacts(
         skeleton=artifacts["skeleton"],
         page_layout=artifacts["page_layout"],
         page_review=artifacts["page_review"],
+        table_flow=artifacts["table_flow"],
         text_flow=artifacts["text_flow"],
         page_assets=artifacts["page_assets"],
     )
@@ -112,6 +123,16 @@ def build_canonical_artifacts(
 def _build_skeleton(observed: dict[str, Any], observed_index: ObservedIndex) -> dict[str, Any]:
     del observed
     return build_book_skeleton_from_index(observed_index)
+
+
+def _build_table_flow_if_resolved(
+    observed: dict[str, Any],
+    observed_index: ObservedIndex,
+    page_review: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not _page_review_is_resolved(page_review):
+        return None
+    return build_table_flow(observed, observed_index, page_review)
 
 
 def _build_page_layout(observed: dict[str, Any], observed_index: ObservedIndex) -> dict[str, Any]:
@@ -170,6 +191,11 @@ def _validate_optional_text_flow(text_flow: Any) -> None:
         raise TypeError("text_flow stage must produce object or None")
 
 
+def _validate_optional_table_flow(table_flow: Any) -> None:
+    if table_flow is not None:
+        validate_table_flow(table_flow)
+
+
 def _validate_page_assets(page_assets: Any) -> None:
     if page_assets is not None and not isinstance(page_assets, dict):
         raise TypeError("page_assets stage must produce object or None")
@@ -181,12 +207,15 @@ def _validate_artifact_relationships(artifacts: dict[str, Any]) -> None:
     skeleton = artifacts["skeleton"]
     page_layout = artifacts["page_layout"]
     page_review = artifacts["page_review"]
+    table_flow = artifacts["table_flow"]
     validate_book_skeleton_against_index(skeleton, index)
     doc_id = index.doc_id
     if page_layout.get("metadata", {}).get("doc_id") != doc_id:
         raise ValueError("PageLayoutAnalysis and ObservedDocument doc_id values differ")
     if page_review.get("metadata", {}).get("doc_id") != doc_id:
         raise ValueError("PageReview and ObservedDocument doc_id values differ")
+    if table_flow is not None:
+        validate_table_flow_against_sources(table_flow, observed, index, page_review)
     review_pages = [record.get("page") for record in page_review.get("pages") or []]
     if review_pages != list(index.page_numbers):
         raise ValueError("PageReview must contain every observed page exactly once in order")

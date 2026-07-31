@@ -42,6 +42,7 @@ def test_resolved_workflow_builds_text_flow_once_and_assembly_reuses_it(monkeypa
     internal = build_internal_canonical_from_artifacts(bundle, public)
 
     assert len(calls) == 1
+    assert bundle.table_flow is not None
     assert bundle.text_flow is not None
     assert bundle.page_assets == observed["assets"]
     assert bundle.page_assets is not observed["assets"]
@@ -67,4 +68,5 @@ def test_unresolved_review_returns_intermediate_bundle_without_text_flow() -> No
 
     bundle = build_canonical_artifacts(observed, stages=stages)
 
+    assert bundle.table_flow is None
     assert bundle.text_flow is None

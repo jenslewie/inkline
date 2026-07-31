@@ -57,7 +57,7 @@ def test_page_review_prompt_profile_prioritizes_body_section_and_tables() -> Non
         page_review_prompt_profile(
             {
                 "skeleton_context": {"matter": "back_matter"},
-                "signals": ["visual_dominant"],
+                "signals": ["visual_dominant", "terminal_page_risk"],
                 "visual_kinds": ["table_region"],
             }
         )

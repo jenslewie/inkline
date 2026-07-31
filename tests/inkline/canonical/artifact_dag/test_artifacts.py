@@ -14,6 +14,7 @@ def test_canonical_artifact_bundle_is_frozen() -> None:
         skeleton={},
         page_layout={},
         page_review={},
+        table_flow=None,
         text_flow=None,
         page_assets=None,
     )

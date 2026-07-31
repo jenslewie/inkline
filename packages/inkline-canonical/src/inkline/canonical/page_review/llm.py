@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-PAGE_REVIEW_PROMPT_VERSION = "4.4-terminal-readable-chronology"
+PAGE_REVIEW_PROMPT_VERSION = "4.5-textual-table-before-terminal"
 
 _PROMPT_PROFILES = {
     "front_special",
@@ -34,10 +34,10 @@ def page_review_prompt_profile(page_record: dict[str, Any]) -> str:
     if context.get("matter") == "pre_body":
         has_visual_evidence = bool(visual_kinds) or "raster_dark_visual_layout" in signals
         return "front_visual_identity" if has_visual_evidence else "front_special"
-    if "terminal_page_risk" in signals:
-        return "terminal_special"
     if "table_region" in visual_kinds:
         return "textual_table"
+    if "terminal_page_risk" in signals:
+        return "terminal_special"
     if "image_region" in visual_kinds:
         return "mixed_visual_body" if "body_profile" in signals else "visual_sparse_text"
     if context.get("is_body_section_start") is True:

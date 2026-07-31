@@ -15,5 +15,6 @@ class CanonicalArtifactBundle:
     skeleton: dict[str, Any]
     page_layout: dict[str, Any]
     page_review: dict[str, Any]
+    table_flow: dict[str, Any] | None
     text_flow: dict[str, Any] | None
     page_assets: dict[str, Any] | None
