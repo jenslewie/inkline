@@ -77,6 +77,9 @@ Snapshot at the time of replanning:
   display, and footnote reconciliation plus focused real-book tests;
 - the worktree also contains a large uncommitted mixture of TableFlow, SectionMap,
   workflow, PageReview, adapter, test, and documentation changes.
+- the main worktree is also not clean: it contains untracked SectionMap membership
+  files/tests and `test.md`. They are user work and must be inventoried and preserved
+  before main becomes the active implementation worktree.
 
 The branch must not absorb VisualRelationReview and the note pipeline. It is already
 too broad, and final TextFlow acceptance now depends on those missing inputs.
