@@ -64,6 +64,12 @@ for the target DAG and the separately documented current runtime.
 The root README is intentionally a project map. Package internals belong in the
 package README, while cross-package architecture decisions belong in `docs/`.
 
+Sequential tasks that span multiple Codex sessions follow the tracked
+[cross-session handoff workflow](docs/development/session-handoff-workflow.md).
+Each completed session records factual state and generates the immediately following
+session's prompt from the templates in [`docs/templates`](docs/templates/). Generated
+handoffs remain local under `data/outputs/workspace/session-handoffs/`.
+
 ## Quick Start
 
 Install the workspace and run tests from the repository root:
