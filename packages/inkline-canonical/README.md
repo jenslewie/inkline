@@ -9,8 +9,10 @@ work evolves here before becoming the release canonical contract.
 - Owns the current `CanonicalDocument` schema, validation, migration helpers,
   and JSON IO.
 - Owns parser-neutral development contracts such as `ObservedDocument`,
-  `BookSkeleton`, `PageLayoutAnalysis`, `PageReview`, `TextFlow`, `SectionMap`,
-  `BookGraph`, and `internal_canonical`.
+  `BookSkeleton`, `PageLayoutAnalysis`, `PageReview`, `VisualRelationReview`,
+  `NoteSystemReview`, `NoteMarkerReview`, `TextFlow`, `TableFlow`,
+  `NoteInventory`, `SectionMap`, `NoteResolution`, `BookGraph`, and
+  `internal_canonical`.
 - Keeps parser-specific details out of public canonical fields. Parser payloads
   belong in provenance/debug payload fields.
 - Does not parse PDFs, call MinerU, render EPUB, or build RAG indexes.
@@ -49,18 +51,31 @@ inkline/canonical/
     llm.py                  Strict LLM decision prompt and profile selection.
     resolution.py           Decision validation and resolved-review contract.
 
+  visual_relations/        Image/figure/plate to caption review before TextFlow.
+    contract.py             Visual groups plus unpaired/unresolved endpoints.
+    builder.py              Observed/layout/page evidence -> bounded relation review.
+    validation.py           Endpoint identity, ownership, and provenance checks.
+
+  note_system/             Page/chapter/book and mixed note-system review.
+  note_marker_review/      Bounded definition/body marker recognition evidence.
+
   text_flow/               Target single TextFlow/TextUnit artifact.
     contract.py            TextFlow and TextUnit development contract.
-    builder.py             Observed + layout + Skeleton + PageReview -> TextFlow.
+    builder.py             Reviewed observed/layout evidence -> final TextFlow.
     validation.py          Unit ordering, boundary, and provenance validation.
+
+  table_flow/              Parser-neutral structured-table artifact.
+    contract.py            TableFlow and logical-table development contract.
+    builder.py             Observed + index + resolved PageReview -> TableFlow.
+    validation.py          Table consumption, ordering, and provenance validation.
 
   section_map/             Section membership and physical-page placement.
     contract.py            SectionMap development contract.
-    builder.py             Skeleton + PageReview + TextFlow -> SectionMap.
+    builder.py             Validated upstream structure -> SectionMap.
     validation.py          Contract and cross-source validation.
 
-  visual_relations/        Planned asset-caption relation artifact.
-  note_resolution/         Planned unified note/reference relation artifact.
+  note_inventory/          Final notes, inline references, groups, and gaps.
+  note_resolution/         Immutable resolved reference relations after SectionMap.
 
   artifact_dag/            Artifact bundle contracts shared with orchestration.
     artifacts.py           Immutable canonical artifact bundle types.
@@ -82,27 +97,26 @@ shows stage order; exact fan-in remains explicit in the architecture I/O table.
 flowchart LR
     observed["ObservedDocument"] --> evidence["Evidence<br/>ObservedIndex and PageLayoutAnalysis"]
     evidence --> structure["Structure<br/>BookSkeleton and PageReview"]
-    structure --> text["Text<br/>TextFlow and SectionMap"]
-    text --> relations["Relations<br/>VisualRelationReview and NoteResolution"]
-    relations --> graph["BookGraph assembly and projections"]
+    structure --> review["Pre-flow review<br/>Visual relations and note evidence"]
+    review --> text["Reading structure<br/>TextFlow, TableFlow, NoteInventory, and SectionMap"]
+    text --> relations["Post-section relations<br/>NoteResolution"]
+    relations --> assembledGraph["BookGraph assembly and projections"]
 ```
 
 `ObservedDocument`, `BookSkeleton`, `PageLayoutAnalysis`, `PageReview`, `TextFlow`,
-`SectionMap`, `BookGraph`, and `internal_canonical` are pre-release development
-artifacts. Each has a validator and may be materialized independently by the
-planned `inkline-workflow` layer for golden review, resume, or debugging. Builders
-do not choose output paths and do not mutate upstream artifacts. Existing EPUB/RAG
-flows still consume the current canonical contract until the BookGraph projection
-switch is complete.
+`TableFlow`, the review/relation artifacts, `NoteInventory`, `SectionMap`, `BookGraph`,
+and `internal_canonical` are pre-release development artifacts. Each has a validator
+and may be materialized independently by the planned `inkline-workflow` layer for
+golden review, resume, or debugging. Builders do not choose output paths and do not
+mutate upstream artifacts.
 
-The current runtime is earlier than this target. PageReview builds TextUnits to obtain
-layout evidence, while public BookGraph and internal canonical independently rebuild
-the observed pipeline. A complete run can therefore generate TextUnits three times.
-The target first extracts reusable `PageLayoutAnalysis`, then creates one validated
-TextFlow artifact after Skeleton and resolved PageReview and shares it with every
-downstream stage. TextFlow's ordered TextUnits are the authoritative internal text
-units; current paragraph logical-splitting behavior moves into TextFlow before final
-`tu...` ids are assigned rather than creating a second `lu...` namespace.
+The target workflow builds one final TextFlow after validated visual groups, note
+systems, and marker evidence exist. TextFlow's ordered TextUnits are authoritative;
+current paragraph logical-splitting behavior moves into TextFlow before final `tu...`
+ids are assigned rather than creating a second `lu...` namespace. SectionMap consumes
+that TextFlow together with TableFlow, VisualRelationReview, and NoteInventory. The
+current runtime has not yet reached this revised target, and release BookGraph,
+internal-canonical, EPUB, and RAG projections have not been switched to it.
 
 During pre-release development, temporary schema versions such as `0.1-shadow` may
 change incompatibly. Do not add migration or backward-compatibility code for superseded
@@ -125,9 +139,12 @@ is `medium` confidence and has exactly two straddling direct anchors that agree
 on the offset. A selected start anchor proves where a section starts and why.
 It does not prove that later pages or resources belong to that section.
 
-The planned internal `SectionMap` consumes `BookSkeleton`, resolved `PageReview`, and
-the single validated `TextFlow` artifact. It assigns already-classified units to
-sections; it does not classify paragraphs or repair invalid TextUnit boundaries. For
+The internal `SectionMap` consumes `BookSkeleton`, resolved `PageReview`, the single
+validated `TextFlow`, validated `TableFlow`, `VisualRelationReview`, and
+`NoteInventory`. It assigns already-classified units, logical tables, visual groups,
+and note groups to sections; it does not classify paragraphs, repair invalid TextUnit
+boundaries, discover image-caption relations, resolve note targets, or reinterpret
+unresolved table candidates. For
 `observed_title_match`, it maps `title_observation_ids` to exact TextFlow units. For
 `printed_page_offset`, whose title evidence is empty, it uses the
 validated physical `page`, matching `toc_observation_ids`, and two agreeing
@@ -143,6 +160,11 @@ separate cross-source validator consumes `ObservedIndex` to prove that reference
 observations, pages, assets, and provenance exist. ObservedDocument is used once to
 construct that index upstream and is not passed into SectionMap. This keeps raw
 evidence auditing separate from section-assignment decisions.
+
+The detailed target contracts are in
+[VisualRelationReview before TextFlow](../../docs/visual-relation-review-design.md),
+[note processing before and after SectionMap](../../docs/note-processing-design.md),
+and [the SectionMap upstream replan](../../docs/section-map-upstream-replan.md).
 
 ## TOC LLM Boundary
 
@@ -223,9 +245,11 @@ most its plate number, caption, or labels. `plate_page` can occur in any book
 position and does not imply a cross-page `plate_section`. Both identities use
 `visual_page + exclude + retain` so their OCR does not enter reading flow while
 their rendered page remains available for EPUB fidelity and later asset work.
-PageReview does not associate an image with its caption. That planned
-`VisualRelationReview` pass consumes the resolved visual pages and existing
-observation ids before BookGraph creates visual assets or `caption_of` edges.
+PageReview does not associate an image with its caption. `VisualRelationReview`
+consumes resolved page decisions, PageAssets, and existing observation ids before
+TextFlow materializes caption TextUnits. It covers selected body image/caption
+candidates as well as retained visual pages. SectionMap later assigns the already
+validated visual group; it never creates `caption_of`.
 
 `book_block_position` records the physical book position separately from the
 reading-flow role: `external_wrap`, `front_matter`, `body`, `back_matter`, or
@@ -262,7 +286,11 @@ inventing a binding identity. A reviewed page records its `llm_prompt_profile`,
 while the top-level `llm` record stores the model and prompt version.
 
 `table_region` always selects `textual_table`: a readable table and a table
-continuation remain in reading flow even when they fill an entire page.
+continuation remain in reading flow even when they fill an entire page. This profile
+takes precedence over terminal-page routing. `TableFlow` runs only after these
+PageReview decisions: fully excluded table candidates remain excluded, while a
+multi-page candidate split between included and excluded pages remains unresolved
+instead of becoming a partial table.
 
 ## Maintenance Guardrail
 

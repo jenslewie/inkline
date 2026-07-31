@@ -23,17 +23,25 @@ Canonical v2 的目标不是让各 builder 相互隔离后重复计算，也不�
 flowchart LR
     ingest["1. Input<br/>ObservedDocument"] --> evidence["2. Evidence<br/>ObservedIndex and PageLayoutAnalysis"]
     evidence --> structure["3. Structure<br/>BookSkeleton and PageReview"]
-    structure --> text["4. Text<br/>TextFlow and SectionMap"]
-    text --> relations["5. Relations<br/>VisualRelationReview and NoteResolution"]
-    relations --> graph["6. Assembly<br/>BookGraph"]
+    structure --> review["4. Pre-flow review<br/>Visual relations and note evidence"]
+    review --> text["5. Reading structure<br/>TextFlow, TableFlow, NoteInventory, and SectionMap"]
+    text --> relations["6. Post-section relations<br/>NoteResolution"]
+    relations --> assembledGraph["7. Assembly<br/>BookGraph"]
 ```
 
 - `PageLayoutAnalysis` 提供 PageReview 与 TextFlow 共享的页面几何、版心和 observation-level layout evidence；PageReview 不应为了页面特征生成最终 TextUnits。
-- `TextFlow` 在 Skeleton 与 resolved PageReview 之后生成一次，是唯一创建 TextUnits 的阶段。
-- `SectionMap` 只负责 section/page/TextUnit membership 与 ranges，不负责把 observations 分类为 heading/paragraph 等类型，也不修补错误 TextUnit。
+- `VisualRelationReview` 在 TextFlow 前建立 image-caption visual groups；caption 不再以临时 `display_block` 身份留给下游纠正。
+- `NoteSystemReview` 与 `NoteMarkerReview` 在 TextFlow 前识别注释系统和印刷 marker；`NoteInventory` 在 TextFlow 后、SectionMap 前盘点 definitions、inline references、groups 与 unresolved cases。
+- `TextFlow` 在 Skeleton、resolved PageReview 及必要的 visual/note reviews 之后生成一次，是唯一创建 TextUnits 的阶段。
+- `TableFlow` 同样在 resolved PageReview 之后生成，把 parser adapter 已归一化的表格 observations 组织成逻辑表格；PageReview 排除的视觉表格页不会进入结构化表格流。
+- `SectionMap` 只负责 section/page/TextUnit/table/visual-group/note-group membership 与 ranges，不负责分类、caption pairing、marker recovery、note target resolution，也不修补错误上游 artifact。
+- 下游 builder 永远不修改上游 artifact。`NoteResolution` 输出独立 relations；BookGraph assembler 只在自己的投影副本中写 resolved target。
 - public BookGraph 与 internal canonical 必须从同一个 assembled artifact bundle 投射，不能分别重跑 observed pipeline。
 - `inkline-parse` 只负责 parser protocol、registry、run state，并在 ObservedDocument 边界结束。
 - `inkline-workflow` 负责 canonical DAG 调度、写盘、恢复和 golden 发布；domain builders 不选择输出路径。未来 LangChain/LangGraph adapter 仍调用相同的 framework-neutral stages、builders 与 validators，不把 domain contract 搬进 prompt。
+
+2026-07-31 的 pre-SectionMap 重排、当前分支处置和新实施顺序见
+[`section-map-upstream-replan.md`](section-map-upstream-replan.md)。
 
 开发期 artifact 可以使用 `0.x-shadow` 等临时 schema version，并允许不兼容变化。pre-release 阶段不为旧 shadow artifact 编写 migration/compatibility code；contract 变化后直接重建 artifacts 与 goldens。首次发布前统一冻结一个 release schema version，之后只在发布边界升级 schema 并处理必要迁移。
 
@@ -315,6 +323,13 @@ TextFlow 构建发生在 BookSkeleton 与 resolved PageReview 之后。Skeleton 
 
 TextFlow 中有序的 TextUnits 是 SectionMap 与 BookGraph assembler 消费的权威 internal text units。现有 paragraph logical-splitting 行为在最终 `tu...` id 分配前折叠进 TextFlow；目标架构不再产生第二套相互竞争的 `lu...` identity namespace。
 
+`TableFlow` 与 TextFlow 是 resolved PageReview 之后的同级 reading-structure
+artifact。MinerU adapter 必须先把 HTML、caption、footnote、continuation 等信息
+归一化到 parser-neutral observation attributes；TableFlow 不读取 MinerU
+`parser_payload`。一个多页表格只有在相关页面全部被 PageReview
+`include` 时才物化；全部 `exclude` 时记录为 excluded；include/exclude 混合时
+整个候选进入 `unresolved_table_observation_runs`，禁止生成半张表。
+
 Phase 3.1 只做同页、非语义聚合：
 
 - 只使用 `kind`、`role_hint`、`page`、`bbox`、`spans`、`reading_order`、垂直间距、左边界对齐和水平重叠。
@@ -575,70 +590,65 @@ first localized front-matter section enter the residual-unknown LLM pass. This
 keeps external wrap detectable while ensuring ordinary front prose is resolved
 instead of being left as `unknown`.
 
-### Phase 4B VisualRelationReview (planned, not implemented)
+### Phase 4B VisualRelationReview before TextFlow (planned, not implemented)
 
 `plate_page` only establishes a page-level consumption decision. It means that
-the page image is retained and its OCR is excluded from reading flow; it does
-**not** mean MinerU image regions and text regions have been associated. Phase
-4B is a separate visual-object relationship pass after PageReview and before
-BookGraph creates public visual assets or caption edges:
+the page image is retained and its OCR is excluded from ordinary reading flow;
+it does **not** mean image and caption observations have been associated.
+VisualRelationReview therefore runs after PageReview and before final TextFlow
+or SectionMap:
 
 ```text
-ObservedDocument + PageReview
-  -> selected visual page
+ObservedIndex + PageLayoutAnalysis + PageReview + PageAssets
+  -> selected visual relation candidates
   -> VisualRelationReview
-  -> internal asset/caption relation evidence
-  -> BookGraph asset + caption node + caption_of edge
+  -> validated visual groups and unresolved endpoints
+  -> TextFlow caption units
+  -> SectionMap visual-group membership
 ```
 
-The initial scope will process only `pre_body` pages that PageReview resolves as
-`plate_page`. It does not extend Phase 4A's LLM selection into body or back
-matter. That expansion requires real book samples and a separate candidate
-selection audit.
+Candidate selection is not limited to PageReview `visual_page` records. It also
+selects included body pages containing an `image_region` plus nearby caption
+candidates. The mandatory acceptance case is the two-part caption on physical
+page 25 of 《丝绸之路新史》: `obs000253` is the image, while
+`obs000254` and `obs000255` are caption text. The three observations must form
+one visual group before TextFlow assigns final `tu...` identities.
 
-This initial slice is not sufficient for BookGraph completion. A subsequent
-body-visual slice must select retained body pages that contain `image_region`
-evidence plus nearby caption candidates. Its acceptance set must include the
-two-part caption on physical page 25 of 《丝绸之路新史》
-(`obs000253` as the image and `obs000254`/`obs000255` as caption text).
-SectionMap keeps those caption observations as independent display TextUnits
-and owns only their section membership; it must not manufacture `caption_of`.
-VisualRelationReview must emit the image-to-caption relation before BookGraph
-can expose the corresponding asset and caption edge.
+For each selected page, the model receives the page image and a parser-neutral
+manifest of existing observation ids, kinds, bboxes, and text. It may select
+ids but may not transcribe, rewrite, or invent content. Validation proves
+endpoint identity, endpoint kind, supported page scope, exclusive ownership,
+and provenance. Unpaired and unresolved endpoints remain explicit. The initial
+contract supports same-page relations; cross-page candidates are unresolved.
 
-For each selected physical page, the multimodal request must receive the full
-page image and a parser-neutral manifest of same-page observations:
-`observation_id`, `kind`, `bbox`, and `text`. The model must select existing
-observation ids rather than transcribe, rewrite, or invent caption content.
-Its result must express only explicit relations, for example:
+TextFlow materializes validated caption observations as `caption`, not as
+ordinary `display_block`. SectionMap later assigns an existing visual group;
+it never discovers `caption_of`. TableFlow owns captions whose parent is a
+structured table. The complete design is
+[`visual-relation-review-design.md`](visual-relation-review-design.md).
 
-```json
-{
-  "page": 4,
-  "relations": [
-    {
-      "asset_observation_id": "ob000041",
-      "caption_observation_ids": ["ob000044", "ob000045"],
-      "relation_type": "caption_of",
-      "confidence": "high"
-    }
-  ],
-  "unpaired_asset_observation_ids": [],
-  "unpaired_caption_observation_ids": []
-}
-```
+### Phase 4C Note review before TextFlow (planned, not implemented)
 
-Validation must require that referenced observations exist on the same physical
-page, the asset endpoint is an `image_region`, and every caption endpoint is a
-text observation. A caption may combine multiple text observations; an
-unpaired asset or caption must remain explicit rather than being guessed.
-Cross-page image/caption relationships, plate-section grouping, OCR repair,
-image descriptions, and body/back-matter visual-page selection remain
-non-goals for the first pre-body slice. Body visual selection and relation
-review are a required follow-up slice, not an implicit capability of
-SectionMap or BookGraph assembly.
+A book may contain page-foot notes, chapter-end notes, book-end notes, or
+several systems simultaneously. `NoteSystemReview` first records each system's
+definition ranges, reference scope, marker styles, reset policy, evidence, and
+unresolved fields.
 
-### Phase 4C SectionMap (planned, not implemented)
+`NoteMarkerReviewPlan` then selects exact definition and body regions that need
+visual inspection. A count mismatch or numeric gap is only a review trigger.
+`NoteMarkerReview` reuses canonical v1's useful Qwen marker-recognition behavior
+behind parser-neutral evidence: it recognizes printed definition markers and
+body-reference markers with adjacent text anchors, but it does not assign a
+section or target note id.
+
+Final TextFlow consumes the validated evidence, forms complete note units, and
+inserts unresolved `note_ref` inline runs before final `tu...` assignment.
+`NoteInventory` is generated once after TextFlow and before SectionMap. It
+records definition units, inline-run locations, note groups, marker coverage,
+and unresolved cases. The complete design is
+[`note-processing-design.md`](note-processing-design.md).
+
+### Phase 4D SectionMap (implementation must restart after upstream reviews)
 
 `SectionMap` is the internal alignment layer from physical pages and TextFlow
 units to the logical document tree. It is **not** a convenience map that
@@ -660,22 +670,45 @@ an authoritative I/O table instead of one full graph with crossing fan-in edges.
 local dependency relevant to SectionMap is:
 
 ```mermaid
-flowchart LR
-    skeleton["BookSkeleton"] --> section["SectionMap"]
-    review["PageReview"] --> section
-    flow["TextFlow"] --> section
-    section --> notes["NoteResolution"]
-    section --> graph["BookGraph assembler"]
+flowchart TD
+    base["BookSkeleton and resolved PageReview"]
+    visuals["VisualRelationReview"]
+    flow["TextFlow"]
+    tables["TableFlow"]
+    inventory["NoteInventory"]
+    section["SectionMap"]
+    notes["NoteResolution"]
+    assembler["BookGraph assembler"]
+
+    base --> flow
+    base --> tables
+    visuals --> flow
+    flow --> inventory
+    flow --> section
+    tables --> section
+    visuals --> section
+    inventory --> section
+    inventory --> notes
+    section --> notes
+    section --> assembler
+    visuals --> assembler
+    notes --> assembler
 ```
 
 | Stage | Required inputs | Output |
 | --- | --- | --- |
-| TextFlow | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, `PageReview` | One authoritative TextFlow artifact |
-| SectionMap | `BookSkeleton`, `PageReview`, `TextFlow` | Section membership, ranges, standalone pages, and unresolved pages |
-| NoteResolution | `TextFlow`, `SectionMap` | Normalized notes and resolved references |
+| VisualRelationReview | `ObservedIndex`, `PageLayoutAnalysis`, `PageReview`, `PageAssets` | Visual groups plus unpaired and unresolved endpoints |
+| NoteSystemReview | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, `PageReview`, `PageAssets` | Page/chapter/book note systems and definition ranges |
+| NoteMarkerReview | `ObservedIndex`, `PageAssets`, `NoteMarkerReviewPlan` | Definition and body-reference marker evidence |
+| TextFlow | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, `PageReview`, `VisualRelationReview`, `NoteSystemReview`, `NoteMarkerReview` | One authoritative TextFlow artifact |
+| TableFlow | `ObservedDocument`, `ObservedIndex`, resolved `PageReview` | Structured logical tables plus excluded and unresolved candidates |
+| NoteInventory | `TextFlow`, `NoteSystemReview`, `NoteMarkerReview` | Notes, references, groups, marker coverage, and unresolved cases |
+| SectionMap | `BookSkeleton`, `PageReview`, `TextFlow`, `TableFlow`, `VisualRelationReview`, `NoteInventory` | Section membership, ranges, standalone pages, unresolved pages, and resource ownership |
+| NoteResolution | `NoteInventory`, `SectionMap` | Immutable resolved and unresolved reference relations |
 
-The SectionMap business builder consumes `BookSkeleton`, resolved `PageReview`, and
-validated `TextFlow`; it does not need the entire ObservedDocument to rediscover facts.
+The SectionMap business builder consumes `BookSkeleton`, resolved `PageReview`,
+validated `TextFlow`, validated `TableFlow`, `VisualRelationReview`, and
+`NoteInventory`; it does not need the entire ObservedDocument to rediscover facts.
 A separate cross-source validator consumes `ObservedIndex` to prove that referenced
 observation ids, pages, assets, and provenance exist. ObservedDocument is used once to
 construct the index upstream and is not passed into SectionMap.
@@ -742,33 +775,35 @@ pages within a body chapter, and an offset-only section start with no title
 TextUnit whose supporting provenance remains traceable without forcing page
 membership.
 
-### Phase 4 note/ref model
+### Phase 4E NoteResolution after SectionMap
 
-Phase 4 开始引入统一 note/ref 关系模型，但它不负责判断 `front_matter`、`body`、`back_matter`，也不负责判断 `preface`、`bibliography`、`copyright_page` 等出版语义角色。
+NoteResolution is the only stage that publishes authoritative reference targets.
+It consumes `NoteInventory` and confirmed SectionMap scope. It handles page-foot,
+chapter-end, book-end, and mixed systems without treating the book as one global note
+mode.
 
-Phase 4 当前最小实现包括：
+The artifact records the source TextUnit id, inline-run index, marker, target note
+TextUnit id, note-system id, scope, evidence, decision source, confidence, and
+resolution status. Unique evidence-based relations are resolved; duplicate, orphan,
+ambiguous, and unsupported cases remain explicit.
 
-- BookGraph schema 允许 `note` node。
-- `references_note` edge 的目标必须是 note-compatible node。迁移期允许 legacy `footnote` node 作为兼容目标；release canonical 应收敛到 `note`。
-- resolved `note_ref.target_note_id` 如果指向 BookGraph node id，目标必须是 note-compatible node；legacy block id 或 note alias 暂时只作为迁移期引用值保留。
-- `normalize_bookgraph_notes(graph)` 可以把 legacy `footnote` node 规范化为 `note` node，并补齐 `marker`、`source_placement`、`scope`、`source_text_unit_ids`。
-- 如果 legacy footnote node 来自 `note_section_candidate` 页面，Phase 4 只写 `source_placement = "note_section_candidate"`、`scope = "unknown"`；它不会在没有结构证据时把候选注释区提前判成 `chapter_end` 或 `book_end`。
-- `resolve_page_footnote_refs(graph)` 只在同页、同 marker、唯一 page-foot note 的情况下写入 `note_ref.attrs.target_note_id` 并生成 `references_note` edge；重复 marker 或缺少候选时不猜测。
-- MinerU `ref_text` 不是 canonical 顶层概念，也不能默认等同于页脚脚注。Observed shadow 只能把它映射成 parser-neutral 的 `reference_text` role hint，并把 MinerU 原始类型保留在 `parser_payload.raw_type`。
-- 稀疏、位于页面底部的 `reference_text` 可以在 BookGraph note 层晋升为 `source_placement = page_foot` 的 note；密集的 reference-like 页面保留为 list/text flow，避免把参考书目误当页脚注。
-- `normalize_bookgraph_note_sections(graph)` 只在出现显式 note-section heading（例如“注释”或 `Notes`）时，把该结构范围内带 marker 的 reference-like text 晋升为 `note`。它可以根据注释区位置和注释区内 subsection heading 写入 `source_placement = chapter_end/book_end` 与 `scope = chapter/book`；无法确定时保留 `unknown`。
-- `resolve_bookgraph_note_refs(graph)` 是 Phase 4 的总入口：先处理确定性页脚脚注，再处理显式注释区内唯一 marker + scope 可匹配的注释。ambiguous/unresolved 不猜测，留给 Phase 5 LLM/verifier。
-- `audit_bookgraph_notes(graph)` 输出 note/ref 健康度摘要，包括 note 数、legacy footnote 数、resolved/unresolved note_ref 数、orphan note 数，以及按 `source_placement` / `scope` 的统计。
-- ObservedDocument -> BookGraph builder 在 Phase 4 会调用 page-foot resolver，因此新的 observed shadow BookGraph 输出应使用 `note`，而不是继续把脚注内容作为 release 方向的 `footnote` node。
+NoteResolution does not modify TextFlow inline runs, NoteInventory, or SectionMap.
+BookGraph assembly maps TextUnit identities to graph nodes, creates
+`references_note` edges, and writes `target_note_id` only into its own assembled
+BookGraph copy. Existing canonical-v1 and shadow BookGraph functions that mutate a
+copied graph are compatibility behavior, not the target artifact boundary.
 
-Phase 4 暂不做：
+MinerU `ref_text` remains a parser hint rather than a canonical top-level note type.
+The parser adapter normalizes it into observed evidence; NoteSystemReview,
+NoteMarkerReview, TextFlow, and NoteInventory determine what can be asserted.
 
-- 不基于注释正文内容语义匹配 marker 到章末注或书末注；只允许显式“注释”结构、scope 和 marker 唯一性足够时做确定性关联。
-- 不调用 LLM 修复 note/ref。
-- 不把参考文献页、出版后记、版权页语义化。
-- 不决定 EPUB/RAG 如何消费 note。
+This phase does not:
 
-后续 Phase 5 会在这个基础上引入 LLM/视觉 verifier：确认 front/body/back matter，区分参考文献、出版后记、版权页、章节注释、书末注释和封底等特殊结构，并对 Phase 4 留下的 unresolved/ambiguous note_ref 做加强匹配。
+- infer a target primarily from note prose semantics;
+- invent missing markers or section ownership;
+- change TextUnit boundaries;
+- reclassify reference lists, bibliographies, copyright pages, or postscripts; or
+- decide EPUB/RAG presentation.
 
 ## display_block 定义
 

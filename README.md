@@ -18,18 +18,27 @@ flowchart LR
     ingest["1. Input normalization<br/>Parser to ObservedDocument"]
     evidence["2. Evidence preparation<br/>ObservedIndex and PageLayoutAnalysis"]
     structure["3. Book interpretation<br/>BookSkeleton and PageReview"]
-    text["4. Text structure<br/>TextFlow and SectionMap"]
-    relations["5. Relation resolution<br/>VisualRelationReview and NoteResolution"]
-    assembly["6. Assembly<br/>BookGraph assembler to BookGraph"]
+    review["4. Pre-flow review<br/>Visual relations and note evidence"]
+    text["5. Reading structure<br/>TextFlow, TableFlow, NoteInventory, and SectionMap"]
+    relations["6. Post-section relations<br/>NoteResolution"]
+    assembly["7. Assembly<br/>BookGraph assembler to BookGraph"]
 
-    ingest --> evidence --> structure --> text --> relations --> assembly
+    ingest --> evidence --> structure --> review --> text --> relations --> assembly
 ```
 
 Each stage consumes named upstream artifacts, validates its output, and may be
-materialized for golden review or resume. The current shadow runtime has not reached
-this target yet: PageReview, public BookGraph, and internal canonical can each rebuild
-TextUnits. The migration plan removes that duplication and makes SectionMap consume
-the one validated TextFlow artifact.
+materialized for golden review or resume. Final TextFlow is built once, after
+VisualRelationReview and note-marker review have supplied validated caption and note
+evidence. SectionMap then consumes that TextFlow together with TableFlow,
+VisualRelationReview, and NoteInventory. The current implementation has only the
+TextFlow foundation and in-progress TableFlow/SectionMap path; it has not reached this
+revised target. The release EPUB/RAG path and legacy BookGraph projections have not
+yet been switched to the artifact bundle.
+
+The new pre-SectionMap boundaries are documented in
+[VisualRelationReview before TextFlow](docs/visual-relation-review-design.md),
+[note processing before and after SectionMap](docs/note-processing-design.md), and
+[the revised implementation plan](docs/section-map-upstream-replan.md).
 
 Pre-release artifact schemas may use temporary `0.x-shadow` versions and change
 incompatibly; development artifacts and goldens are regenerated instead of migrated.

@@ -11,7 +11,7 @@ through a rigid linear pipeline. Each builder consumes named upstream artifacts,
 returns a new immutable artifact, and performs each deterministic computation once.
 
 One overview diagram cannot legibly show both stage order and every fan-in edge. The
-overview therefore shows only the six execution phases; the I/O table is the
+overview therefore shows only the seven execution phases; the I/O table is the
 authoritative dependency definition.
 
 ```mermaid
@@ -19,11 +19,12 @@ flowchart LR
     ingest["1. Input normalization<br/>Parser to ObservedDocument"]
     evidence["2. Evidence preparation<br/>ObservedIndex, PageLayoutAnalysis, PageAssets"]
     structure["3. Book interpretation<br/>BookSkeleton and PageReview"]
-    text["4. Text structure<br/>TextFlow and SectionMap"]
-    relations["5. Relation resolution<br/>VisualRelationReview and NoteResolution"]
-    assembly["6. Assembly<br/>BookGraph assembler to public and internal views"]
+    review["4. Pre-flow review<br/>Visual relations and note evidence"]
+    text["5. Reading structure<br/>TextFlow, TableFlow, NoteInventory, and SectionMap"]
+    relations["6. Post-section relations<br/>NoteResolution"]
+    assembly["7. Assembly<br/>BookGraph assembler to public and internal views"]
 
-    ingest --> evidence --> structure --> text --> relations --> assembly
+    ingest --> evidence --> structure --> review --> text --> relations --> assembly
 ```
 
 | Builder or stage | Required inputs | Output | Acceptance gate |
@@ -34,28 +35,40 @@ flowchart LR
 | Page layout | `ObservedIndex` | `PageLayoutAnalysis` | Contract and geometry characterization tests |
 | Page review | `BookSkeleton`, `PageLayoutAnalysis` | `PageReview` | Staged regeneration and 13-book PageReview golden comparison |
 | Page assets | `ObservedDocument`, `PageReview` | `PageAssets` | Asset provenance and page-action validation |
-| Text flow | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, `PageReview` | `TextFlow` | 13-book smoke; one TextFlow build per workflow run |
-| Section map | `BookSkeleton`, `PageReview`, `TextFlow` | `SectionMap` | Task 2/3 automated gates; Task 4 manual acceptance |
-| Visual relations | `ObservedIndex`, `PageReview`, `PageAssets` | `VisualRelationReview` | Relation and unpaired-endpoint validation |
-| Note resolution | `TextFlow`, `SectionMap` | `NoteResolution` | Reference, scope, and unresolved-case validation |
+| Visual relations | `ObservedIndex`, `PageLayoutAnalysis`, `PageReview`, `PageAssets` | `VisualRelationReview` | Relation, endpoint-kind, ownership, and unpaired-endpoint validation |
+| Note systems | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, `PageReview`, `PageAssets` | `NoteSystemReview` | 13-book system/range/scope audit; mixed systems remain separate |
+| Note marker plan | `ObservedIndex`, `PageLayoutAnalysis`, `NoteSystemReview` | `NoteMarkerReviewPlan` | Every review request has a bounded region and structural reason |
+| Note marker review | `ObservedIndex`, `PageAssets`, `NoteMarkerReviewPlan` | `NoteMarkerReview` | Marker/anchor/provenance validation; absent, failed, and unresolved remain distinct |
+| Text flow | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, `PageReview`, `VisualRelationReview`, `NoteSystemReview`, `NoteMarkerReview` | `TextFlow` | 13-book freeze; one TextFlow build per workflow run |
+| Table flow | `ObservedDocument`, `ObservedIndex`, resolved `PageReview` | `TableFlow` | Parser-neutral table contract tests; every table observation consumed, excluded, or unresolved |
+| Note inventory | `TextFlow`, `NoteSystemReview`, `NoteMarkerReview` | `NoteInventory` | Definition/reference/group coverage; no dangling TextUnit or inline-run ids |
+| Section map | `BookSkeleton`, `PageReview`, `TextFlow`, `TableFlow`, `VisualRelationReview`, `NoteInventory` | `SectionMap` | Automated membership gates; Task 4 manual acceptance |
+| Note resolution | `NoteInventory`, `SectionMap` | `NoteResolution` | Reference, scope, and unresolved-case validation |
 | BookGraph assembler | Validated `CanonicalArtifactBundle` | Public `BookGraph` and internal canonical view | Projection parity; no upstream recomputation |
 
 Use small local diagrams when a fan-in deserves explanation. For example, the core
 page/text/section dependencies are:
 
 ```mermaid
-flowchart LR
-    skeleton["BookSkeleton"] --> review["PageReview"]
-    layout["PageLayoutAnalysis"] --> review
+flowchart TD
+    base["Observed evidence, BookSkeleton,<br/>resolved PageReview, and PageAssets"]
+    visual["VisualRelationReview"]
+    noteSystems["NoteSystemReview"]
+    noteMarkers["NoteMarkerReviewPlan and NoteMarkerReview"]
+    flow["TextFlow"]
+    tables["TableFlow"]
+    inventory["NoteInventory"]
+    section["SectionMap"]
 
-    index["ObservedIndex"] --> flow["TextFlow"]
-    layout --> flow
-    skeleton --> flow
-    review --> flow
-
-    skeleton --> section["SectionMap"]
-    review --> section
+    base --> visual --> flow
+    base --> noteSystems --> noteMarkers --> flow
+    base --> tables
+    flow --> inventory
+    noteSystems --> inventory
     flow --> section
+    tables --> section
+    visual --> section
+    inventory --> section
 ```
 
 The important boundaries are:
@@ -67,76 +80,104 @@ The important boundaries are:
 - `PageReview` combines `PageLayoutAnalysis` with `BookSkeleton`. Skeleton supplies TOC
   pages, provisional matter boundaries, and title-start anchors; PageReview does not
   turn those anchors into logical section membership.
-- `TextFlow` is built once after Skeleton and resolved PageReview. It is the only stage
-  that creates TextUnits and classifies `heading`, `paragraph`, `display_block`,
-  `list_item`, and `footnote`. Verified Skeleton title-observation groups are protected
-  structural boundaries, and PageReview-excluded pages do not enter reading flow. Its
-  ordered TextUnits are authoritative for downstream structure; the target does not
-  add a second competing `lu...` identity namespace.
-- `SectionMap` assigns TextFlow units and physical pages to Skeleton sections. It does
-  not classify paragraphs or repair an invalid TextFlow boundary.
+- `VisualRelationReview` runs before final TextFlow. It groups existing visual and
+  caption observations without rewriting their content. TextFlow then materializes
+  caption observations as `caption`, not as a provisional `display_block`. SectionMap
+  consumes the validated group and never invents `caption_of`.
+- Note handling is split before and after SectionMap. `NoteSystemReview` identifies
+  page-foot, chapter-end, book-end, and mixed systems. `NoteMarkerReview` recognizes
+  printed definition/reference markers from bounded visual evidence. TextFlow inserts
+  unresolved `note_ref` inline runs; NoteInventory audits them before SectionMap; and
+  NoteResolution later emits target relations without modifying any earlier artifact.
+- `TextFlow` is built once after Skeleton, resolved PageReview, and the required visual
+  and note reviews. It is the only stage that creates TextUnits and classifies
+  `heading`, `paragraph`, `display_block`, `caption`, `list_item`, and `footnote`.
+  Verified Skeleton title-observation groups are protected structural boundaries, and
+  PageReview-excluded pages do not enter ordinary reading flow. Its ordered TextUnits
+  are authoritative for downstream structure; the target does not add a second
+  competing `lu...` identity namespace.
+- `TableFlow` is also built only after resolved PageReview. Parser adapters first
+  normalize source tables into parser-neutral observation attributes. TableFlow
+  serializes readable tables and joins their explicit continuation observations.
+  PageReview-excluded table observations remain excluded; when PageReview splits one
+  logical multi-page table between included and excluded pages, the whole candidate is
+  unresolved rather than materializing a misleading half-table.
+- `NoteInventory` is materialized once from final TextFlow and the validated note
+  reviews. It inventories definitions, inline references, note groups, and unresolved
+  coverage; it does not publish final targets.
+- `SectionMap` assigns TextFlow units, TableFlow tables, visual groups, note groups,
+  and physical pages to Skeleton sections. It does not classify paragraphs, repair an
+  invalid TextFlow boundary, discover image-caption relations, resolve note targets,
+  or reinterpret an unresolved table candidate.
 - The current `materialize_v2_page_assets` returns an ObservedDocument copy with
   retained whole-page PNG records. The target DAG materializes those records as a
   separate `PageAssets` artifact so ObservedDocument remains immutable. Neither form
   performs OCR repair, image cropping, caption matching, or section assignment.
-- `VisualRelationReview` and `NoteResolution` are sibling relation artifacts rather
-  than hidden repair passes inside BookGraph assembly.
+- Every artifact is immutable after validation. Downstream builders may copy and
+  project its facts, but never edit it. In particular, SectionMap does not change
+  TextFlow inline runs, NoteResolution does not write targets back into TextFlow, and
+  BookGraph assembly writes resolved targets only into the assembled BookGraph copy.
 - The assembler consumes completed artifacts and does no parser repair, TextUnit
   aggregation, page review, or section-boundary discovery. Public BookGraph and
   internal canonical are two views of the same assembled result.
 - EPUB and RAG still consume `canonical.json` by default. BookGraph is the migration
   target, not the current release input.
 
+Detailed contracts and the revised implementation order are recorded in:
+
+- [VisualRelationReview before TextFlow](visual-relation-review-design.md)
+- [note processing before and after SectionMap](note-processing-design.md)
+- [the SectionMap upstream replan](section-map-upstream-replan.md)
+
 ## Current Canonical-v2 Runtime Flow
 
-This diagram follows the artifacts produced by `build_v2_artifacts()` and the current
-observed BookGraph builder. Builders sit between their inputs and outputs, so the
-data dependencies remain visible without call-and-return arrows.
+This diagram follows the in-progress `build_canonical_artifacts()` workflow on the
+current development branch. It deliberately labels outputs whose target inputs do not
+exist yet.
 
 ```mermaid
 flowchart TD
-    raw["Raw MinerU inputs"] --> build_observed["1. Build ObservedDocument"]
-    build_observed --> observed["ObservedDocument"]
+    observed["ObservedDocument"]
+    index["ObservedIndex"]
+    layout["PageLayoutAnalysis"]
+    skeleton["BookSkeleton"]
+    review["Resolved PageReview"]
+    assets["PageAssets"]
+    currentFlow["Current TextFlow foundation"]
+    currentTables["In-progress TableFlow"]
+    currentSection["In-progress SectionMap"]
+    missing["Missing target inputs:<br/>VisualRelationReview and note artifacts"]
 
-    observed --> build_skeleton["2. Build BookSkeleton: optional TOC LLM"]
-    build_skeleton --> skeleton["BookSkeleton"]
-
-    observed --> build_review["3. Build PageReview: rebuild TextUnits for layout"]
-    skeleton --> build_review
-    build_review --> page_review["PageReview"]
-
-    page_review --> unresolved{"Candidates unresolved and PageReview LLM disabled?"}
-    unresolved -->|"Yes"| intermediate["Return intermediate artifacts only"]
-    unresolved -->|"No"| validate["4. Validate resolved PageReview"]
-
-    observed --> materialize["5. Materialize retained physical pages"]
-    validate --> materialize
-    materialize --> observed_assets["ObservedDocument with 150-DPI page assets"]
-
-    subgraph duplicated_build["Current implementation: rebuild the graph pipeline twice"]
-        public_builder["6a. Rebuild TextUnits and public graph artifacts"]
-        internal_builder["6b. Rebuild TextUnits and internal artifacts"]
-    end
-    observed_assets --> public_builder
-    page_review --> public_builder
-    observed_assets --> internal_builder
-    page_review --> internal_builder
-    public_builder --> public_graph["Public BookGraph"]
-    internal_builder --> internal_canonical["Internal canonical"]
+    observed --> index
+    observed --> layout
+    index --> skeleton
+    skeleton --> review
+    layout --> review
+    observed --> assets
+    review --> assets
+    index --> currentFlow
+    layout --> currentFlow
+    skeleton --> currentFlow
+    review --> currentFlow
+    observed --> currentTables
+    index --> currentTables
+    review --> currentTables
+    currentFlow --> currentSection
+    currentTables --> currentSection
+    skeleton --> currentSection
+    review --> currentSection
+    missing -.-> currentFlow
+    missing -.-> currentSection
 ```
 
-BookSkeleton may use an optional TOC LLM, but its physical-page anchors are resolved
-against `ObservedDocument` evidence. The current PageReview path builds TextUnits once
-to derive its layout audit. Public BookGraph construction and internal-canonical
-construction then each call `build_observed_bookgraph_artifacts()` independently and
-rebuild TextUnits again. A complete run can therefore generate TextUnits three times.
-This is implementation debt, not an intended modularity trade-off.
-
-`SectionMap`, `VisualRelationReview`, the target TextFlow artifact, and the shared
-BookGraph assembler are not present in this runtime yet. Migration to the target DAG
-must first separate reusable `PageLayoutAnalysis` from final TextFlow, then build one
-TextFlow artifact after resolved PageReview and share the same artifact bundle across
-SectionMap, public BookGraph, and internal canonical.
+The framework-neutral `build_canonical_artifacts()` workflow currently materializes
+`ObservedIndex`, `PageLayoutAnalysis`, resolved `PageReview`, a TextFlow foundation,
+`TableFlow`, and the in-progress SectionMap bundle. It does not yet materialize
+VisualRelationReview, the note review artifacts, or NoteInventory. Consequently, its
+current TextFlow and SectionMap outputs are development review artifacts, not the
+accepted final forms described by the target DAG. The release-facing observed
+BookGraph and internal-canonical builders still use their separate legacy path and
+may rebuild their own units. Switching those projections remains later work.
 
 ## Artifact Materialization and Schema Lifecycle
 
@@ -170,8 +211,11 @@ decisions into prompts.
   deterministic scheduling, artifact storage, materialization, and resume policy. It
   contains no parser-specific or canonical domain decisions.
 - `inkline-parser-mineru` implements the protocol and owns MinerU-specific extraction,
-  normalization, layout repair, note recovery, marker-locator prompts/evidence,
-  and raw outputs. It may use `inkline-llm` for Qwen calls.
+  normalization, raw outputs, and legacy canonical-v1 repairs. For canonical v2 it may
+  expose parser hints through ObservedDocument, but it does not own final visual groups,
+  note systems, marker review, or note resolution. Parser-neutral review prompts,
+  evidence schemas, and validators live with their canonical domain artifacts and may
+  use `inkline-llm` for transport.
 - A future `inkline-parser-paddle` package should implement the same protocol.
 - `inkline-epub` consumes canonical JSON only.
 - `inkline-rag` consumes canonical JSON or chunk JSONL only. Answer-generation

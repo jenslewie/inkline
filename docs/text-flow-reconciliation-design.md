@@ -2,8 +2,11 @@
 
 ## Status
 
-Approved direction, implementation and 13-book TextFlow acceptance in progress,
-2026-07-30.
+Classification and reconciliation foundation implemented on
+`codex/text-flow-layout-reconciliation`; final TextFlow acceptance is blocked on
+VisualRelationReview and note review integration, 2026-07-31. The revised
+cross-artifact order is recorded in
+[`section-map-upstream-replan.md`](section-map-upstream-replan.md).
 
 ## Problem
 
@@ -142,7 +145,7 @@ Canonical v1 is a characterization baseline, not a runtime dependency:
 | Explicit cross-page footnote | `接下页`/`接上页` pair and same-lane tail are one note | Footnote reconciliation |
 | Cross-page display block | Compatible set-off fragments are jointly classified and then merged | Layout classification, then display reconciliation |
 | Paragraph misread as display or vice versa | v1 sometimes repaired type during merge | Rejected: classification must be correct before aggregation |
-| Image-caption semantic relation | Preserve image observations and caption display TextUnits without inventing an edge | Deferred to VisualRelationReview; its body-visual acceptance set includes physical page 25 of 《丝绸之路新史》 |
+| Image-caption semantic relation | Preserve image and caption observations without inventing an edge | VisualRelationReview runs before final TextFlow; TextFlow then materializes validated captions as `caption`, not `display_block` |
 
 ## Considered Approaches
 
@@ -194,6 +197,9 @@ Inputs
   PageReview             included text-flow pages
   BookSkeleton           protected direct heading anchors
   PageLayoutAnalysis     normalized page and body-lane profiles
+  VisualRelationReview   validated visual groups and caption observations
+  NoteSystemReview       page/chapter/book and mixed note systems
+  NoteMarkerReview       validated definition/body marker evidence
 
 Pipeline
   -> filter retained observations by PageReview
@@ -205,14 +211,18 @@ Pipeline
   -> homogeneous candidate aggregation
   -> explicit cross-page footnote reconciliation
   -> homogeneous paragraph/display reconciliation across page boundaries
+  -> caption units from validated visual groups
+  -> complete note units and unresolved note_ref inline runs from validated marker evidence
   -> final TextUnit materialization and one-time tu identity assignment
   -> validated TextFlow
+  -> NoteInventory
   -> SectionMap membership
 ```
 
-This task's integration boundary ends at SectionMap. NoteResolution, BookGraph,
-RAG, and EPUB will consume the corrected artifacts in later tasks, but are not
-implemented or acceptance-tested here.
+The current branch implements the classification/reconciliation foundation only.
+VisualRelationReview, note review, NoteInventory, final SectionMap, NoteResolution,
+BookGraph, RAG, and EPUB remain separate tasks. TextFlow is not frozen until those
+pre-flow inputs are integrated and the 13-book comparison passes.
 
 `PageLayoutAnalysis` is an input to layout segmentation and classification. It
 provides normalized page dimensions, body lanes, ordered visual-region
@@ -420,11 +430,11 @@ For either type, a merge is allowed only when:
 - no heading, direct Skeleton anchor, differently typed content unit, list
   item, table-related content, or unrelated unit intervenes.
 
-For paragraphs only, a sequence of display records on the right page may be
-transparent when each record is geometrically associated with an ordered
-`image_region` or `table_region`, the visual starts in the page-top content
-zone, and the right paragraph starts immediately after the combined
-visual/caption corridor. Those display records remain independent TextUnits.
+For paragraphs only, a validated visual group or structured table on the right page
+may be transparent when it starts in the page-top content zone and the right
+paragraph starts immediately after the combined visual/caption corridor. Caption
+records remain independent `caption` TextUnits; table caption ownership remains in
+TableFlow.
 The same evidence allows a top-of-page image with no caption. It does not
 permit a paragraph to merge with a display block.
 
@@ -563,8 +573,9 @@ Implementation follows RED-GREEN TDD.
    - observations `obs001399`, `obs001405`, and their continuation tail form
      one cross-page footnote matching the canonical v1 behavior.
 14. Add real-book regressions from the 2026-07-29 audit:
-   - `obs000249` and `obs000256` are one paragraph while `obs000254` and
-     `obs000255` remain independent caption/display units;
+   - `obs000249` and `obs000256` are one paragraph while `obs000253`,
+     `obs000254`, and `obs000255` form a validated visual group whose text
+     materializes as caption units;
    - `obs000378`/`obs000383` and `obs000384`/`obs000388` are paragraph
      continuations across top-of-page images;
    - `obs000419` and `obs000420` are one same-page multi-paragraph footnote;
@@ -577,25 +588,32 @@ Implementation follows RED-GREEN TDD.
 15. Add negative tests proving that an independent marked footnote, large
    same-page footnote gap, indented new paragraph, heading, non-approved bridge
    page, and `paragraph`/`display_block` type mismatch all stop reconciliation.
-16. Regenerate all 13 PageReview-dependent TextFlows. Compare classification,
-   logical boundaries, observation coverage, unconsumed evidence, and changed
-   units against the immediately preceding accepted artifacts. Freeze TextFlow
-   only after every unexplained change is resolved.
-17. Only after the TextFlow freeze, regenerate all 13 SectionMaps. Compare
-   counts, ownership, unresolved boundaries, observation coverage, and changed
-   units against the immediately preceding accepted artifacts. Stop on any
-   unexplained change.
-18. Run focused pytest, the 13-book real-book suite, Ruff, Pylint, and Pyright.
-19. Present the refreshed Task 4 manual checkpoint before committing the active
-   SectionMap implementation.
+16. Validate and merge the current classification/reconciliation foundation without
+   declaring TextFlow final.
+17. Implement and freeze VisualRelationReview, NoteSystemReview, and
+   NoteMarkerReview as separate upstream artifacts.
+18. Integrate those immutable artifacts into TextFlow, then regenerate all 13
+   TextFlows. Compare classification, logical boundaries, observation coverage,
+   captions, note units, inline runs, unconsumed evidence, and changed units against
+   the immediately preceding accepted artifacts. Freeze TextFlow only after every
+   unexplained change is resolved.
+19. Build NoteInventory and finalize TableFlow independently.
+20. Only then rebuild all 13 SectionMaps. Compare text, table, visual-group,
+   note-group, page, range, and unresolved ownership. Stop on any unexplained change.
+21. Run focused pytest, the 13-book real-book suite, Ruff, Pylint, and Pyright at each
+   branch gate.
+22. Present the refreshed Task 4 manual checkpoint only after the new upstream
+   artifacts are frozen.
 
 ## Non-goals
 
 - Reusing MinerU canonical blocks as TextFlow input.
 - Semantic sentence-completion or topic-based merging.
 - Guessing unmarked cross-page footnote continuation.
-- Semantic image-caption pairing or a general redesign of heading, list,
-  table, figure-caption, or visual-page classification.
+- Implementing VisualRelationReview itself; it is now a required external input to
+  final TextFlow.
+- Implementing note-system or marker review itself; they are required external
+  inputs to final TextFlow.
 - Reclassifying paragraph/display types during reconciliation.
 - Table continuation.
 - Changing SectionMap membership rules.
