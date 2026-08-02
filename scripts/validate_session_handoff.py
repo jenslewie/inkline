@@ -342,27 +342,125 @@ def _validate_no_legacy_grafts(repo: Path, errors: list[str]) -> None:
     )
 
 
-def _validate_clean_tracked_state(repo: Path, errors: list[str]) -> None:
+def _tracked_state_label(relative_path: Path | None) -> str:
+    if relative_path is None:
+        return "repository"
+    return f"populated submodule {relative_path.as_posix()!r}"
+
+
+def _tracked_submodule_paths(
+    repo: Path,
+    relative_path: Path | None,
+    errors: list[str],
+) -> list[Path] | None:
+    result = _git(repo, ["ls-files", "--stage", "-z"])
+    label = _tracked_state_label(relative_path)
+    if result.returncode != 0:
+        errors.append(f"{label}: cannot inspect populated submodules for status complete")
+        return None
+    submodule_paths: list[Path] = []
+    for entry in result.stdout.split("\0"):
+        if not entry:
+            continue
+        metadata, separator, path = entry.partition("\t")
+        metadata_parts = metadata.split()
+        if not separator or len(metadata_parts) != 3:
+            errors.append(f"{label}: cannot parse tracked index while inspecting submodules")
+            return None
+        mode, _object_id, _stage = metadata_parts
+        if mode == "160000":
+            submodule_paths.append(Path(path))
+    return submodule_paths
+
+
+def _populated_submodule(
+    child: Path,
+    relative_path: Path,
+    errors: list[str],
+) -> Path | None:
+    git_metadata = child / ".git"
+    try:
+        git_metadata.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        errors.append(
+            f"populated submodule {relative_path.as_posix()!r}: "
+            f"cannot inspect Git metadata: {error}"
+        )
+        return None
+    top_level_result = _git(child, ["rev-parse", "--show-toplevel"])
+    if top_level_result.returncode != 0 or not top_level_result.stdout.strip():
+        errors.append(
+            f"populated submodule {relative_path.as_posix()!r}: "
+            "cannot inspect tracked worktree and index for status complete"
+        )
+        return None
+    try:
+        resolved_child = child.resolve(strict=True)
+        reported_top_level = Path(top_level_result.stdout.strip()).resolve(strict=True)
+    except OSError as error:
+        errors.append(
+            f"populated submodule {relative_path.as_posix()!r}: cannot resolve worktree: {error}"
+        )
+        return None
+    if resolved_child != reported_top_level:
+        errors.append(
+            f"populated submodule {relative_path.as_posix()!r}: "
+            "Git top level does not match the indexed submodule path"
+        )
+        return None
+    return resolved_child
+
+
+def _validate_repository_tracked_state(
+    repo: Path,
+    relative_path: Path | None,
+    seen_repositories: set[Path],
+    errors: list[str],
+) -> None:
+    label = _tracked_state_label(relative_path)
     status_result = _git(
         repo,
         ["status", "--porcelain", "--untracked-files=no", "--ignore-submodules=none"],
     )
-    if status_result.returncode != 0 or status_result.stdout.strip():
-        errors.append("repository tracked worktree and index must be clean for status complete")
+    if status_result.returncode != 0:
+        errors.append(f"{label}: cannot inspect tracked worktree and index for status complete")
+    elif status_result.stdout.strip():
+        errors.append(f"{label}: tracked worktree and index must be clean for status complete")
     flags_result = _git(repo, ["ls-files", "-v", "-z"])
     if flags_result.returncode != 0:
-        errors.append("cannot inspect tracked index flags for status complete")
-        return
-    flagged = [
-        entry
+        errors.append(f"{label}: cannot inspect tracked index flags for status complete")
+    elif any(
+        entry and (entry[0].islower() or entry[0].upper() == "S")
         for entry in flags_result.stdout.split("\0")
-        if entry and (entry[0].islower() or entry[0].upper() == "S")
-    ]
-    if flagged:
+    ):
         errors.append(
-            "repository tracked index must not contain assume-unchanged or "
+            f"{label}: tracked index must not contain assume-unchanged or "
             "skip-worktree index flags for status complete"
         )
+    submodule_paths = _tracked_submodule_paths(repo, relative_path, errors)
+    if submodule_paths is None:
+        return
+    for submodule_path in submodule_paths:
+        child_relative_path = (
+            submodule_path if relative_path is None else relative_path / submodule_path
+        )
+        child = _populated_submodule(repo / submodule_path, child_relative_path, errors)
+        if child is None or child in seen_repositories:
+            continue
+        seen_repositories.add(child)
+        _validate_repository_tracked_state(
+            child,
+            child_relative_path,
+            seen_repositories,
+            errors,
+        )
+
+
+def _validate_clean_tracked_state(repo: Path, errors: list[str]) -> None:
+    resolved_repo = repo.resolve()
+    _validate_repository_tracked_state(repo, None, {resolved_repo}, errors)
 
 
 def _prepare_handoff_directory(
@@ -630,6 +728,17 @@ def _unfenced_lines(text: str) -> list[str]:
     return lines
 
 
+def _markdown_body(text: str) -> str:
+    lines = text.splitlines()
+    if not lines or lines[0] != "---":
+        return ""
+    try:
+        closing_index = lines.index("---", 1)
+    except ValueError:
+        return ""
+    return "\n".join(lines[closing_index + 1 :])
+
+
 def _validate_review_rounds(
     review_file: Path,
     review: dict[str, str],
@@ -643,9 +752,10 @@ def _validate_review_rounds(
         "review.md",
         errors,
     )
+    review_body = _markdown_body(review_file.read_text(encoding="utf-8"))
     round_headings = [
         line
-        for line in _unfenced_lines(review_file.read_text(encoding="utf-8"))
+        for line in _unfenced_lines(review_body)
         if re.match(r"^ {0,3}###(?!#)[\t ]+Round(?:[\t ]|$)", line) is not None
     ]
     parsed_rounds: list[tuple[int, str]] = []
