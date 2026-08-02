@@ -377,6 +377,7 @@ def test_accepts_nonapproved_terminal_handoff_with_executable_prompt(
         next_task="recover workflow task",
         next_task_kind="documentation",
         review_path="none",
+        handoff_fixers="none",
         handoff_spec_reviewer="none",
         handoff_adversarial_reviewer="none",
     )

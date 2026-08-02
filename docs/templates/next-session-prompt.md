@@ -143,6 +143,8 @@ review_verdict: "{{PREVIOUS_REVIEW_VERDICT}}"
 
 9. review 与 handoff 必须记录实际 agent ids、candidate/approved commit、findings、
    验证结果、产物路径、regression、未解决问题和下一任务前置条件。
+   Agent ids 使用真实的 slash-delimited task path 或只包含字母、数字、`.`、`_`、
+   `-` 的简单 token，不得使用 YAML collection、空白或其他标点伪值。
 10. 下一轮提示词必须引用实际 handoff、review 和 approved commit，不得残留任何
     双花括号占位符。
 11. 运行以下 mandatory completion gate：
@@ -154,6 +156,12 @@ review_verdict: "{{PREVIOUS_REVIEW_VERDICT}}"
     ```
 
 12. validator exit zero 后停止，不要在本会话开始下一任务。
+
+`{{HANDOFF_RUN_ID}}` 必须是 `docs/handovers/session-handoffs/` 的单一直接子目录。
+Front matter 中的 `handoff_path` 和 retained `review_path` 只能使用 exact basename
+或当前 record 的 exact absolute lexical path，不得使用 `./`、`..` 或 symlink
+alias。`complete` 前还必须确认 tracked index 没有 `assume-unchanged` 或
+`skip-worktree` flags。
 
 `prompt_mode` 必须与 previous handoff 一致：`complete -> implementation`、
 `blocked -> recovery`、`superseded -> diagnosis`。本模板只用于 terminal handoff

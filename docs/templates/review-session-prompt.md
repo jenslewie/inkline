@@ -29,6 +29,10 @@ findings、证据、复现命令和 verdict；不得生成 `handoff.md`，不得
 `complete`。Root 收到结果后追加 review round；如需修复，必须交给 fixer
 subagent，并对新 candidate 重新执行所有 required review phases。
 
+`review_path` 只能使用当前 `review.md` 的 exact basename 或 exact absolute lexical
+path，不得使用 `./`、`..` 或 symlink alias。`reviewer_agent_id` 使用真实的
+slash-delimited task path 或只包含字母、数字、`.`、`_`、`-` 的简单 token。
+
 ## Review boundary
 
 - Task specification: {{TASK_SPECIFICATION}}

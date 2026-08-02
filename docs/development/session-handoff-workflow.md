@@ -76,6 +76,13 @@ Use a sortable run id such as:
 2026-07-31T153000-contract-freeze
 ```
 
+The run directory is exactly one direct child of
+`docs/handovers/session-handoffs/`; the root itself and deeper nesting are invalid.
+Structured references to `handoff.md` and `review.md` use either the exact basename
+or the current record's exact absolute lexical path. Do not use `./`, `..`, alternate
+symlink names, or any other resolve-equivalent alias. The validator checks the
+configured record itself and rejects symlinked record files.
+
 Book-processing data, acceptance reports, and other user-reviewable data outputs
 belong under:
 
@@ -136,7 +143,10 @@ exclusive except that one documentation reviewer may cover both review phases.
 comma-separated list of non-empty, unique identities. Empty entries, leading or
 trailing commas, repeated identities, and mixing `none` with a real identity are
 invalid in every workflow state, including optional pre-review implementers and a
-no-fix completed task.
+no-fix completed task. Each identity is either a slash-delimited agent task path,
+such as `/root/workflow_spec`, or a simple token. Every path component contains only
+letters, digits, `.`, `_`, and `-`; YAML collection spellings such as `[]` or `{}`,
+whitespace, and other punctuation are invalid.
 
 ## Task lifecycle
 
@@ -238,9 +248,13 @@ Every round heading is canonical and commit-bound:
 ```
 
 Round numbers are contiguous from 1. The validator ignores examples inside fenced
-code blocks, rejects every other `### Round` form, checks each hash is a commit object
-rather than a tag or another Git object, and requires the final heading to name the
-structured final candidate and all phases that actually ran in that final round.
+code blocks, treats an unfenced heading candidate indented by zero to three spaces as
+a candidate, and accepts only the exact unindented canonical form. Four-space
+indented code is ignored. It checks each hash is a commit object rather than a tag or
+another Git object, requires the prerequisite to be an ancestor of round 1, requires
+each round commit to be an ancestor of the next, and requires the final heading to
+name the structured final candidate and all phases that actually ran in that final
+round.
 Fence detection follows the CommonMark boundary needed here: an opener or closer is
 indented by at most three spaces, uses at least three matching backticks or tildes,
 and a closer uses the same character with length at least that of its opener. Thus a
@@ -327,24 +341,27 @@ implementer/fixer/reviewer identities, and exact commit. Its structured final ro
 must record both required phases as `approved` for the same final candidate,
 `unresolved_blocking_count: 0`, and `manual_gate: passed|not_required`. Its
 `worktree_state` must be `clean`, and the validator independently rejects staged or
-unstaged tracked changes while ignoring untracked and ignored local artifacts.
+unstaged tracked changes while ignoring untracked and ignored local artifacts. It
+also rejects any tracked index entry marked `assume-unchanged` or `skip-worktree`,
+because those flags can hide tracked changes from ordinary status output.
 
 Pre-review `blocked` uses `review_verdict: not_run`, `review_path: none`, and reviewer
-ids `none`. Post-review `blocked` uses `review_verdict: changes_requested`, retains
-the append-only `review.md`, and records actual evidence for every phase that ran.
+ids and `fixer_agent_ids` all set to `none`. Post-review `blocked` uses
+`review_verdict: changes_requested`, retains the append-only `review.md`, and records
+actual evidence for every phase that ran.
 Each phase is either `approved|changes_requested` with its reviewer and the result
 candidate, or `not_run|unavailable` with commit and reviewer both `none`; at least one
 phase must have run. It has a positive `unresolved_blocking_count`. Both phases may
 be approved when `terminal_reason` identifies a separate user or manual blocker.
 
 A pre-review `superseded` task uses `review_verdict: not_applicable`,
-`review_path: none`, and reviewer ids `none`. If supersession happens after review
-started, it uses `review_verdict: superseded`, retains `review.md`, records the same
-run/unrun phase evidence, and may have a zero blocking count because replacement—not
-a defect—ended the task. All non-complete forms use `approved_commit: none`, a
-non-empty `terminal_reason`, and an executable successor (`recovery` for blocked,
-`diagnosis` for superseded). Their `result_commit` records the real current `HEAD`,
-not an approved product baseline.
+`review_path: none`, and reviewer ids and `fixer_agent_ids` all set to `none`. If
+supersession happens after review started, it uses `review_verdict: superseded`,
+retains `review.md`, records the same run/unrun phase evidence, and may have a zero
+blocking count because replacement—not a defect—ended the task. All non-complete
+forms use `approved_commit: none`, a non-empty `terminal_reason`, and an executable
+successor (`recovery` for blocked, `diagnosis` for superseded). Their `result_commit`
+records the real current `HEAD`, not an approved product baseline.
 Do not report `complete` merely because changes were committed or tests passed.
 
 ### 6. Generate the next-session prompt
@@ -400,11 +417,12 @@ stale review evidence, overlapping or state-inappropriate roles, incomplete or
 noncanonical final-round metadata, non-approved manual gates, nonexistent or
 non-commit Git objects, invalid ancestry, a result different from the supplied commit
 or current `HEAD`, branch drift, and cross-file metadata mismatches. It accepts only
-terminal run directories below the current repository's
-`docs/handovers/session-handoffs/` root and rejects a symlinked run directory, any
-repository-relative symlinked parent, and symlinked record files. Every terminal
-handoff has non-empty `branch`, `worktree_state`, and `generated_at`; every retained
-review has non-empty `reviewed_at`.
+single-level terminal run directories directly below the current repository's
+`docs/handovers/session-handoffs/` root and rejects the root itself, deeper nesting,
+a symlinked run directory, any repository-relative symlinked parent, symlinked record
+files, and noncanonical record-path aliases. Every terminal handoff has non-empty
+`branch`, `worktree_state`, and `generated_at`; every retained review has non-empty
+`reviewed_at`.
 
 This validator is a static consistency gate. It cannot prove that an agent id maps to
 the claimed process, that reviewer context was genuinely fresh, that a reviewer was

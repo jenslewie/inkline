@@ -34,12 +34,14 @@ For any task that changes tracked implementation, contract, test, or workflow fi
    commit graph and current `HEAD`. The root, implementer, and each required reviewer
    must be real agent identities; `fixer_agent_ids` may be `none` when no fix round
    occurred. A `complete` handoff must declare and actually have a clean tracked
-   index and worktree.
+   index and worktree, with no tracked path marked `assume-unchanged` or
+   `skip-worktree`.
 8. `handoff.md` is generated only for terminal status `complete`, `blocked`, or
    `superseded`. Review workflow states such as `ready_for_review` belong in
    `review.md`, never in handoff status. If review must continue in another session,
    use `docs/templates/review-session-prompt.md`; do not fabricate a terminal
-   handoff. A pre-review blocker is recorded as `not_run` without reviewer evidence.
+   handoff. A pre-review blocker is recorded as `not_run` with reviewer ids and
+   `fixer_agent_ids` all set to `none`.
    A post-review blocker is `changes_requested` and retains every phase that ran;
    a phase that did not run or was unavailable records commit and reviewer as `none`.
    A task superseded after review started uses review verdict `superseded` and
@@ -47,12 +49,18 @@ For any task that changes tracked implementation, contract, test, or workflow fi
 9. Every recorded review round heading uses exactly
    "### Round N: `<40-character-commit>`" outside fenced code blocks. Round numbers
    are contiguous from 1, every round commit is a real commit object, and the final
-   round names the terminal candidate.
-10. Terminal workflow records must live below the current repository's
-    `docs/handovers/session-handoffs/` directory without symlinked run directories,
-    repository-relative parent directories, or record files. `review_path: none`
-    requires `review.md` to be absent; `next_task: none` requires
-    `next-session-prompt.md` to be absent.
+   round names the terminal candidate. The prerequisite must be an ancestor of
+   round 1, and each round commit must be an ancestor of the next round.
+10. Agent identities use slash-delimited agent task paths or simple tokens whose
+    components contain only letters, digits, `.`, `_`, and `-`. YAML collection
+    spellings, whitespace, and other punctuation are not identities.
+11. A terminal workflow directory must be one direct run-id child of the current
+    repository's `docs/handovers/session-handoffs/` directory, without symlinked run
+    directories, repository-relative parent directories, or record files.
+    Configured record paths use only the exact basename or that record's exact
+    absolute lexical path; aliases containing `.`, `..`, alternate names, or
+    symlinks are invalid. `review_path: none` requires `review.md` to be absent;
+    `next_task: none` requires `next-session-prompt.md` to be absent.
 
 ## Multi-session development chains
 

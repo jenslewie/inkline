@@ -15,6 +15,7 @@ TASK_KINDS = {"code", "documentation"}
 RUN_REVIEW_VERDICTS = {"approved", "changes_requested"}
 UNRUN_REVIEW_VERDICTS = {"not_run", "unavailable"}
 ROUND_HEADING_PATTERN = re.compile(r"### Round ([1-9][0-9]*): `([0-9a-f]{40})`")
+AGENT_ID_PATTERN = re.compile(r"/?[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*")
 
 
 def _front_matter(path: Path, errors: list[str]) -> dict[str, str]:
@@ -84,6 +85,14 @@ def _agent_ids(
                 "agent ids cannot mix 'none' with real identities"
             )
         return {agent_id for agent_id in agent_id_list if agent_id != "none"}
+    invalid_ids = [
+        agent_id for agent_id in agent_id_list if AGENT_ID_PATTERN.fullmatch(agent_id) is None
+    ]
+    if invalid_ids and field is not None and source is not None and errors is not None:
+        errors.append(
+            f"{source}: {field} must contain valid agent identity tokens; "
+            f"invalid: {', '.join(invalid_ids)}"
+        )
     agent_ids = set(agent_id_list)
     if (
         len(agent_ids) != len(agent_id_list)
@@ -120,6 +129,8 @@ def _single_agent_id(
         if not allow_none:
             errors.append(f"{source}: {field} must identify a real agent, not 'none'")
         return set()
+    if value and AGENT_ID_PATTERN.fullmatch(value) is None:
+        errors.append(f"{source}: {field} must contain a valid agent identity token")
     return {value} if value else set()
 
 
@@ -150,16 +161,12 @@ def _configured_record_path(
 ) -> Path | None:
     if not configured:
         return None
-    path = Path(configured)
-    if not path.is_absolute():
-        path = directory / path
     expected = directory / expected_name
-    try:
-        if path.resolve() != expected.resolve():
-            errors.append(f"{source}: path must name the current {expected_name}")
-            return None
-    except OSError as error:
-        errors.append(f"{source}: cannot resolve path: {error}")
+    if configured not in {expected_name, str(expected)}:
+        errors.append(
+            f"{source}: path must be the canonical {expected_name!r} basename or "
+            "the current record's exact absolute lexical path"
+        )
         return None
     return _record_file(directory, expected_name, required=True, errors=errors)
 
@@ -171,6 +178,26 @@ def _git(repo: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
     )
+
+
+def _validate_clean_tracked_state(repo: Path, errors: list[str]) -> None:
+    status_result = _git(repo, ["status", "--porcelain", "--untracked-files=no"])
+    if status_result.returncode != 0 or status_result.stdout.strip():
+        errors.append("repository tracked worktree and index must be clean for status complete")
+    flags_result = _git(repo, ["ls-files", "-v", "-z"])
+    if flags_result.returncode != 0:
+        errors.append("cannot inspect tracked index flags for status complete")
+        return
+    flagged = [
+        entry
+        for entry in flags_result.stdout.split("\0")
+        if entry and (entry[0].islower() or entry[0].upper() == "S")
+    ]
+    if flagged:
+        errors.append(
+            "repository tracked index must not contain assume-unchanged or "
+            "skip-worktree index flags for status complete"
+        )
 
 
 def _prepare_handoff_directory(
@@ -207,6 +234,12 @@ def _prepare_handoff_directory(
             return None
 
     required_root = repository / "docs" / "handovers" / "session-handoffs"
+    if raw_directory.parent != required_root:
+        errors.append(
+            "terminal handoff directory must be a single direct child of "
+            "docs/handovers/session-handoffs/"
+        )
+        return None
     try:
         raw_directory.relative_to(required_root)
     except ValueError:
@@ -288,9 +321,7 @@ def _validate_repository_state(
     if branch_result.returncode != 0 or branch_result.stdout.strip() != declared_branch:
         errors.append("handoff.md: branch must match the repository current branch")
     if require_clean:
-        status_result = _git(repo, ["status", "--porcelain", "--untracked-files=no"])
-        if status_result.returncode != 0 or status_result.stdout.strip():
-            errors.append("repository tracked worktree and index must be clean for status complete")
+        _validate_clean_tracked_state(repo, errors)
 
 
 def _validate_task_kind(metadata: dict[str, str], source: str, errors: list[str]) -> str:
@@ -450,9 +481,10 @@ def _validate_review_rounds(
     round_headings = [
         line
         for line in _unfenced_lines(review_file.read_text(encoding="utf-8"))
-        if line.startswith("### Round")
+        if re.match(r"^ {0,3}### Round", line) is not None
     ]
     parsed_rounds: list[tuple[int, str]] = []
+    commits_valid = True
     for heading in round_headings:
         match = ROUND_HEADING_PATTERN.fullmatch(heading)
         if match is None:
@@ -464,7 +496,10 @@ def _validate_review_rounds(
         number = int(match.group(1))
         commit = match.group(2)
         parsed_rounds.append((number, commit))
-        _validate_git_commit(repo, commit, f"round_{number}_commit", "review.md", errors)
+        commits_valid = (
+            _validate_git_commit(repo, commit, f"round_{number}_commit", "review.md", errors)
+            and commits_valid
+        )
     recorded_numbers = [number for number, _commit in parsed_rounds]
     if final_round is not None and recorded_numbers != list(range(1, final_round + 1)):
         errors.append(
@@ -475,6 +510,18 @@ def _validate_review_rounds(
         final_heading_number, final_heading_commit = parsed_rounds[-1]
         if final_heading_number == final_round and final_heading_commit != candidate:
             errors.append("review.md: final review round commit must match candidate_commit")
+    prerequisite = review.get("prerequisite_commit", "")
+    prerequisite_is_commit = _git(repo, ["cat-file", "-t", prerequisite]).stdout.strip() == "commit"
+    if commits_valid and prerequisite_is_commit:
+        previous_commit = prerequisite
+        previous_label = "prerequisite_commit"
+        for number, commit in parsed_rounds:
+            if _git(repo, ["merge-base", "--is-ancestor", previous_commit, commit]).returncode != 0:
+                errors.append(
+                    f"review.md: {previous_label} must be an ancestor of round {number} commit"
+                )
+            previous_commit = commit
+            previous_label = f"round {number} commit"
 
 
 def _validate_final_review(
@@ -704,6 +751,8 @@ def _validate_no_review_terminal(
     for field in ("spec_reviewer_agent_id", "adversarial_reviewer_agent_id"):
         if handoff.get(field) != "none":
             errors.append(f"handoff.md: {field} must be 'none' for {expected_verdict}")
+    if handoff.get("fixer_agent_ids") != "none":
+        errors.append(f"handoff.md: fixer_agent_ids must be 'none' for {expected_verdict}")
     _validate_agent_roles(
         handoff,
         "handoff.md",

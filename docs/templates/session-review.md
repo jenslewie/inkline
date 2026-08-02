@@ -48,7 +48,10 @@ Reviewers used fresh context and remained read-only with respect to tracked file
 Append each round. Do not remove rejected candidates, findings, or earlier commands.
 The heading is machine-checked: use the exact contiguous round number and a real
 40-character commit hash. Do not use a branch, tag, abbreviated hash, bare heading,
-or fenced example as the recorded round.
+or fenced example as the recorded round. Do not indent a recorded heading: unfenced
+zero-to-three-space candidates are checked, and only the exact unindented form is
+canonical. The prerequisite must be an ancestor of round 1, and each round commit
+must be an ancestor of the next.
 
 ### Round {{ROUND_NUMBER}}: `{{ROUND_CANDIDATE_COMMIT}}`
 
@@ -97,6 +100,8 @@ For an approved final review, both phase verdicts are `approved`, both reviewed
 commits equal `candidate_commit`, `approved_commit` equals that candidate, and the
 blocking count is `0`. Root, implementer, and both required reviewer identities must
 be real and mutually exclusive; fixer ids may be `none` when no fix round occurred.
+Agent ids use slash-delimited task paths or simple tokens whose components contain
+only letters, digits, `.`, `_`, and `-`.
 
 For a blocked post-review record, use overall verdict `changes_requested`,
 `approved_commit: none`, and a positive blocking count. For a task superseded after
