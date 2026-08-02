@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from session_handoff_test_support import (
     GitContext,
@@ -126,6 +128,24 @@ def test_rejects_space_indented_unfenced_round_heading_candidate(
     assert any("review round headings" in error for error in errors)
 
 
+@pytest.mark.parametrize("heading_separator", ["\t", "  "])
+def test_rejects_noncanonical_commonmark_round_heading_whitespace(
+    git_context: GitContext,
+    heading_separator: str,
+) -> None:
+    _write_records(
+        git_context,
+        rounds_text=(
+            f"### Round 1: `{git_context.candidate}`\n\n"
+            f"###{heading_separator}Round 2: `{git_context.candidate}`"
+        ),
+    )
+
+    errors = _validate(git_context)
+
+    assert any("review round headings" in error for error in errors)
+
+
 def test_ignores_four_space_indented_round_heading_candidate(
     git_context: GitContext,
 ) -> None:
@@ -204,6 +224,93 @@ def test_rejects_ancestry_fabricated_by_replace_ref(git_context: GitContext) -> 
     errors = _validate(git_context)
 
     assert any("prerequisite_commit" in error and "ancestor" in error for error in errors)
+
+
+def test_rejects_ancestry_fabricated_by_legacy_graft(git_context: GitContext) -> None:
+    tree = _git(git_context.repo, "rev-parse", f"{git_context.candidate}^{{tree}}")
+    unrelated_prerequisite = _git(
+        git_context.repo,
+        "commit-tree",
+        tree,
+        "-m",
+        "test: unrelated prerequisite",
+    )
+    grafts = git_context.repo / ".git" / "info" / "grafts"
+    grafts.write_text(
+        f"{git_context.candidate} {unrelated_prerequisite}\n",
+        encoding="utf-8",
+    )
+    _write_records(git_context, prerequisite=unrelated_prerequisite)
+
+    errors = _validate(git_context)
+
+    assert any("graft" in error for error in errors)
+
+
+def test_rejects_legacy_graft_in_linked_worktree_common_dir(
+    git_context: GitContext,
+    tmp_path: Path,
+) -> None:
+    linked_repo = tmp_path / "linked-repo"
+    _git(
+        git_context.repo,
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        "linked-review",
+        str(linked_repo),
+        git_context.candidate,
+    )
+    linked_context = GitContext(
+        linked_repo,
+        linked_repo / "docs" / "handovers" / "session-handoffs" / "run",
+        git_context.prerequisite,
+        git_context.candidate,
+    )
+    linked_context.handoff_directory.mkdir(parents=True)
+    tree = _git(linked_repo, "rev-parse", f"{git_context.candidate}^{{tree}}")
+    unrelated_prerequisite = _git(
+        linked_repo,
+        "commit-tree",
+        tree,
+        "-m",
+        "test: unrelated prerequisite",
+    )
+    grafts = git_context.repo / ".git" / "info" / "grafts"
+    grafts.write_text(
+        f"{git_context.candidate} {unrelated_prerequisite}\n",
+        encoding="utf-8",
+    )
+    _write_records(
+        linked_context,
+        prerequisite=unrelated_prerequisite,
+        branch="linked-review",
+    )
+
+    errors = _validate(linked_context)
+
+    assert any("graft" in error for error in errors)
+
+
+def test_rejects_required_metadata_nested_under_yaml_mapping(
+    git_context: GitContext,
+) -> None:
+    _write_records(git_context)
+    for record_name in ("handoff.md", "review.md"):
+        record = git_context.handoff_directory / record_name
+        text = record.read_text(encoding="utf-8")
+        record.write_text(
+            text.replace(
+                'root_agent_id: "root-agent-1"',
+                'agents:\n  root_agent_id: "root-agent-1"',
+            ),
+            encoding="utf-8",
+        )
+
+    errors = _validate(git_context)
+
+    assert any("top-level" in error for error in errors)
 
 
 def test_rejects_nonmonotonic_review_round_chain(git_context: GitContext) -> None:

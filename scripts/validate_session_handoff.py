@@ -1,5 +1,7 @@
 """Validate a generated review-gated session handoff directory."""
 
+# pylint: disable=too-many-lines
+
 from __future__ import annotations
 
 import argparse
@@ -39,6 +41,11 @@ def _front_matter(path: Path, errors: list[str]) -> dict[str, str]:
     for line_number, line in enumerate(lines[1:closing_index], start=2):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
+            continue
+        if line != line.lstrip():
+            errors.append(
+                f"{path.name}:{line_number}: front-matter fields must be top-level and unindented"
+            )
             continue
         if ":" not in stripped:
             errors.append(f"{path.name}:{line_number}: invalid front-matter scalar")
@@ -177,6 +184,27 @@ def _git(repo: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
         check=False,
         capture_output=True,
         text=True,
+    )
+
+
+def _validate_no_legacy_grafts(repo: Path, errors: list[str]) -> None:
+    graft_path_result = _git(
+        repo,
+        ["rev-parse", "--path-format=absolute", "--git-path", "info/grafts"],
+    )
+    if graft_path_result.returncode != 0 or not graft_path_result.stdout.strip():
+        errors.append("cannot inspect repository legacy graft metadata")
+        return
+    graft_path = Path(graft_path_result.stdout.strip())
+    try:
+        graft_path.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        errors.append(f"cannot inspect repository legacy graft metadata: {error}")
+        return
+    errors.append(
+        "repository legacy graft metadata must be absent before validating commit ancestry"
     )
 
 
@@ -481,7 +509,7 @@ def _validate_review_rounds(
     round_headings = [
         line
         for line in _unfenced_lines(review_file.read_text(encoding="utf-8"))
-        if re.match(r"^ {0,3}### Round", line) is not None
+        if re.match(r"^ {0,3}###(?!#)[\t ]+Round(?:[\t ]|$)", line) is not None
     ]
     parsed_rounds: list[tuple[int, str]] = []
     commits_valid = True
@@ -925,6 +953,7 @@ def validate_handoff_directory(
     if prepared is None:
         return errors
     directory, repo = prepared
+    _validate_no_legacy_grafts(repo, errors)
 
     for path in sorted(directory.glob("*.md")):
         if path.is_symlink():
