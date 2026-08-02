@@ -180,6 +180,32 @@ def test_rejects_review_round_before_prerequisite(git_context: GitContext) -> No
     assert any("prerequisite_commit" in error and "round 1" in error for error in errors)
 
 
+def test_rejects_ancestry_fabricated_by_replace_ref(git_context: GitContext) -> None:
+    tree = _git(git_context.repo, "rev-parse", f"{git_context.candidate}^{{tree}}")
+    unrelated_prerequisite = _git(
+        git_context.repo,
+        "commit-tree",
+        tree,
+        "-m",
+        "test: unrelated prerequisite",
+    )
+    replacement_commit = _git(
+        git_context.repo,
+        "commit-tree",
+        tree,
+        "-p",
+        unrelated_prerequisite,
+        "-m",
+        "test: replacement candidate",
+    )
+    _git(git_context.repo, "replace", git_context.candidate, replacement_commit)
+    _write_records(git_context, prerequisite=unrelated_prerequisite)
+
+    errors = _validate(git_context)
+
+    assert any("prerequisite_commit" in error and "ancestor" in error for error in errors)
+
+
 def test_rejects_nonmonotonic_review_round_chain(git_context: GitContext) -> None:
     _write_records(
         git_context,

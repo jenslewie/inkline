@@ -173,7 +173,7 @@ def _configured_record_path(
 
 def _git(repo: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", "-C", str(repo), *arguments],
+        ["git", "--no-replace-objects", "-C", str(repo), *arguments],
         check=False,
         capture_output=True,
         text=True,
