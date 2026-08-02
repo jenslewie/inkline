@@ -60,10 +60,39 @@ def _require(metadata: dict[str, str], field: str, source: str, errors: list[str
     return value
 
 
-def _agent_ids(value: str) -> set[str]:
-    if value.strip() == "none":
+def _agent_ids(
+    value: str,
+    *,
+    field: str | None = None,
+    source: str | None = None,
+    errors: list[str] | None = None,
+) -> set[str]:
+    stripped_value = value.strip()
+    if stripped_value == "none":
         return set()
-    return {agent_id.strip() for agent_id in value.split(",") if agent_id.strip()}
+    agent_id_list = [agent_id.strip() for agent_id in stripped_value.split(",")]
+    if any(not agent_id for agent_id in agent_id_list):
+        if field is not None and source is not None and errors is not None:
+            errors.append(
+                f"{source}: {field} must be exactly 'none' or comma-separated non-empty agent ids"
+            )
+        return {agent_id for agent_id in agent_id_list if agent_id}
+    if "none" in agent_id_list:
+        if field is not None and source is not None and errors is not None:
+            errors.append(
+                f"{source}: 'none' must be the only value in {field}; "
+                "agent ids cannot mix 'none' with real identities"
+            )
+        return {agent_id for agent_id in agent_id_list if agent_id != "none"}
+    agent_ids = set(agent_id_list)
+    if (
+        len(agent_ids) != len(agent_id_list)
+        and field is not None
+        and source is not None
+        and errors is not None
+    ):
+        errors.append(f"{source}: {field} agent ids must be unique")
+    return agent_ids
 
 
 def _list_agent_ids(
@@ -73,11 +102,7 @@ def _list_agent_ids(
     errors: list[str],
 ) -> set[str]:
     value = _require(metadata, field, source, errors)
-    agent_ids = _agent_ids(value)
-    if "none" in agent_ids:
-        errors.append(f"{source}: 'none' must be the only value in {field}")
-        agent_ids.remove("none")
-    return agent_ids
+    return _agent_ids(value, field=field, source=source, errors=errors)
 
 
 def _single_agent_id(
@@ -386,20 +411,26 @@ def _nonnegative_integer(value: str, field: str, source: str, errors: list[str])
 
 def _unfenced_lines(text: str) -> list[str]:
     lines: list[str] = []
-    fence_marker: str | None = None
+    fence_character: str | None = None
+    fence_length = 0
     for line in text.splitlines():
-        stripped = line.lstrip()
-        marker = (
-            "```" if stripped.startswith("```") else "~~~" if stripped.startswith("~~~") else None
-        )
-        if marker is not None:
-            if fence_marker is None:
-                fence_marker = marker
-            elif fence_marker == marker:
-                fence_marker = None
+        if fence_character is not None:
+            closing_match = re.fullmatch(r" {0,3}(`+|~+)[\t ]*", line)
+            if closing_match is not None:
+                marker = closing_match.group(1)
+                if marker[0] == fence_character and len(marker) >= fence_length:
+                    fence_character = None
+                    fence_length = 0
             continue
-        if fence_marker is None:
-            lines.append(line)
+        opening_match = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if opening_match is not None:
+            marker = opening_match.group(1)
+            info_string = opening_match.group(2)
+            if marker[0] != "`" or "`" not in info_string:
+                fence_character = marker[0]
+                fence_length = len(marker)
+                continue
+        lines.append(line)
     return lines
 
 
@@ -861,6 +892,7 @@ def validate_handoff_directory(
     handoff_file = _record_file(directory, "handoff.md", required=True, errors=errors)
     if handoff_file is None:
         return errors
+    _require_record_absent(directory, "review-session-prompt.md", errors)
     handoff = _front_matter(handoff_file, errors)
     if _require(handoff, "workflow_version", "handoff.md", errors) != "2":
         errors.append("handoff.md: workflow_version must be 2")

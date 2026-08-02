@@ -19,6 +19,9 @@ reviewer_agent_id: "{{REVIEWER_AGENT_ID}}"
 artifact 的 implementation prompt。开始前验证 candidate 是当前 `HEAD`，且
 `{{PREREQUISITE_COMMIT}}` 是其祖先；读取 task specification、authoritative
 contracts、accepted artifacts 和 `{{REVIEW_PATH}}` 中已有的 append-only rounds。
+本 prompt 只属于 active `ready_for_review` 状态，可以和 `review.md` 共存，但不得
+和 terminal `handoff.md` 共存。任务进入 `complete`、`blocked` 或 `superseded`
+之前必须删除本文件。
 
 Reviewer 对 tracked repository 文件保持 read-only。可以运行测试并在临时目录中
 创建 reproducers，但不得修改、stage 或 commit tracked 文件。报告 blocking

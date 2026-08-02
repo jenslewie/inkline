@@ -65,7 +65,10 @@ review has started. A pre-review `blocked` or `superseded` directory has no
 a task that must move its
 still-active review to another session, instantiate
 `docs/templates/review-session-prompt.md`; that prompt is not a handoff and does not
-authorize terminal status.
+authorize terminal status. It belongs only to an active `ready_for_review` state and
+may coexist with `review.md`, but never with terminal `handoff.md`. Remove it before
+writing a `complete`, `blocked`, or `superseded` handoff; the terminal validator
+rejects any leftover `review-session-prompt.md` for all three statuses.
 
 Use a sortable run id such as:
 
@@ -129,6 +132,11 @@ least one real implementer plus a real root, specification reviewer, and adversa
 reviewer; fixer ids may be `none` when no finding required a fix. A phase with verdict
 `not_run` or `unavailable` has reviewer id `none`. All identities are mutually
 exclusive except that one documentation reviewer may cover both review phases.
+`implementer_agent_ids` and `fixer_agent_ids` are exactly `none` or a
+comma-separated list of non-empty, unique identities. Empty entries, leading or
+trailing commas, repeated identities, and mixing `none` with a real identity are
+invalid in every workflow state, including optional pre-review implementers and a
+no-fix completed task.
 
 ## Task lifecycle
 
@@ -233,6 +241,11 @@ Round numbers are contiguous from 1. The validator ignores examples inside fence
 code blocks, rejects every other `### Round` form, checks each hash is a commit object
 rather than a tag or another Git object, and requires the final heading to name the
 structured final candidate and all phases that actually ran in that final round.
+Fence detection follows the CommonMark boundary needed here: an opener or closer is
+indented by at most three spaces, uses at least three matching backticks or tildes,
+and a closer uses the same character with length at least that of its opener. Thus a
+three-backtick line cannot close a four-backtick fence, while a four-space-indented
+pseudo-fence cannot hide a real review-round heading.
 
 Dispatch reviewer subagents with fresh context and read-only tracked-file authority.
 The specification reviewer checks completeness against the task and contracts. The
@@ -270,7 +283,9 @@ If review cannot fit safely in the current session, instantiate
 `docs/templates/review-session-prompt.md` and leave the review state
 `ready_for_review`. The prompt uses `prompt_mode: review_only`, names the exact
 candidate and one review phase, and grants no tracked-file write authority. Do not
-generate `handoff.md` or mark the task `complete`.
+generate `handoff.md` or mark the task `complete`. When the task becomes terminal,
+delete the review-only prompt before creating `handoff.md`; the two records are
+mutually exclusive.
 
 User-mandated manual inspection is an additional blocking gate. It runs after
 automated and agent review at the point declared by the task, and cannot be replaced

@@ -780,6 +780,122 @@ def test_complete_allows_no_fixer_when_no_review_fixes_were_needed(
     assert _validate(git_context) == []
 
 
+def test_complete_accepts_unique_comma_separated_list_role_agent_ids(
+    git_context: GitContext,
+) -> None:
+    _write_records(
+        git_context,
+        handoff_implementers="implementer-1, implementer-2",
+        review_implementers="implementer-2,implementer-1",
+        handoff_fixers="fixer-1,fixer-2",
+        review_fixers="fixer-2, fixer-1",
+    )
+
+    assert _validate(git_context) == []
+
+
+def test_pre_review_terminal_allows_exact_none_for_optional_agent_lists(
+    git_context: GitContext,
+) -> None:
+    _write_records(
+        git_context,
+        status="blocked",
+        handoff_approved_commit="none",
+        handoff_verdict="not_run",
+        review_path="none",
+        handoff_implementers="none",
+        handoff_fixers="none",
+        handoff_spec_reviewer="none",
+        handoff_adversarial_reviewer="none",
+        terminal_reason="pre_review_blocker",
+        next_task="recover workflow task",
+        next_task_kind="documentation",
+    )
+    (git_context.handoff_directory / "review.md").unlink()
+    _write_next_prompt(
+        git_context,
+        prompt_mode="recovery",
+        task="recover workflow task",
+        task_kind="documentation",
+        review_path="none",
+        review_verdict="not_run",
+    )
+
+    assert _validate(git_context) == []
+
+
+@pytest.mark.parametrize(
+    "invalid_ids",
+    [
+        ",agent-1",
+        "agent-1,",
+        "agent-1,,agent-2",
+        "agent-1, ,agent-2",
+        "agent-1,agent-1",
+        "agent-1, agent-1",
+        "none,agent-1",
+        "agent-1,none",
+    ],
+)
+@pytest.mark.parametrize(
+    ("handoff_field", "review_field"),
+    [
+        ("handoff_implementers", "review_implementers"),
+        ("handoff_fixers", "review_fixers"),
+    ],
+)
+def test_complete_rejects_malformed_or_duplicate_list_role_agent_ids(
+    git_context: GitContext,
+    handoff_field: str,
+    review_field: str,
+    invalid_ids: str,
+) -> None:
+    _write_records(
+        git_context,
+        **{handoff_field: invalid_ids, review_field: invalid_ids},
+    )
+
+    errors = _validate(git_context)
+
+    assert any("agent ids" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "implementer_ids",
+    [",agent-1", "agent-1,", "agent-1,,agent-2", "agent-1,agent-1", "none,agent-1"],
+)
+def test_pre_review_terminal_rejects_malformed_optional_implementer_ids(
+    git_context: GitContext,
+    implementer_ids: str,
+) -> None:
+    _write_records(
+        git_context,
+        status="blocked",
+        handoff_approved_commit="none",
+        handoff_verdict="not_run",
+        review_path="none",
+        handoff_implementers=implementer_ids,
+        handoff_spec_reviewer="none",
+        handoff_adversarial_reviewer="none",
+        terminal_reason="pre_review_blocker",
+        next_task="recover workflow task",
+        next_task_kind="documentation",
+    )
+    (git_context.handoff_directory / "review.md").unlink()
+    _write_next_prompt(
+        git_context,
+        prompt_mode="recovery",
+        task="recover workflow task",
+        task_kind="documentation",
+        review_path="none",
+        review_verdict="not_run",
+    )
+
+    errors = _validate(git_context)
+
+    assert any("implementer_agent_ids" in error and "agent ids" in error for error in errors)
+
+
 @pytest.mark.parametrize(
     ("handoff_field", "review_field"),
     [

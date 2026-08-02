@@ -57,6 +57,76 @@ def test_accepts_contiguous_canonical_rounds_and_ignores_fenced_examples(
     assert _validate(git_context) == []
 
 
+@pytest.mark.parametrize("marker", ["`", "~"])
+def test_long_fence_is_not_closed_by_shorter_same_character_fence(
+    git_context: GitContext,
+    marker: str,
+) -> None:
+    opening = marker * 4
+    shorter = marker * 3
+    _write_records(
+        git_context,
+        rounds_text=(
+            f"{opening}markdown\n"
+            f"### Round 98: `{git_context.prerequisite}`\n"
+            f"{shorter}\n"
+            f"### Round 99: `{git_context.candidate}`\n"
+            f"{opening}\n\n"
+            f"### Round 1: `{git_context.candidate}`"
+        ),
+    )
+
+    assert _validate(git_context) == []
+
+
+@pytest.mark.parametrize("marker", ["`", "~"])
+def test_three_space_indented_long_fence_hides_example_round(
+    git_context: GitContext,
+    marker: str,
+) -> None:
+    fence = marker * 4
+    _write_records(
+        git_context,
+        rounds_text=(
+            f"   {fence}markdown\n"
+            f"### Round 99: `{git_context.prerequisite}`\n"
+            f"   {fence}\n\n"
+            f"### Round 1: `{git_context.candidate}`"
+        ),
+    )
+
+    assert _validate(git_context) == []
+
+
+def test_four_space_indented_pseudo_fence_does_not_hide_real_round(
+    git_context: GitContext,
+) -> None:
+    _write_records(
+        git_context,
+        rounds_text=(f"    ```markdown\n### Round 1: `{git_context.candidate}`\n    ```"),
+    )
+
+    assert _validate(git_context) == []
+
+
+def test_four_space_indented_closer_does_not_end_fenced_block(
+    git_context: GitContext,
+) -> None:
+    _write_records(
+        git_context,
+        rounds_text=(
+            "```markdown\n"
+            f"### Round 98: `{git_context.prerequisite}`\n"
+            "    ```\n"
+            f"### Round 99: `{git_context.candidate}`\n"
+            "```\n\n"
+            f"### Round 1: `{git_context.candidate}`"
+        ),
+    )
+
+    assert _validate(git_context) == []
+
+
 def test_rejects_annotated_tag_object_as_commit(git_context: GitContext) -> None:
     _git(git_context.repo, "tag", "-a", "candidate-tag", "-m", "annotated")
     tag_object = _git(git_context.repo, "rev-parse", "candidate-tag^{tag}")
@@ -147,6 +217,47 @@ def test_next_task_none_requires_prompt_file_absent(git_context: GitContext) -> 
     errors = _validate(git_context)
 
     assert any("next-session-prompt.md must not exist" in error for error in errors)
+
+
+@pytest.mark.parametrize("status", ["complete", "blocked", "superseded"])
+def test_terminal_handoff_rejects_active_review_session_prompt(
+    git_context: GitContext,
+    status: str,
+) -> None:
+    if status == "complete":
+        _write_records(git_context)
+    else:
+        verdict = "not_run" if status == "blocked" else "not_applicable"
+        prompt_mode = "recovery" if status == "blocked" else "diagnosis"
+        _write_records(
+            git_context,
+            status=status,
+            handoff_approved_commit="none",
+            handoff_verdict=verdict,
+            review_path="none",
+            handoff_spec_reviewer="none",
+            handoff_adversarial_reviewer="none",
+            terminal_reason="cannot_safely_continue",
+            next_task="recover workflow task",
+            next_task_kind="documentation",
+        )
+        (git_context.handoff_directory / "review.md").unlink()
+        _write_next_prompt(
+            git_context,
+            prompt_mode=prompt_mode,
+            task="recover workflow task",
+            task_kind="documentation",
+            review_path="none",
+            review_verdict=verdict,
+        )
+    (git_context.handoff_directory / "review-session-prompt.md").write_text(
+        "active review continuation\n",
+        encoding="utf-8",
+    )
+
+    errors = _validate(git_context)
+
+    assert any("review-session-prompt.md must not exist" in error for error in errors)
 
 
 @pytest.mark.parametrize("field", ["branch", "worktree_state", "generated_at"])
