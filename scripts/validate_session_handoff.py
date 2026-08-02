@@ -16,6 +16,7 @@ from yaml.events import AliasEvent, NodeEvent
 from yaml.nodes import MappingNode, ScalarNode
 
 PLACEHOLDER_PATTERN = re.compile(r"\{\{[^{}]+\}\}")
+CANONICAL_NONNEGATIVE_INTEGER_PATTERN = re.compile(r"(?:0|[1-9][0-9]*)")
 COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
 TERMINAL_STATUSES = {"complete", "blocked", "superseded"}
 TASK_KINDS = {"code", "documentation"}
@@ -30,7 +31,52 @@ INTEGER_FRONT_MATTER_FIELDS = {
 }
 
 
-def _front_matter(path: Path, errors: list[str]) -> dict[str, str]:
+def _validate_generated_front_matter_key(
+    path: Path,
+    key: str,
+    line_number: int,
+    *,
+    enabled: bool,
+    errors: list[str],
+) -> None:
+    if enabled and PLACEHOLDER_PATTERN.search(key):
+        errors.append(
+            f"{path.name}:{line_number}: unresolved placeholder in decoded front-matter key"
+        )
+
+
+def _validate_generated_front_matter_value(
+    path: Path,
+    key: str,
+    value: str,
+    line_number: int,
+    *,
+    enabled: bool,
+    errors: list[str],
+) -> None:
+    if not enabled:
+        return
+    if PLACEHOLDER_PATTERN.search(value):
+        errors.append(
+            f"{path.name}:{line_number}: unresolved placeholder "
+            f"in decoded front-matter field {key!r}"
+        )
+    if (
+        key in INTEGER_FRONT_MATTER_FIELDS
+        and CANONICAL_NONNEGATIVE_INTEGER_PATTERN.fullmatch(value) is None
+    ):
+        errors.append(
+            f"{path.name}:{line_number}: front-matter field {key!r} "
+            "must use canonical ASCII decimal notation"
+        )
+
+
+def _front_matter(
+    path: Path,
+    errors: list[str],
+    *,
+    validate_generated_metadata: bool = False,
+) -> dict[str, str]:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as error:
@@ -82,6 +128,13 @@ def _front_matter(path: Path, errors: list[str]) -> dict[str, str]:
             )
             continue
         key = key_node.value
+        _validate_generated_front_matter_key(
+            path,
+            key,
+            line_number,
+            enabled=validate_generated_metadata,
+            errors=errors,
+        )
         if key in metadata:
             errors.append(f"{path.name}:{line_number}: duplicate front-matter key {key!r}")
             continue
@@ -108,7 +161,16 @@ def _front_matter(path: Path, errors: list[str]) -> dict[str, str]:
                 f"{nesting_suffix}"
             )
             continue
-        metadata[key] = value_node.value
+        value = value_node.value
+        _validate_generated_front_matter_value(
+            path,
+            key,
+            value,
+            value_node.start_mark.line + 2,
+            enabled=validate_generated_metadata,
+            errors=errors,
+        )
+        metadata[key] = value
     return metadata
 
 
@@ -707,7 +769,7 @@ def _validate_complete(
     )
     if review_file is None:
         return None
-    review = _front_matter(review_file, errors)
+    review = _front_matter(review_file, errors, validate_generated_metadata=True)
     for field in (
         "workflow_version",
         "task",
@@ -863,7 +925,7 @@ def _validate_post_review_terminal(
     if review_file is None:
         errors.append("handoff.md: post-review terminal status requires retained review.md")
         return None
-    review = _front_matter(review_file, errors)
+    review = _front_matter(review_file, errors, validate_generated_metadata=True)
     for field in (
         "workflow_version",
         "task",
@@ -950,7 +1012,7 @@ def _validate_next_prompt(
     prompt_file = _record_file(directory, "next-session-prompt.md", required=True, errors=errors)
     if prompt_file is None:
         return
-    prompt = _front_matter(prompt_file, errors)
+    prompt = _front_matter(prompt_file, errors, validate_generated_metadata=True)
     for field in (
         "workflow_version",
         "prompt_mode",
@@ -1027,7 +1089,7 @@ def validate_handoff_directory(
     if handoff_file is None:
         return errors
     _require_record_absent(directory, "review-session-prompt.md", errors)
-    handoff = _front_matter(handoff_file, errors)
+    handoff = _front_matter(handoff_file, errors, validate_generated_metadata=True)
     if _require(handoff, "workflow_version", "handoff.md", errors) != "2":
         errors.append("handoff.md: workflow_version must be 2")
     status = _require(handoff, "status", "handoff.md", errors)

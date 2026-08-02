@@ -564,6 +564,153 @@ def test_accepts_quoted_front_matter_key_with_same_yaml_semantics(
     assert _validate(git_context) == []
 
 
+def test_rejects_yaml_escaped_placeholder_in_matching_record_metadata(
+    git_context: GitContext,
+) -> None:
+    _write_records(git_context)
+    escaped_placeholder = r"\u007b\u007bTASK_NAME\u007d\u007d"
+    for record_name in ("handoff.md", "review.md"):
+        record = git_context.handoff_directory / record_name
+        record.write_text(
+            record.read_text(encoding="utf-8").replace(
+                'task: "workflow gate"',
+                f'task: "{escaped_placeholder}"',
+            ),
+            encoding="utf-8",
+        )
+
+    errors = _validate(git_context)
+
+    assert all(
+        any(
+            record_name in error and "unresolved placeholder" in error and "task" in error
+            for error in errors
+        )
+        for record_name in ("handoff.md", "review.md")
+    )
+
+
+def test_rejects_yaml_escaped_placeholder_in_successor_prompt_metadata(
+    git_context: GitContext,
+) -> None:
+    escaped_placeholder = r"\u007b\u007bNEXT_TASK\u007d\u007d"
+    _write_records(
+        git_context,
+        next_task=escaped_placeholder,
+        next_task_kind="code",
+    )
+    _write_next_prompt(git_context, task=escaped_placeholder)
+
+    errors = _validate(git_context)
+
+    assert any(
+        "next-session-prompt.md" in error and "unresolved placeholder" in error and "task" in error
+        for error in errors
+    )
+
+
+def test_rejects_yaml_escaped_placeholder_in_metadata_key(
+    git_context: GitContext,
+) -> None:
+    _write_records(git_context)
+    handoff = git_context.handoff_directory / "handoff.md"
+    escaped_placeholder = r"\u007b\u007bUNKNOWN_FIELD\u007d\u007d"
+    handoff.write_text(
+        handoff.read_text(encoding="utf-8").replace(
+            'task: "workflow gate"',
+            f'task: "workflow gate"\n"{escaped_placeholder}": "unused"',
+        ),
+        encoding="utf-8",
+    )
+
+    errors = _validate(git_context)
+
+    assert any(
+        "handoff.md" in error
+        and "unresolved placeholder" in error
+        and "decoded front-matter key" in error
+        for error in errors
+    )
+
+
+def test_accepts_ordinary_unicode_metadata_and_permitted_agent_lists(
+    git_context: GitContext,
+) -> None:
+    _write_records(
+        git_context,
+        next_task="下一项有界任务",
+        next_task_kind="code",
+        handoff_implementers="/root/workflow_impl_1,/root/implementer-2",
+        review_implementers="/root/implementer-2,/root/workflow_impl_1",
+    )
+    for record_name in ("handoff.md", "review.md"):
+        record = git_context.handoff_directory / record_name
+        record.write_text(
+            record.read_text(encoding="utf-8").replace(
+                'task: "workflow gate"',
+                'task: "工作流门禁"',
+            ),
+            encoding="utf-8",
+        )
+    _write_next_prompt(
+        git_context,
+        previous_task="工作流门禁",
+        task="下一项有界任务",
+    )
+
+    assert _validate(git_context) == []
+
+
+@pytest.mark.parametrize("noncanonical", ["01", "+1", "١"])
+def test_rejects_noncanonical_ascii_final_round(
+    git_context: GitContext,
+    noncanonical: str,
+) -> None:
+    _write_records(git_context, final_round=noncanonical)
+
+    errors = _validate(git_context)
+
+    assert any("final_round" in error and "canonical ASCII decimal" in error for error in errors)
+
+
+@pytest.mark.parametrize("noncanonical", ["00", "+0", "٠"])
+def test_rejects_noncanonical_ascii_unresolved_blocking_count(
+    git_context: GitContext,
+    noncanonical: str,
+) -> None:
+    _write_records(git_context, unresolved_blocking_count=noncanonical)
+
+    errors = _validate(git_context)
+
+    assert any(
+        "unresolved_blocking_count" in error and "canonical ASCII decimal" in error
+        for error in errors
+    )
+
+
+@pytest.mark.parametrize("noncanonical", ["02", "+2", "٢"])
+def test_rejects_noncanonical_ascii_workflow_version(
+    git_context: GitContext,
+    noncanonical: str,
+) -> None:
+    _write_records(git_context)
+    for record_name in ("handoff.md", "review.md"):
+        record = git_context.handoff_directory / record_name
+        record.write_text(
+            record.read_text(encoding="utf-8").replace(
+                "workflow_version: 2",
+                f'workflow_version: "{noncanonical}"',
+            ),
+            encoding="utf-8",
+        )
+
+    errors = _validate(git_context)
+
+    assert any(
+        "workflow_version" in error and "canonical ASCII decimal" in error for error in errors
+    )
+
+
 @pytest.mark.parametrize("invalid_value", ["[]", "{}", "true", "42", "null"])
 def test_rejects_nonstring_front_matter_values(
     git_context: GitContext,
