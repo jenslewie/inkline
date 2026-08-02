@@ -1,6 +1,6 @@
 # Review-Gated Task Workflow Design
 
-**Status:** Proposed written specification
+**Status:** Approved for repository-level implementation
 
 **Date:** 2026-08-02
 
@@ -69,8 +69,14 @@ The root agent owns the task boundary and workflow state. It:
 - refuses to mark the task complete until the final review verdict is `approved`;
 - writes the final review record, handoff, and next-session prompt.
 
-The root agent may implement a small task directly, but it may not act as the sole
-reviewer of its own implementation.
+The root agent does not edit tracked implementation, contract, test, or workflow
+files. All such edits, including review fixes, belong to implementer or fixer
+subagents. This strict separation applies even to small tasks. The root may write
+generated local review and handoff records after approval because those files are
+ignored task records rather than changes to the reviewed product commit.
+
+If an appropriate subagent cannot be used, the task remains blocked or is handed to
+a separate user-visible session. The root does not silently relax the role boundary.
 
 ### Implementer and fixer subagents
 
@@ -126,9 +132,9 @@ This reviewer actively looks for invalid states that positive-path tests may acc
 - regressions outside focused tests;
 - test assertions that restate the implementation instead of the contract.
 
-Code tasks require both phases. Separate reviewer subagents are preferred so that
-the second review is not anchored by the first review's conclusions. A small
-documentation-only task may use one independent reviewer that performs both phases.
+Code tasks require both phases, performed by two different reviewer subagents so the
+second review is not anchored by the first review's conclusions. A documentation-only
+task may use one independent reviewer that performs both phases.
 
 User-mandated manual artifact review remains an additional gate after automated and
 agent review; it is never replaced by them.
@@ -279,6 +285,13 @@ The implementation of this design will update:
 
 The implementation will not repair BookGraph contracts. Those corrections form the
 first product task executed under the new review-gated workflow.
+
+## Repository Scope
+
+This workflow is defined by the root `AGENTS.md` and tracked files in this repository.
+It governs Codex work performed in Inkline but does not change Codex behavior in other
+repositories. A more specific nested `AGENTS.md` may add local constraints but must
+not weaken this repository's independent-review completion gate.
 
 ## Acceptance Criteria
 

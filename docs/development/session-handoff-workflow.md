@@ -2,8 +2,8 @@
 
 **Status:** Active
 
-**Applies to:** Sequential Inkline development tasks executed across multiple Codex
-sessions
+**Applies to:** Codex development tasks in this repository, including tasks executed
+within one session and sequential tasks handed across sessions
 
 ## Purpose
 
@@ -14,6 +14,7 @@ following session.
 
 This workflow separates:
 
+- **independent acceptance evidence**, recorded in `review.md`;
 - **facts**, recorded in `handoff.md`; and
 - **instructions**, recorded in `next-session-prompt.md`.
 
@@ -41,6 +42,7 @@ The workflow itself is version controlled:
 
 - `AGENTS.md`
 - `docs/development/session-handoff-workflow.md`
+- `docs/templates/session-review.md`
 - `docs/templates/session-handoff.md`
 - `docs/templates/next-session-prompt.md`
 
@@ -48,6 +50,7 @@ Per-session results are local review artifacts and are not committed:
 
 ```text
 docs/handovers/session-handoffs/<run-id>/
+├── review.md
 ├── handoff.md
 └── next-session-prompt.md
 ```
@@ -69,7 +72,46 @@ Do not mix session handoffs into the data workspace. Do not place any review
 artifacts in `/private/tmp`. Temporary caches and test intermediates that the user is
 not expected to inspect may still use temporary directories.
 
-## Session lifecycle
+## Roles and separation of authority
+
+### Root orchestrator
+
+The root agent owns orchestration, not tracked implementation edits. It verifies the
+baseline, defines the task boundary and file ownership, dispatches implementer and
+fixer subagents, runs integration checks, creates candidate commits, dispatches
+reviewers, evaluates findings against repository evidence, and generates final local
+records.
+
+The root must not edit tracked implementation, contract, test, or workflow files,
+including small fixes. If no suitable subagent is available, the task is `blocked` or
+is handed to a separate user-visible session.
+
+### Implementers and fixers
+
+Implementer subagents own bounded, non-overlapping tracked changes. Fixer subagents
+own changes required by accepted review findings. They may report
+`ready_for_review`, but they cannot approve or complete their own work. Concurrent
+subagents must not write the same files or rely on one another's uncommitted state.
+
+### Reviewers
+
+Reviewers are read-only with respect to tracked repository files. They receive fresh
+context rather than the implementation conversation, and their prompt contains the
+exact prerequisite and candidate commits, task specification, authoritative
+contracts, accepted artifacts, regression samples, and validation requirements. It
+must not contain an implementer's defense or assert that passing tests proves
+correctness.
+
+Code tasks require two different independent reviewer subagents:
+
+1. a specification and contract reviewer; and
+2. an adversarial correctness reviewer.
+
+A documentation-only task may use one independent reviewer covering both phases.
+No reviewer may be an implementer or fixer for the candidate under review. The root's
+own inspection and validation do not replace an independent review.
+
+## Task lifecycle
 
 ### 1. Verify the baseline
 
@@ -100,7 +142,7 @@ when the mismatch cannot be resolved from the repository.
 If unrelated worktree changes exist, preserve them. Do not overwrite, discard,
 reformat, stage, or commit them as part of the current task.
 
-### 2. Execute one bounded task
+### 2. Define and execute one bounded task
 
 Every session prompt must define:
 
@@ -117,11 +159,16 @@ Every session prompt must define:
 Do not begin the next planned artifact merely because the current task finishes
 early. The next task starts in the next session using the generated prompt.
 
+The root delegates every tracked edit to implementer subagents with explicit file
+ownership. A subagent that discovers work outside its boundary reports it rather than
+editing unowned files. The root preserves unrelated worktree changes and serializes
+tasks that would otherwise overlap.
+
 Downstream consumers must not mutate upstream artifacts. If implementation reveals
 that an upstream declaration is wrong, report the contract defect instead of hiding
 the repair downstream.
 
-### 3. Validate and commit
+### 3. Validate and commit a candidate
 
 Run the checks appropriate to the actual change. Inkline code changes normally
 require focused tests, Ruff, Pylint, and Pyright; meaningful cross-package changes
@@ -147,19 +194,67 @@ git log -1 --oneline
 git status --short --branch
 ```
 
-The final commit hash, not the pre-task hash, is the baseline for the next session.
+This commit is only a candidate. It is not the next session's accepted baseline until
+the independent review gate approves this exact commit.
 
-### 4. Generate the handoff
+### 4. Review the exact candidate
 
-After the final commit, instantiate `docs/templates/session-handoff.md` in the
-session-handoff run directory using `apply_patch`, and replace every placeholder with
-a verified value.
+Set workflow state to `ready_for_review`. Instantiate
+`docs/templates/session-review.md` as `review.md` in the run directory and append one
+entry per review round. Never erase an earlier rejected candidate or finding.
+
+Dispatch reviewer subagents with fresh context and read-only tracked-file authority.
+The specification reviewer checks completeness against the task and contracts. The
+adversarial reviewer constructs negative cases and looks for invalid states, missing
+coverage, mutation, provenance errors, scope leakage, stale assets, weak assertions,
+and regressions outside the focused tests.
+
+Every finding records priority, evidence, affected scope, and disposition. A
+correctness, contract, provenance, data-loss, mutation, or required-test defect in
+scope blocks approval. An upstream defect that invalidates the task input also
+blocks; downstream code must not hide it.
+
+The review state machine is:
+
+```text
+in_progress -> ready_for_review -> approved -> complete
+```
+
+Blocking findings force the loop:
+
+```text
+ready_for_review -> changes_requested -> in_progress -> ready_for_review
+```
+
+The root assigns accepted findings to a fixer subagent, re-runs validation, and
+creates a new candidate commit. Any tracked change invalidates every earlier
+approval. Both review phases must review the new exact commit before it may be
+approved; passing tests do not restore approval.
+
+If reviewers disagree, the root compares both claims to repository evidence. It may
+reject a finding only with recorded evidence. An unresolved contract decision is
+escalated to the user and approval is withheld.
+
+If review cannot fit safely in the current session, generate a separate review-task
+prompt and leave the state `ready_for_review`. Do not mark the task `complete`.
+
+User-mandated manual inspection is an additional blocking gate. It runs after
+automated and agent review at the point declared by the task, and cannot be replaced
+by either. A task with pending manual review remains incomplete.
+
+### 5. Generate the handoff
+
+Only after approval of the exact final commit and any required manual gate,
+instantiate `docs/templates/session-handoff.md` in the session-handoff run directory
+using `apply_patch`, and replace every placeholder with a verified value.
 
 The handoff records at minimum:
 
 - task name and status;
 - branch and prerequisite commit;
 - result commit;
+- task kind and root/implementer/fixer agent ids;
+- review path, final verdict, and approved commit;
 - final worktree state;
 - authoritative contracts;
 - changed files and owned behavior;
@@ -175,9 +270,12 @@ Statuses are:
 - `blocked`: the task did not pass and cannot continue safely;
 - `superseded`: the planned task or contract was replaced before completion.
 
-Do not report `complete` merely because changes were committed.
+`complete` requires `review.md` to name the same task, task kind, prerequisite,
+implementer identities, and exact commit; its final verdict must be `approved`.
+`blocked` and `superseded` records must state what prevented approval. Do not report
+`complete` merely because changes were committed or tests passed.
 
-### 5. Generate the next-session prompt
+### 6. Generate the next-session prompt
 
 After writing the handoff, instantiate `docs/templates/next-session-prompt.md` beside
 it using `apply_patch`, and replace all placeholders.
@@ -185,27 +283,32 @@ it using `apply_patch`, and replace all placeholders.
 The generated prompt must:
 
 1. point to the exact handoff path;
-2. name the actual result commit;
-3. name every authoritative contract and accepted input artifact;
-4. state one next task and its boundary;
-5. reproduce unresolved issues that affect that task;
-6. require live baseline and call-chain verification;
-7. define validation and output paths;
-8. forbid starting the following task;
-9. contain no unresolved `{{PLACEHOLDER}}` tokens.
+2. name the actual approved result commit and final review path;
+3. require the next root agent to use the repository's strict subagent roles;
+4. name every authoritative contract and accepted input artifact;
+5. state one next task and its boundary;
+6. reproduce unresolved issues that affect that task;
+7. require live baseline and call-chain verification;
+8. define validation and output paths;
+9. forbid starting the following task;
+10. contain no unresolved `{{PLACEHOLDER}}` tokens.
 
 For a `blocked` handoff, generate a recovery or diagnosis prompt rather than an
 implementation prompt. For a terminal task with no agreed successor, set
 `next_task: none` in the handoff and do not invent more work.
 
-Validate generated files before finishing:
+Validate generated files before finishing. This command is a mandatory completion
+gate, not an optional lint:
 
 ```bash
-rg -n '\{\{[A-Z0-9_]+\}\}' \
-  docs/handovers/session-handoffs/<run-id>/
+uv run python scripts/validate_session_handoff.py \
+  docs/handovers/session-handoffs/<run-id>/ \
+  --expected-commit <approved-commit>
 ```
 
-The command must return no matches.
+The command must exit zero. It rejects unresolved placeholders, missing or stale
+review evidence, self-review, non-independent code reviewers, and commit or metadata
+mismatches.
 
 ## Starting the next session
 
@@ -213,14 +316,33 @@ The user can paste `next-session-prompt.md` into a new conversation without copy
 the old conversation. The new session must still read the referenced handoff,
 contracts, and artifacts and verify the repository state before acting.
 
-If `HEAD` has advanced:
+The next session reads `review.md` as acceptance evidence and verifies that its
+approved commit equals the handoff result commit. If `HEAD` has advanced:
 
 - when the recorded result commit is still an ancestor, inspect every intervening
   commit and refresh the task baseline before editing;
 - when it is not an ancestor, treat the prompt as stale and stop for reconciliation.
 
+Even when the approved commit remains an ancestor, any intervening tracked change
+that affects the accepted artifact invalidates reuse of that approval for the altered
+artifact. Re-open the owning task and review the new exact commit.
+
+## Failure, recovery, and terminal states
+
+- `blocked`: a user decision, missing authority, unavailable prerequisite, required
+  check, reviewer, or manual gate prevents approval.
+- `superseded`: the task or governing contract was replaced before acceptance.
+- `complete`: all declared validation, independent reviews, and required manual gates
+  approved the exact result commit.
+
+If the candidate is no longer an ancestor of `HEAD`, stop review and reconcile the
+baseline. If implementation exposes an upstream contract defect, reopen the upstream
+task or block the downstream task. If context is exhausted, preserve factual state
+and generate a separate recovery or review prompt instead of weakening the gate.
+
 ## Workflow changes
 
-Changes to this workflow or its templates are normal repository changes. Update them
-through a focused commit. Generated handoffs remain local workspace artifacts and
-must not be promoted into contracts merely because a previous session wrote them.
+Changes to this workflow or its templates are normal repository changes and are
+themselves subject to this review gate. Generated handoffs remain local workspace
+artifacts and must not be promoted into contracts merely because a previous session
+wrote them.
