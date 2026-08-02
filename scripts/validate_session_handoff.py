@@ -5,10 +5,15 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 from pathlib import Path
 from typing import Sequence
+
+import yaml
+from yaml.events import AliasEvent, NodeEvent
+from yaml.nodes import MappingNode, ScalarNode
 
 PLACEHOLDER_PATTERN = re.compile(r"\{\{[^{}]+\}\}")
 COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
@@ -18,6 +23,11 @@ RUN_REVIEW_VERDICTS = {"approved", "changes_requested"}
 UNRUN_REVIEW_VERDICTS = {"not_run", "unavailable"}
 ROUND_HEADING_PATTERN = re.compile(r"### Round ([1-9][0-9]*): `([0-9a-f]{40})`")
 AGENT_ID_PATTERN = re.compile(r"/?[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*")
+INTEGER_FRONT_MATTER_FIELDS = {
+    "final_round",
+    "unresolved_blocking_count",
+    "workflow_version",
+}
 
 
 def _front_matter(path: Path, errors: list[str]) -> dict[str, str]:
@@ -37,27 +47,68 @@ def _front_matter(path: Path, errors: list[str]) -> dict[str, str]:
         errors.append(f"{path.name}: unterminated YAML front matter")
         return {}
 
-    metadata: dict[str, str] = {}
-    for line_number, line in enumerate(lines[1:closing_index], start=2):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if line != line.lstrip():
+    front_matter = "\n".join(lines[1:closing_index])
+    try:
+        events = list(yaml.parse(front_matter, Loader=yaml.SafeLoader))
+        root = yaml.compose(front_matter, Loader=yaml.SafeLoader)
+    except yaml.YAMLError as error:
+        problem_mark = getattr(error, "problem_mark", None)
+        line_suffix = f":{problem_mark.line + 2}" if problem_mark is not None else ""
+        errors.append(f"{path.name}{line_suffix}: invalid YAML front matter")
+        return {}
+
+    if root is None:
+        return {}
+    if not isinstance(root, MappingNode) or root.flow_style:
+        errors.append(f"{path.name}: front matter must be a top-level block mapping")
+        return {}
+
+    for event in events:
+        if isinstance(event, AliasEvent) or (
+            isinstance(event, NodeEvent)
+            and (event.anchor is not None or getattr(event, "tag", None) is not None)
+        ):
             errors.append(
-                f"{path.name}:{line_number}: front-matter fields must be top-level and unindented"
+                f"{path.name}:{event.start_mark.line + 2}: "
+                "front matter must not use YAML anchors, aliases, or explicit tags"
+            )
+
+    metadata: dict[str, str] = {}
+    for key_node, value_node in root.value:
+        line_number = key_node.start_mark.line + 2
+        if not isinstance(key_node, ScalarNode) or key_node.tag != "tag:yaml.org,2002:str":
+            errors.append(
+                f"{path.name}:{line_number}: front-matter keys must be top-level string scalars"
             )
             continue
-        if ":" not in stripped:
-            errors.append(f"{path.name}:{line_number}: invalid front-matter scalar")
-            continue
-        key, raw_value = stripped.split(":", 1)
-        key = key.strip()
-        value = raw_value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-            value = value[1:-1]
+        key = key_node.value
         if key in metadata:
             errors.append(f"{path.name}:{line_number}: duplicate front-matter key {key!r}")
-        metadata[key] = value
+            continue
+        is_schema_integer = (
+            isinstance(value_node, ScalarNode)
+            and key in INTEGER_FRONT_MATTER_FIELDS
+            and value_node.tag == "tag:yaml.org,2002:int"
+            and re.fullmatch(r"[0-9]+", value_node.value) is not None
+        )
+        if (
+            not isinstance(value_node, ScalarNode)
+            or (value_node.tag != "tag:yaml.org,2002:str" and not is_schema_integer)
+            or value_node.style in {"|", ">"}
+            or value_node.start_mark.line != value_node.end_mark.line
+        ):
+            nesting_suffix = (
+                "; nested mappings are invalid because front-matter fields must be top-level"
+                if isinstance(value_node, MappingNode)
+                else ""
+            )
+            errors.append(
+                f"{path.name}:{value_node.start_mark.line + 2}: "
+                f"front-matter field {key!r} must be a single-line string scalar"
+                f"{nesting_suffix}"
+            )
+            continue
+        metadata[key] = value_node.value
     return metadata
 
 
@@ -179,11 +230,13 @@ def _configured_record_path(
 
 
 def _git(repo: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     return subprocess.run(
         ["git", "--no-replace-objects", "-C", str(repo), *arguments],
         check=False,
         capture_output=True,
         text=True,
+        env=environment,
     )
 
 

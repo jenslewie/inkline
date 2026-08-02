@@ -39,6 +39,72 @@ def test_complete_with_ordinary_clean_index_still_ignores_local_files(
     assert _validate(git_context) == []
 
 
+def test_complete_ignores_hostile_git_index_file_environment(
+    git_context: GitContext,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _write_records(git_context)
+    clean_index = tmp_path / "clean-index"
+    clean_index.write_bytes((git_context.repo / ".git" / "index").read_bytes())
+    tracked = git_context.repo / "tracked.txt"
+    tracked.write_text("staged but hidden\n", encoding="utf-8")
+    _git(git_context.repo, "add", "tracked.txt")
+    tracked.write_text("candidate\n", encoding="utf-8")
+    monkeypatch.setenv("GIT_INDEX_FILE", str(clean_index))
+
+    errors = _validate(git_context)
+
+    assert any("tracked worktree and index must be clean" in error for error in errors)
+
+
+def test_complete_ignores_hostile_git_repository_environment(
+    git_context: GitContext,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    foreign_repo = tmp_path / "foreign-repo"
+    foreign_repo.mkdir()
+    _git(foreign_repo, "init", "-q", "-b", "main")
+    _git(foreign_repo, "config", "user.email", "workflow-test@example.invalid")
+    _git(foreign_repo, "config", "user.name", "Workflow Test")
+    foreign_tracked = foreign_repo / "tracked.txt"
+    foreign_tracked.write_text("prerequisite\n", encoding="utf-8")
+    _git(foreign_repo, "add", "tracked.txt")
+    _git(foreign_repo, "commit", "-q", "-m", "test: foreign prerequisite")
+    foreign_prerequisite = _git(foreign_repo, "rev-parse", "HEAD")
+    foreign_tracked.write_text("candidate\n", encoding="utf-8")
+    _git(foreign_repo, "add", "tracked.txt")
+    _git(foreign_repo, "commit", "-q", "-m", "test: foreign candidate")
+    foreign_candidate = _git(foreign_repo, "rev-parse", "HEAD")
+    _write_records(
+        git_context,
+        prerequisite=foreign_prerequisite,
+        result_commit=foreign_candidate,
+        handoff_approved_commit=foreign_candidate,
+        review_candidate=foreign_candidate,
+        review_approved_commit=foreign_candidate,
+        final_spec_commit=foreign_candidate,
+        final_adversarial_commit=foreign_candidate,
+    )
+    monkeypatch.setenv("GIT_DIR", str(foreign_repo / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(git_context.repo))
+
+    errors = _validate(git_context, expected_commit=foreign_candidate)
+
+    assert any("does not name a commit object" in error for error in errors)
+
+
+def test_complete_ignores_git_config_environment_injection(
+    git_context: GitContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_records(git_context)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "not-an-integer")
+
+    assert _validate(git_context) == []
+
+
 @pytest.mark.parametrize(
     "review_path",
     [
@@ -311,6 +377,141 @@ def test_rejects_required_metadata_nested_under_yaml_mapping(
     errors = _validate(git_context)
 
     assert any("top-level" in error for error in errors)
+
+
+def test_rejects_duplicate_semantic_front_matter_key(
+    git_context: GitContext,
+) -> None:
+    _write_records(git_context)
+    handoff = git_context.handoff_directory / "handoff.md"
+    handoff.write_text(
+        handoff.read_text(encoding="utf-8").replace(
+            'status: "complete"',
+            'status: "complete"\n"status": "blocked"',
+        ),
+        encoding="utf-8",
+    )
+
+    errors = _validate(git_context)
+
+    assert any("duplicate front-matter key 'status'" in error for error in errors)
+
+
+def test_accepts_quoted_front_matter_key_with_same_yaml_semantics(
+    git_context: GitContext,
+) -> None:
+    _write_records(git_context)
+    for record_name in ("handoff.md", "review.md"):
+        record = git_context.handoff_directory / record_name
+        record.write_text(
+            record.read_text(encoding="utf-8").replace(
+                'task: "workflow gate"',
+                '"task": "workflow gate"',
+            ),
+            encoding="utf-8",
+        )
+
+    assert _validate(git_context) == []
+
+
+@pytest.mark.parametrize("invalid_value", ["[]", "{}", "true", "42", "null"])
+def test_rejects_nonstring_front_matter_values(
+    git_context: GitContext,
+    invalid_value: str,
+) -> None:
+    _write_records(git_context)
+    handoff = git_context.handoff_directory / "handoff.md"
+    handoff.write_text(
+        handoff.read_text(encoding="utf-8").replace(
+            'task: "workflow gate"',
+            f"task: {invalid_value}",
+        ),
+        encoding="utf-8",
+    )
+
+    errors = _validate(git_context)
+
+    assert any("field 'task' must be a single-line string scalar" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        "task: |\n  workflow gate",
+        "task: >\n  workflow gate",
+        'task: "workflow\n  gate"',
+    ],
+)
+def test_rejects_multiline_front_matter_scalars(
+    git_context: GitContext,
+    replacement: str,
+) -> None:
+    _write_records(git_context)
+    handoff = git_context.handoff_directory / "handoff.md"
+    handoff.write_text(
+        handoff.read_text(encoding="utf-8").replace('task: "workflow gate"', replacement),
+        encoding="utf-8",
+    )
+
+    errors = _validate(git_context)
+
+    assert any("field 'task' must be a single-line string scalar" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        'task: &task "workflow gate"',
+        'task: !!str "workflow gate"',
+        'task_alias: &task "workflow gate"\ntask: *task',
+    ],
+)
+def test_rejects_yaml_anchors_aliases_and_explicit_tags(
+    git_context: GitContext,
+    replacement: str,
+) -> None:
+    _write_records(git_context)
+    handoff = git_context.handoff_directory / "handoff.md"
+    handoff.write_text(
+        handoff.read_text(encoding="utf-8").replace('task: "workflow gate"', replacement),
+        encoding="utf-8",
+    )
+
+    errors = _validate(git_context)
+
+    assert any("anchors, aliases, or explicit tags" in error for error in errors)
+
+
+def test_rejects_complex_front_matter_mapping_key(git_context: GitContext) -> None:
+    _write_records(git_context)
+    handoff = git_context.handoff_directory / "handoff.md"
+    handoff.write_text(
+        handoff.read_text(encoding="utf-8").replace(
+            'task: "workflow gate"',
+            '? [task]\n: "workflow gate"',
+        ),
+        encoding="utf-8",
+    )
+
+    errors = _validate(git_context)
+
+    assert any("keys must be top-level string scalars" in error for error in errors)
+
+
+def test_rejects_malformed_yaml_front_matter(git_context: GitContext) -> None:
+    _write_records(git_context)
+    handoff = git_context.handoff_directory / "handoff.md"
+    handoff.write_text(
+        handoff.read_text(encoding="utf-8").replace(
+            'terminal_reason: "all_declared_gates_passed"',
+            'terminal_reason: "unterminated',
+        ),
+        encoding="utf-8",
+    )
+
+    errors = _validate(git_context)
+
+    assert any("invalid YAML front matter" in error for error in errors)
 
 
 def test_rejects_nonmonotonic_review_round_chain(git_context: GitContext) -> None:
