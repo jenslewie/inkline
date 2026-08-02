@@ -12,6 +12,9 @@ PLACEHOLDER_PATTERN = re.compile(r"\{\{[^{}]+\}\}")
 COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
 TERMINAL_STATUSES = {"complete", "blocked", "superseded"}
 TASK_KINDS = {"code", "documentation"}
+RUN_REVIEW_VERDICTS = {"approved", "changes_requested"}
+UNRUN_REVIEW_VERDICTS = {"not_run", "unavailable"}
+ROUND_HEADING_PATTERN = re.compile(r"### Round ([1-9][0-9]*): `([0-9a-f]{40})`")
 
 
 def _front_matter(path: Path, errors: list[str]) -> dict[str, str]:
@@ -63,6 +66,38 @@ def _agent_ids(value: str) -> set[str]:
     return {agent_id.strip() for agent_id in value.split(",") if agent_id.strip()}
 
 
+def _list_agent_ids(
+    metadata: dict[str, str],
+    field: str,
+    source: str,
+    errors: list[str],
+) -> set[str]:
+    value = _require(metadata, field, source, errors)
+    agent_ids = _agent_ids(value)
+    if "none" in agent_ids:
+        errors.append(f"{source}: 'none' must be the only value in {field}")
+        agent_ids.remove("none")
+    return agent_ids
+
+
+def _single_agent_id(
+    value: str,
+    field: str,
+    source: str,
+    errors: list[str],
+    *,
+    allow_none: bool,
+) -> set[str]:
+    if "," in value:
+        errors.append(f"{source}: {field} must contain a single agent id, not a list")
+        return _agent_ids(value)
+    if value == "none":
+        if not allow_none:
+            errors.append(f"{source}: {field} must identify a real agent, not 'none'")
+        return set()
+    return {value} if value else set()
+
+
 def _record_file(directory: Path, name: str, *, required: bool, errors: list[str]) -> Path | None:
     path = directory / name
     if path.is_symlink():
@@ -73,6 +108,12 @@ def _record_file(directory: Path, name: str, *, required: bool, errors: list[str
             errors.append(f"{name} is required but does not exist at {path}")
         return None
     return path
+
+
+def _require_record_absent(directory: Path, name: str, errors: list[str]) -> None:
+    path = directory / name
+    if path.exists() or path.is_symlink():
+        errors.append(f"{name} must not exist for the declared terminal state")
 
 
 def _configured_record_path(
@@ -98,14 +139,6 @@ def _configured_record_path(
     return _record_file(directory, expected_name, required=True, errors=errors)
 
 
-def _find_git_repository(directory: Path, errors: list[str]) -> Path | None:
-    for candidate in (directory, *directory.parents):
-        if (candidate / ".git").exists():
-            return candidate
-    errors.append("handoff directory is not inside a Git repository")
-    return None
-
-
 def _git(repo: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", str(repo), *arguments],
@@ -113,6 +146,59 @@ def _git(repo: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
     )
+
+
+def _prepare_handoff_directory(
+    handoff_directory: Path,
+    errors: list[str],
+) -> tuple[Path, Path] | None:
+    raw_directory = handoff_directory.expanduser().absolute()
+    if raw_directory.is_symlink():
+        errors.append("handoff directory must not be a symbolic link")
+        return None
+    if not raw_directory.is_dir():
+        errors.append(f"handoff directory does not exist: {raw_directory}")
+        return None
+
+    repository_result = _git(raw_directory, ["rev-parse", "--show-toplevel"])
+    if repository_result.returncode != 0:
+        errors.append("handoff directory is not inside a Git repository")
+        return None
+    repository = Path(repository_result.stdout.strip()).resolve()
+    try:
+        relative_directory = raw_directory.relative_to(repository)
+    except ValueError:
+        errors.append("handoff directory must be lexically inside its Git repository")
+        return None
+
+    current = repository
+    for component in relative_directory.parts:
+        current /= component
+        if current.is_symlink():
+            errors.append(
+                "handoff directory has a repository-relative parent that is a symbolic link: "
+                f"{current}"
+            )
+            return None
+
+    required_root = repository / "docs" / "handovers" / "session-handoffs"
+    try:
+        raw_directory.relative_to(required_root)
+    except ValueError:
+        errors.append(
+            "terminal handoff directory must be under the repository "
+            "docs/handovers/session-handoffs/ directory"
+        )
+        return None
+    resolved_directory = raw_directory.resolve()
+    try:
+        resolved_directory.relative_to(required_root.resolve())
+    except ValueError:
+        errors.append(
+            "resolved terminal handoff directory must remain under docs/handovers/session-handoffs/"
+        )
+        return None
+    return resolved_directory, repository
 
 
 def _validate_commit_syntax(value: str, field: str, source: str, errors: list[str]) -> bool:
@@ -127,26 +213,25 @@ def _validate_git_commit(
 ) -> bool:
     if not _validate_commit_syntax(value, field, source, errors):
         return False
-    result = _git(repo, ["cat-file", "-e", f"{value}^{{commit}}"])
-    if result.returncode != 0:
-        errors.append(f"{source}: {field} does not name a commit in the repository")
+    result = _git(repo, ["cat-file", "-t", value])
+    if result.returncode != 0 or result.stdout.strip() != "commit":
+        errors.append(f"{source}: {field} does not name a commit object in the repository")
         return False
     return True
 
 
 def _validate_repository_state(
-    directory: Path,
+    repo: Path,
     prerequisite: str,
     result_commit: str,
     approved_commit: str | None,
     expected_commit: str | None,
+    declared_branch: str,
+    require_clean: bool,
     errors: list[str],
 ) -> None:
     if expected_commit is None:
         errors.append("expected_commit is required for terminal handoff validation")
-        return
-    repo = _find_git_repository(directory, errors)
-    if repo is None:
         return
     prerequisite_valid = _validate_git_commit(
         repo, prerequisite, "prerequisite_commit", "handoff.md", errors
@@ -174,6 +259,13 @@ def _validate_repository_state(
         errors.append("command line: expected_commit must equal result_commit")
     if approved_commit is not None and approved_valid and approved_commit != result_commit:
         errors.append("handoff.md: approved_commit must equal result_commit")
+    branch_result = _git(repo, ["branch", "--show-current"])
+    if branch_result.returncode != 0 or branch_result.stdout.strip() != declared_branch:
+        errors.append("handoff.md: branch must match the repository current branch")
+    if require_clean:
+        status_result = _git(repo, ["status", "--porcelain", "--untracked-files=no"])
+        if status_result.returncode != 0 or status_result.stdout.strip():
+            errors.append("repository tracked worktree and index must be clean for status complete")
 
 
 def _validate_task_kind(metadata: dict[str, str], source: str, errors: list[str]) -> str:
@@ -183,18 +275,54 @@ def _validate_task_kind(metadata: dict[str, str], source: str, errors: list[str]
     return task_kind
 
 
-def _validate_agent_roles(metadata: dict[str, str], source: str, errors: list[str]) -> None:
-    implementers = _agent_ids(_require(metadata, "implementer_agent_ids", source, errors))
-    fixers = _agent_ids(_require(metadata, "fixer_agent_ids", source, errors))
+def _validate_agent_roles(
+    metadata: dict[str, str],
+    source: str,
+    errors: list[str],
+    *,
+    require_implementer: bool,
+    phase_verdicts: dict[str, str] | None,
+) -> None:
+    implementers = _list_agent_ids(metadata, "implementer_agent_ids", source, errors)
+    fixers = _list_agent_ids(metadata, "fixer_agent_ids", source, errors)
     root = _require(metadata, "root_agent_id", source, errors)
     spec = _require(metadata, "spec_reviewer_agent_id", source, errors)
     adversarial = _require(metadata, "adversarial_reviewer_agent_id", source, errors)
+    if require_implementer and not implementers:
+        errors.append(f"{source}: status complete requires at least one implementer agent id")
+
+    reviewer_values = {"spec": spec, "adversarial": adversarial}
+    reviewers: dict[str, set[str]] = {}
+    for phase, value in reviewer_values.items():
+        verdict = phase_verdicts.get(phase, "") if phase_verdicts is not None else ""
+        allow_none = phase_verdicts is None or verdict in UNRUN_REVIEW_VERDICTS
+        reviewers[phase] = _single_agent_id(
+            value,
+            f"{phase}_reviewer_agent_id",
+            source,
+            errors,
+            allow_none=allow_none,
+        )
+        if phase_verdicts is not None:
+            if verdict in RUN_REVIEW_VERDICTS and not reviewers[phase]:
+                errors.append(
+                    f"{source}: {phase} phase evidence requires a real {phase}_reviewer_agent_id"
+                )
+            if verdict in UNRUN_REVIEW_VERDICTS and value != "none":
+                errors.append(f"{source}: {phase}_reviewer_agent_id must be 'none' for {verdict}")
+
     roles = {
         "implementers": implementers,
         "fixers": fixers,
-        "root": {root} if root else set(),
-        "spec reviewer": _agent_ids(spec),
-        "adversarial reviewer": _agent_ids(adversarial),
+        "root": _single_agent_id(
+            root,
+            "root_agent_id",
+            source,
+            errors,
+            allow_none=False,
+        ),
+        "spec reviewer": reviewers["spec"],
+        "adversarial reviewer": reviewers["adversarial"],
     }
     role_items = list(roles.items())
     for index, (left_name, left_ids) in enumerate(role_items):
@@ -244,9 +372,42 @@ def _positive_integer(value: str, field: str, source: str, errors: list[str]) ->
     return number
 
 
-def _validate_review_round_count(
+def _nonnegative_integer(value: str, field: str, source: str, errors: list[str]) -> int | None:
+    try:
+        number = int(value)
+    except ValueError:
+        errors.append(f"{source}: {field} must be an integer")
+        return None
+    if number < 0:
+        errors.append(f"{source}: {field} must be at least 0")
+        return None
+    return number
+
+
+def _unfenced_lines(text: str) -> list[str]:
+    lines: list[str] = []
+    fence_marker: str | None = None
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        marker = (
+            "```" if stripped.startswith("```") else "~~~" if stripped.startswith("~~~") else None
+        )
+        if marker is not None:
+            if fence_marker is None:
+                fence_marker = marker
+            elif fence_marker == marker:
+                fence_marker = None
+            continue
+        if fence_marker is None:
+            lines.append(line)
+    return lines
+
+
+def _validate_review_rounds(
     review_file: Path,
     review: dict[str, str],
+    candidate: str,
+    repo: Path,
     errors: list[str],
 ) -> None:
     final_round = _positive_integer(
@@ -255,27 +416,44 @@ def _validate_review_round_count(
         "review.md",
         errors,
     )
-    recorded_rounds = [
-        int(match)
-        for match in re.findall(
-            r"^### Round ([1-9][0-9]*)(?::|$)",
-            review_file.read_text(encoding="utf-8"),
-            flags=re.MULTILINE,
-        )
+    round_headings = [
+        line
+        for line in _unfenced_lines(review_file.read_text(encoding="utf-8"))
+        if line.startswith("### Round")
     ]
-    if final_round is not None and recorded_rounds != list(range(1, final_round + 1)):
+    parsed_rounds: list[tuple[int, str]] = []
+    for heading in round_headings:
+        match = ROUND_HEADING_PATTERN.fullmatch(heading)
+        if match is None:
+            errors.append(
+                "review.md: review round headings must use canonical "
+                "'### Round N: `<40-sha>`' syntax"
+            )
+            continue
+        number = int(match.group(1))
+        commit = match.group(2)
+        parsed_rounds.append((number, commit))
+        _validate_git_commit(repo, commit, f"round_{number}_commit", "review.md", errors)
+    recorded_numbers = [number for number, _commit in parsed_rounds]
+    if final_round is not None and recorded_numbers != list(range(1, final_round + 1)):
         errors.append(
-            "review.md: final_round must match contiguous recorded review rounds starting at 1"
+            "review.md: final_round must match contiguous recorded review rounds "
+            "using canonical headings and starting at 1"
         )
+    if final_round is not None and parsed_rounds:
+        final_heading_number, final_heading_commit = parsed_rounds[-1]
+        if final_heading_number == final_round and final_heading_commit != candidate:
+            errors.append("review.md: final review round commit must match candidate_commit")
 
 
 def _validate_final_review(
     review_file: Path,
     review: dict[str, str],
     candidate: str,
+    repo: Path,
     errors: list[str],
 ) -> None:
-    _validate_review_round_count(review_file, review, errors)
+    _validate_review_rounds(review_file, review, candidate, repo, errors)
     for phase in ("spec", "adversarial"):
         commit_field = f"final_{phase}_reviewed_commit"
         verdict_field = f"final_{phase}_verdict"
@@ -291,8 +469,44 @@ def _validate_final_review(
         errors.append("review.md: manual_gate must be 'passed' or 'not_required'")
 
 
+def _phase_verdicts(review: dict[str, str]) -> dict[str, str]:
+    return {phase: review.get(f"final_{phase}_verdict", "") for phase in ("spec", "adversarial")}
+
+
+def _validate_partial_phase_evidence(
+    review: dict[str, str],
+    candidate: str,
+    errors: list[str],
+) -> dict[str, str]:
+    verdicts = _phase_verdicts(review)
+    ran_phase = False
+    for phase, verdict in verdicts.items():
+        commit_field = f"final_{phase}_reviewed_commit"
+        commit = review.get(commit_field, "")
+        if verdict in RUN_REVIEW_VERDICTS:
+            ran_phase = True
+            if commit != candidate:
+                errors.append(
+                    f"review.md: {phase} phase evidence must name candidate_commit when run"
+                )
+        elif verdict in UNRUN_REVIEW_VERDICTS:
+            if commit != "none":
+                errors.append(
+                    f"review.md: {phase} phase evidence commit must be 'none' for {verdict}"
+                )
+        else:
+            errors.append(
+                f"review.md: final_{phase}_verdict must be approved, changes_requested, "
+                "not_run, or unavailable"
+            )
+    if not ran_phase:
+        errors.append("review.md: at least one review phase must have run for post-review status")
+    return verdicts
+
+
 def _validate_complete(
     directory: Path,
+    repo: Path,
     handoff: dict[str, str],
     expected_commit: str | None,
     errors: list[str],
@@ -308,11 +522,20 @@ def _validate_complete(
     for field in required_handoff_fields:
         _require(handoff, field, "handoff.md", errors)
     _validate_task_kind(handoff, "handoff.md", errors)
-    _validate_agent_roles(handoff, "handoff.md", errors)
+    complete_verdicts = {"spec": "approved", "adversarial": "approved"}
+    _validate_agent_roles(
+        handoff,
+        "handoff.md",
+        errors,
+        require_implementer=True,
+        phase_verdicts=complete_verdicts,
+    )
     if handoff.get("review_verdict") != "approved":
         errors.append("handoff.md: review_verdict must be 'approved' for status complete")
     if handoff.get("manual_gate") not in {"passed", "not_required"}:
         errors.append("handoff.md: manual_gate must be 'passed' or 'not_required'")
+    if handoff.get("worktree_state") != "clean":
+        errors.append("handoff.md: worktree_state must be 'clean' for status complete")
 
     review_file = _configured_record_path(
         directory,
@@ -337,10 +560,17 @@ def _validate_complete(
         "root_agent_id",
         "spec_reviewer_agent_id",
         "adversarial_reviewer_agent_id",
+        "reviewed_at",
     ):
         _require(review, field, "review.md", errors)
     _validate_task_kind(review, "review.md", errors)
-    _validate_agent_roles(review, "review.md", errors)
+    _validate_agent_roles(
+        review,
+        "review.md",
+        errors,
+        require_implementer=True,
+        phase_verdicts=complete_verdicts,
+    )
     _validate_matching_review_metadata(handoff, review, errors)
 
     result_commit = handoff.get("result_commit", "")
@@ -354,13 +584,15 @@ def _validate_complete(
     ):
         if value != result_commit:
             errors.append(f"{source} must match handoff.md result_commit")
-    _validate_final_review(review_file, review, candidate, errors)
+    _validate_final_review(review_file, review, candidate, repo, errors)
     _validate_repository_state(
-        directory,
+        repo,
         handoff.get("prerequisite_commit", ""),
         result_commit,
         handoff.get("approved_commit", ""),
         expected_commit,
+        handoff.get("branch", ""),
+        True,
         errors,
     )
     return review_file
@@ -368,6 +600,7 @@ def _validate_complete(
 
 def _validate_nonapproved_terminal(
     directory: Path,
+    repo: Path,
     handoff: dict[str, str],
     expected_commit: str | None,
     errors: list[str],
@@ -387,27 +620,43 @@ def _validate_nonapproved_terminal(
             f"handoff.md: status {status} must name a recovery or diagnosis task in next_task"
         )
     _validate_repository_state(
-        directory,
+        repo,
         handoff.get("prerequisite_commit", ""),
         handoff.get("result_commit", ""),
         None,
         expected_commit,
+        handoff.get("branch", ""),
+        False,
         errors,
     )
     if status == "superseded":
-        _validate_no_review_terminal(handoff, "not_applicable", status, errors)
+        if handoff.get("review_verdict") == "not_applicable":
+            _validate_no_review_terminal(directory, handoff, "not_applicable", status, errors)
+            return None
+        if handoff.get("review_verdict") == "superseded":
+            return _validate_post_review_terminal(directory, repo, handoff, "superseded", errors)
+        errors.append(
+            "handoff.md: superseded review_verdict must be 'not_applicable' or 'superseded'"
+        )
         return None
     review_verdict = handoff.get("review_verdict")
     if review_verdict == "not_run":
-        _validate_no_review_terminal(handoff, "not_run", status, errors)
+        _validate_no_review_terminal(directory, handoff, "not_run", status, errors)
         return None
     if review_verdict == "changes_requested":
-        return _validate_blocked_review(directory, handoff, errors)
+        return _validate_post_review_terminal(
+            directory,
+            repo,
+            handoff,
+            "changes_requested",
+            errors,
+        )
     errors.append("handoff.md: blocked review_verdict must be 'not_run' or 'changes_requested'")
     return None
 
 
 def _validate_no_review_terminal(
+    directory: Path,
     handoff: dict[str, str],
     expected_verdict: str,
     status: str,
@@ -415,6 +664,8 @@ def _validate_no_review_terminal(
 ) -> None:
     if handoff.get("review_path") != "none":
         errors.append(f"handoff.md: review_path must be 'none' for {expected_verdict}")
+    else:
+        _require_record_absent(directory, "review.md", errors)
     if handoff.get("review_verdict") != expected_verdict:
         errors.append(
             f"handoff.md: review_verdict must be {expected_verdict!r} for status {status}"
@@ -422,12 +673,20 @@ def _validate_no_review_terminal(
     for field in ("spec_reviewer_agent_id", "adversarial_reviewer_agent_id"):
         if handoff.get(field) != "none":
             errors.append(f"handoff.md: {field} must be 'none' for {expected_verdict}")
-    _validate_agent_roles(handoff, "handoff.md", errors)
+    _validate_agent_roles(
+        handoff,
+        "handoff.md",
+        errors,
+        require_implementer=False,
+        phase_verdicts={"spec": "not_run", "adversarial": "not_run"},
+    )
 
 
-def _validate_blocked_review(
+def _validate_post_review_terminal(
     directory: Path,
+    repo: Path,
     handoff: dict[str, str],
+    expected_verdict: str,
     errors: list[str],
 ) -> Path | None:
     review_file = _configured_record_path(
@@ -437,9 +696,8 @@ def _validate_blocked_review(
         "handoff.md: changes_requested requires retained review.md",
         errors,
     )
-    _validate_agent_roles(handoff, "handoff.md", errors)
     if review_file is None:
-        errors.append("handoff.md: changes_requested requires retained review.md")
+        errors.append("handoff.md: post-review terminal status requires retained review.md")
         return None
     review = _front_matter(review_file, errors)
     for field in (
@@ -461,34 +719,51 @@ def _validate_blocked_review(
         "final_adversarial_verdict",
         "unresolved_blocking_count",
         "manual_gate",
+        "reviewed_at",
     ):
         _require(review, field, "review.md", errors)
     _validate_task_kind(review, "review.md", errors)
-    _validate_agent_roles(review, "review.md", errors)
     _validate_matching_review_metadata(handoff, review, errors)
-    _validate_review_round_count(review_file, review, errors)
 
     candidate = review.get("candidate_commit", "")
-    if review.get("verdict") != "changes_requested":
-        errors.append("review.md: verdict must be 'changes_requested' for blocked post-review")
+    if review.get("verdict") != expected_verdict:
+        errors.append(
+            f"review.md: verdict must be {expected_verdict!r} for this post-review terminal state"
+        )
     if candidate != handoff.get("result_commit"):
         errors.append("review.md: candidate_commit must match handoff.md result_commit")
     if review.get("approved_commit") != "none":
         errors.append("review.md: approved_commit must be 'none' for changes_requested")
-    for phase in ("spec", "adversarial"):
-        commit_field = f"final_{phase}_reviewed_commit"
-        verdict_field = f"final_{phase}_verdict"
-        if review.get(commit_field) != candidate:
-            errors.append(f"review.md: {commit_field} must match candidate_commit")
-        verdict = review.get(verdict_field, "")
-        if verdict not in {"approved", "changes_requested"}:
-            errors.append(f"review.md: {verdict_field} must be 'approved' or 'changes_requested'")
-    _positive_integer(
-        review.get("unresolved_blocking_count", ""),
-        "unresolved_blocking_count",
+    phase_verdicts = _validate_partial_phase_evidence(review, candidate, errors)
+    _validate_agent_roles(
+        handoff,
+        "handoff.md",
+        errors,
+        require_implementer=False,
+        phase_verdicts=phase_verdicts,
+    )
+    _validate_agent_roles(
+        review,
         "review.md",
         errors,
+        require_implementer=False,
+        phase_verdicts=phase_verdicts,
     )
+    _validate_review_rounds(review_file, review, candidate, repo, errors)
+    if expected_verdict == "changes_requested":
+        _positive_integer(
+            review.get("unresolved_blocking_count", ""),
+            "unresolved_blocking_count",
+            "review.md",
+            errors,
+        )
+    else:
+        _nonnegative_integer(
+            review.get("unresolved_blocking_count", ""),
+            "unresolved_blocking_count",
+            "review.md",
+            errors,
+        )
     return review_file
 
 
@@ -504,7 +779,7 @@ def _validate_next_prompt(
     if not prompt_required:
         if next_task_kind != "none":
             errors.append("handoff.md: next_task_kind must be 'none' when next_task is 'none'")
-        _record_file(directory, "next-session-prompt.md", required=False, errors=errors)
+        _require_record_absent(directory, "next-session-prompt.md", errors)
         return
     if next_task_kind not in TASK_KINDS:
         errors.append("handoff.md: next_task_kind must be 'code' or 'documentation'")
@@ -565,10 +840,11 @@ def validate_handoff_directory(
     expected_commit: str | None = None,
 ) -> list[str]:
     """Return workflow contract violations for one terminal handoff directory."""
-    directory = handoff_directory.resolve()
     errors: list[str] = []
-    if not directory.is_dir():
-        return [f"handoff directory does not exist: {directory}"]
+    prepared = _prepare_handoff_directory(handoff_directory, errors)
+    if prepared is None:
+        return errors
+    directory, repo = prepared
 
     for path in sorted(directory.glob("*.md")):
         if path.is_symlink():
@@ -594,12 +870,20 @@ def validate_handoff_directory(
             "handoff.md: status must be a terminal status: complete, blocked, or superseded"
         )
         return errors
+    for field in ("branch", "worktree_state", "generated_at"):
+        _require(handoff, field, "handoff.md", errors)
 
     review_file: Path | None = None
     if status == "complete":
-        review_file = _validate_complete(directory, handoff, expected_commit, errors)
+        review_file = _validate_complete(directory, repo, handoff, expected_commit, errors)
     else:
-        review_file = _validate_nonapproved_terminal(directory, handoff, expected_commit, errors)
+        review_file = _validate_nonapproved_terminal(
+            directory,
+            repo,
+            handoff,
+            expected_commit,
+            errors,
+        )
     _validate_next_prompt(directory, handoff, review_file, errors)
     return errors
 

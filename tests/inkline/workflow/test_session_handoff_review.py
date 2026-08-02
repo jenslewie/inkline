@@ -1,66 +1,10 @@
-from __future__ import annotations
-
-import importlib.util
-import subprocess
-from dataclasses import dataclass
-from pathlib import Path
-from types import ModuleType
-
 import pytest
-
-PROJECT_ROOT = Path(__file__).parents[3]
-VALIDATOR_PATH = PROJECT_ROOT / "scripts" / "validate_session_handoff.py"
-
-
-def _load_validator() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("validate_session_handoff", VALIDATOR_PATH)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-validator = _load_validator()
-
-
-def _git(repo: Path, *arguments: str, input_text: str | None = None) -> str:
-    return subprocess.run(
-        ["git", "-C", str(repo), *arguments],
-        check=True,
-        capture_output=True,
-        text=True,
-        input=input_text,
-    ).stdout.strip()
-
-
-@dataclass(frozen=True)
-class GitContext:
-    repo: Path
-    handoff_directory: Path
-    prerequisite: str
-    candidate: str
-
-
-@pytest.fixture
-def git_context(tmp_path: Path) -> GitContext:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init", "-q")
-    _git(repo, "config", "user.email", "workflow-test@example.invalid")
-    _git(repo, "config", "user.name", "Workflow Test")
-    tracked = repo / "tracked.txt"
-    tracked.write_text("prerequisite\n", encoding="utf-8")
-    _git(repo, "add", "tracked.txt")
-    _git(repo, "commit", "-q", "-m", "test: prerequisite")
-    prerequisite = _git(repo, "rev-parse", "HEAD")
-    tracked.write_text("candidate\n", encoding="utf-8")
-    _git(repo, "add", "tracked.txt")
-    _git(repo, "commit", "-q", "-m", "test: candidate")
-    candidate = _git(repo, "rev-parse", "HEAD")
-    handoff_directory = repo / "docs" / "handovers" / "session-handoffs" / "run"
-    handoff_directory.mkdir(parents=True)
-    return GitContext(repo, handoff_directory, prerequisite, candidate)
+from session_handoff_test_support import (
+    PROJECT_ROOT,
+    GitContext,
+    _git,
+    validator,
+)
 
 
 def _write_records(
@@ -93,9 +37,14 @@ def _write_records(
     handoff_adversarial_reviewer: str = "adversarial-reviewer-1",
     review_adversarial_reviewer: str = "adversarial-reviewer-1",
     terminal_reason: str = "all_declared_gates_passed",
+    branch: str = "main",
+    worktree_state: str = "clean",
+    generated_at: str = "2026-08-02T12:00:00+08:00",
+    reviewed_at: str = "2026-08-02T12:30:00+08:00",
     next_task: str = "none",
     next_task_kind: str = "none",
     review_path: str = "review.md",
+    rounds_text: str | None = None,
 ) -> None:
     prerequisite = prerequisite or context.prerequisite
     result_commit = result_commit or context.candidate
@@ -104,6 +53,7 @@ def _write_records(
     review_approved_commit = review_approved_commit or context.candidate
     final_spec_commit = final_spec_commit or context.candidate
     final_adversarial_commit = final_adversarial_commit or context.candidate
+    rounds_text = rounds_text or f"### Round 1: `{review_candidate}`"
     directory = context.handoff_directory
     (directory / "handoff.md").write_text(
         f"""---
@@ -111,7 +61,7 @@ workflow_version: 2
 task: "workflow gate"
 task_kind: "{task_kind}"
 status: "{status}"
-branch: "main"
+branch: "{branch}"
 prerequisite_commit: "{prerequisite}"
 result_commit: "{result_commit}"
 review_path: "{review_path}"
@@ -124,7 +74,8 @@ spec_reviewer_agent_id: "{handoff_spec_reviewer}"
 adversarial_reviewer_agent_id: "{handoff_adversarial_reviewer}"
 manual_gate: "{manual_gate}"
 terminal_reason: "{terminal_reason}"
-generated_at: "2026-08-02T12:00:00+08:00"
+worktree_state: "{worktree_state}"
+generated_at: "{generated_at}"
 next_task: "{next_task}"
 next_task_kind: "{next_task_kind}"
 ---
@@ -156,14 +107,14 @@ final_adversarial_reviewed_commit: "{final_adversarial_commit}"
 final_adversarial_verdict: "{final_adversarial_verdict}"
 unresolved_blocking_count: "{unresolved_blocking_count}"
 manual_gate: "{manual_gate}"
-reviewed_at: "2026-08-02T12:30:00+08:00"
+reviewed_at: "{reviewed_at}"
 ---
 
 # Review record: workflow gate
 
 ## Review rounds
 
-### Round 1
+{rounds_text}
 
 Both phases approved the final candidate.
 """,
@@ -722,6 +673,9 @@ def test_rejects_unresolved_placeholder_in_generated_markdown(
                 "manual_gate",
                 "terminal_reason",
                 "next_task_kind",
+                "branch",
+                "worktree_state",
+                "generated_at",
             },
         ),
         (
@@ -734,6 +688,7 @@ def test_rejects_unresolved_placeholder_in_generated_markdown(
                 "final_adversarial_verdict",
                 "unresolved_blocking_count",
                 "manual_gate",
+                "reviewed_at",
             },
         ),
         (
@@ -774,3 +729,110 @@ def test_review_only_template_is_explicitly_read_only() -> None:
     assert 'prompt_mode: "review_only"' in template
     assert "不得修改、stage 或 commit tracked 文件" in template
     assert "不得生成 `handoff.md`" in template
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected_fragment"),
+    [
+        ({"handoff_implementers": "none", "review_implementers": "none"}, "implementer"),
+        ({"handoff_root": "none", "review_root": "none"}, "root_agent_id"),
+        (
+            {"handoff_spec_reviewer": "none", "review_spec_reviewer": "none"},
+            "spec_reviewer_agent_id",
+        ),
+        (
+            {
+                "handoff_adversarial_reviewer": "none",
+                "review_adversarial_reviewer": "none",
+            },
+            "adversarial_reviewer_agent_id",
+        ),
+        (
+            {"handoff_root": "root-1,root-2", "review_root": "root-1,root-2"},
+            "single agent id",
+        ),
+        (
+            {
+                "handoff_spec_reviewer": "reviewer-1,reviewer-2",
+                "review_spec_reviewer": "reviewer-1,reviewer-2",
+            },
+            "single agent id",
+        ),
+    ],
+)
+def test_complete_requires_real_state_appropriate_agent_ids(
+    git_context: GitContext,
+    arguments: dict[str, str],
+    expected_fragment: str,
+) -> None:
+    _write_records(git_context, **arguments)
+
+    errors = _validate(git_context)
+
+    assert any(expected_fragment in error for error in errors)
+
+
+def test_complete_allows_no_fixer_when_no_review_fixes_were_needed(
+    git_context: GitContext,
+) -> None:
+    _write_records(git_context, handoff_fixers="none", review_fixers="none")
+
+    assert _validate(git_context) == []
+
+
+@pytest.mark.parametrize(
+    ("handoff_field", "review_field"),
+    [
+        ("handoff_implementers", "review_implementers"),
+        ("handoff_fixers", "review_fixers"),
+    ],
+)
+def test_rejects_none_mixed_with_real_list_role_agent_id(
+    git_context: GitContext,
+    handoff_field: str,
+    review_field: str,
+) -> None:
+    arguments = {
+        handoff_field: "none,real-agent-1",
+        review_field: "none,real-agent-1",
+    }
+    _write_records(git_context, **arguments)
+
+    errors = _validate(git_context)
+
+    assert any("'none' must be the only" in error for error in errors)
+
+
+@pytest.mark.parametrize("dirty_mode", ["unstaged", "staged"])
+def test_complete_rejects_dirty_tracked_state(
+    git_context: GitContext,
+    dirty_mode: str,
+) -> None:
+    _write_records(git_context)
+    (git_context.repo / "tracked.txt").write_text("dirty\n", encoding="utf-8")
+    if dirty_mode == "staged":
+        _git(git_context.repo, "add", "tracked.txt")
+
+    errors = _validate(git_context)
+
+    assert any("tracked worktree and index must be clean" in error for error in errors)
+
+
+def test_complete_ignores_untracked_and_ignored_files(git_context: GitContext) -> None:
+    _write_records(git_context)
+    (git_context.repo / "ordinary-untracked.txt").write_text("local\n", encoding="utf-8")
+    (git_context.repo / ".git" / "info" / "exclude").write_text(
+        "ignored-local.txt\n",
+        encoding="utf-8",
+    )
+    (git_context.repo / "ignored-local.txt").write_text("ignored\n", encoding="utf-8")
+
+    assert _validate(git_context) == []
+
+
+def test_complete_requires_declared_clean_worktree_state(git_context: GitContext) -> None:
+    _write_records(git_context, worktree_state="dirty")
+
+    errors = _validate(git_context)
+
+    assert any("worktree_state must be 'clean'" in error for error in errors)

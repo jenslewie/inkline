@@ -18,8 +18,8 @@ review_verdict: "{{PREVIOUS_REVIEW_VERDICT}}"
 ## Required baseline
 
 - Previous handoff: `{{HANDOFF_PATH}}`
-- Previous review evidence: `{{REVIEW_PATH}}` (`none` before review or when
-  superseded; retained for post-review blocked)
+- Previous review evidence: `{{REVIEW_PATH}}` (`none` before review; retained for
+  post-review blocked or post-review superseded)
 - Previous review verdict: `{{PREVIOUS_REVIEW_VERDICT}}`
 - Previous result commit and new prerequisite: `{{PREREQUISITE_COMMIT}}` (approved
   only when the previous status is `complete`)
@@ -127,7 +127,8 @@ review_verdict: "{{PREVIOUS_REVIEW_VERDICT}}"
 2. Root 直接提交 candidate 到本地 `main`，不要 push。
 3. Root 针对 exact candidate commit 调度所需的 fresh-context、read-only reviewers。
 4. 将 review rounds、findings、dispositions、fix commits 和 re-review 结果追加到
-   `review.md`；不得删除旧 round。
+   `review.md`；不得删除旧 round。Round heading 必须严格使用
+   "### Round N: `<40-character-commit>`"，连续编号并引用真实 commit。
 5. 如有 blocking finding，必须交给 fixer subagent 修改并重复验证、commit 和完整
    review。不得以测试通过代替 re-review。
 6. 完成任何明确要求的人工检查；人工 gate 未通过时不得 complete。

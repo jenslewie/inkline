@@ -58,10 +58,11 @@ docs/handovers/session-handoffs/<run-id>/
 └── next-session-prompt.md
 ```
 
-This full layout describes `complete` with a successor and also a post-review
-`blocked` task. A pre-review `blocked` or `superseded` directory has no `review.md`.
-For `next_task: none`, omit
-`next-session-prompt.md`. For a task that must move its
+This full layout describes `complete` with a successor and any terminal task after
+review has started. A pre-review `blocked` or `superseded` directory has no
+`review.md`. `review_path: none` requires that file to be absent. For
+`next_task: none`, omit `next-session-prompt.md`; an existing prompt is an error. For
+a task that must move its
 still-active review to another session, instantiate
 `docs/templates/review-session-prompt.md`; that prompt is not a handoff and does not
 authorize terminal status.
@@ -121,6 +122,13 @@ Code tasks require two different independent reviewer subagents:
 A documentation-only task may use one independent reviewer covering both phases.
 No reviewer may be an implementer or fixer for the candidate under review. The root's
 own inspection and validation do not replace an independent review.
+
+Agent identity fields are state-aware. `root_agent_id` and each reviewer id are
+single scalar identities, never comma-separated lists. A completed task requires at
+least one real implementer plus a real root, specification reviewer, and adversarial
+reviewer; fixer ids may be `none` when no finding required a fix. A phase with verdict
+`not_run` or `unavailable` has reviewer id `none`. All identities are mutually
+exclusive except that one documentation reviewer may cover both review phases.
 
 ## Task lifecycle
 
@@ -215,6 +223,17 @@ Set workflow state to `ready_for_review`. Instantiate
 entry per review round. Do not create `handoff.md` yet. Never erase an earlier
 rejected candidate or finding.
 
+Every round heading is canonical and commit-bound:
+
+```text
+### Round 1: `<exact-40-character-commit>`
+```
+
+Round numbers are contiguous from 1. The validator ignores examples inside fenced
+code blocks, rejects every other `### Round` form, checks each hash is a commit object
+rather than a tag or another Git object, and requires the final heading to name the
+structured final candidate and all phases that actually ran in that final round.
+
 Dispatch reviewer subagents with fresh context and read-only tracked-file authority.
 The specification reviewer checks completeness against the task and contracts. The
 adversarial reviewer constructs negative cases and looks for invalid states, missing
@@ -291,19 +310,26 @@ Statuses are:
 `complete` requires `review.md` to name the same task, task kind, prerequisite,
 implementer/fixer/reviewer identities, and exact commit. Its structured final round
 must record both required phases as `approved` for the same final candidate,
-`unresolved_blocking_count: 0`, and `manual_gate: passed|not_required`.
+`unresolved_blocking_count: 0`, and `manual_gate: passed|not_required`. Its
+`worktree_state` must be `clean`, and the validator independently rejects staged or
+unstaged tracked changes while ignoring untracked and ignored local artifacts.
 
 Pre-review `blocked` uses `review_verdict: not_run`, `review_path: none`, and reviewer
 ids `none`. Post-review `blocked` uses `review_verdict: changes_requested`, retains
-the append-only `review.md`, and records actual reviewer ids. Its structured final
-round names the result candidate for both phases, records each phase as
-`approved|changes_requested`, and has a positive `unresolved_blocking_count`. Both
-phases may be approved when `terminal_reason` identifies a separate user or manual
-blocker. `superseded` uses
-`review_verdict: not_applicable`, `review_path: none`, and reviewer ids `none`. All
-non-complete forms use `approved_commit: none`, a non-empty `terminal_reason`, and an
-executable successor (`recovery` for blocked, `diagnosis` for superseded). Their
-`result_commit` records the real current `HEAD`, not an approved product baseline.
+the append-only `review.md`, and records actual evidence for every phase that ran.
+Each phase is either `approved|changes_requested` with its reviewer and the result
+candidate, or `not_run|unavailable` with commit and reviewer both `none`; at least one
+phase must have run. It has a positive `unresolved_blocking_count`. Both phases may
+be approved when `terminal_reason` identifies a separate user or manual blocker.
+
+A pre-review `superseded` task uses `review_verdict: not_applicable`,
+`review_path: none`, and reviewer ids `none`. If supersession happens after review
+started, it uses `review_verdict: superseded`, retains `review.md`, records the same
+run/unrun phase evidence, and may have a zero blocking count because replacement—not
+a defect—ended the task. All non-complete forms use `approved_commit: none`, a
+non-empty `terminal_reason`, and an executable successor (`recovery` for blocked,
+`diagnosis` for superseded). Their `result_commit` records the real current `HEAD`,
+not an approved product baseline.
 Do not report `complete` merely because changes were committed or tests passed.
 
 ### 6. Generate the next-session prompt
@@ -355,9 +381,15 @@ must exit zero. For `complete`, the result commit is also the approved commit. F
 `blocked` and `superseded`, it is the current unapproved `HEAD` recorded by the
 terminal handoff. The validator rejects unresolved placeholders, nonterminal or
 unknown handoff statuses, missing successor prompts, symlinked records, path escape,
-stale review evidence, overlapping roles, incomplete final-round metadata,
-non-approved manual gates, nonexistent commits, invalid ancestry, a result different
-from the supplied commit or current `HEAD`, and cross-file metadata mismatches.
+stale review evidence, overlapping or state-inappropriate roles, incomplete or
+noncanonical final-round metadata, non-approved manual gates, nonexistent or
+non-commit Git objects, invalid ancestry, a result different from the supplied commit
+or current `HEAD`, branch drift, and cross-file metadata mismatches. It accepts only
+terminal run directories below the current repository's
+`docs/handovers/session-handoffs/` root and rejects a symlinked run directory, any
+repository-relative symlinked parent, and symlinked record files. Every terminal
+handoff has non-empty `branch`, `worktree_state`, and `generated_at`; every retained
+review has non-empty `reviewed_at`.
 
 This validator is a static consistency gate. It cannot prove that an agent id maps to
 the claimed process, that reviewer context was genuinely fresh, that a reviewer was
@@ -374,9 +406,10 @@ contracts, and artifacts and verify the repository state before acting.
 
 For `complete`, the next session reads `review.md` as acceptance evidence and verifies
 that its approved commit equals the handoff result commit. For post-review `blocked`,
-it reads `review.md` as rejection and blocker evidence, not acceptance. Pre-review
-`blocked` and `superseded` have `review_path: none` and therefore no review record to
-consume. In every case, if `HEAD` has advanced:
+it reads `review.md` as rejection and blocker evidence, not acceptance. A
+post-review `superseded` task retains review history as interruption evidence, not
+acceptance. Pre-review `blocked` and `superseded` have `review_path: none` and
+therefore no review record to consume. In every case, if `HEAD` has advanced:
 
 - when the recorded result commit is still an ancestor, inspect every intervening
   commit and refresh the task baseline before editing;

@@ -31,14 +31,28 @@ For any task that changes tracked implementation, contract, test, or workflow fi
    final-round phase commits and verdicts, zero-blocker count, manual gate, task
    metadata, and mutually exclusive agent identities agree with `handoff.md`, as
    verified by `scripts/validate_session_handoff.py` against the repository's real
-   commit graph and current `HEAD`.
+   commit graph and current `HEAD`. The root, implementer, and each required reviewer
+   must be real agent identities; `fixer_agent_ids` may be `none` when no fix round
+   occurred. A `complete` handoff must declare and actually have a clean tracked
+   index and worktree.
 8. `handoff.md` is generated only for terminal status `complete`, `blocked`, or
    `superseded`. Review workflow states such as `ready_for_review` belong in
    `review.md`, never in handoff status. If review must continue in another session,
    use `docs/templates/review-session-prompt.md`; do not fabricate a terminal
-   handoff. A pre-review blocker is recorded as `not_run` without reviewer evidence;
-   a post-review blocker is `changes_requested` and retains its review and reviewer
-   identities.
+   handoff. A pre-review blocker is recorded as `not_run` without reviewer evidence.
+   A post-review blocker is `changes_requested` and retains every phase that ran;
+   a phase that did not run or was unavailable records commit and reviewer as `none`.
+   A task superseded after review started uses review verdict `superseded` and
+   retains the same partial-review evidence instead of pretending review never ran.
+9. Every recorded review round heading uses exactly
+   "### Round N: `<40-character-commit>`" outside fenced code blocks. Round numbers
+   are contiguous from 1, every round commit is a real commit object, and the final
+   round names the terminal candidate.
+10. Terminal workflow records must live below the current repository's
+    `docs/handovers/session-handoffs/` directory without symlinked run directories,
+    repository-relative parent directories, or record files. `review_path: none`
+    requires `review.md` to be absent; `next_task: none` requires
+    `next-session-prompt.md` to be absent.
 
 ## Multi-session development chains
 

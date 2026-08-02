@@ -46,6 +46,9 @@ Reviewers used fresh context and remained read-only with respect to tracked file
 ## Review rounds
 
 Append each round. Do not remove rejected candidates, findings, or earlier commands.
+The heading is machine-checked: use the exact contiguous round number and a real
+40-character commit hash. Do not use a branch, tag, abbreviated hash, bare heading,
+or fenced example as the recorded round.
 
 ### Round {{ROUND_NUMBER}}: `{{ROUND_CANDIDATE_COMMIT}}`
 
@@ -92,8 +95,15 @@ Append each round. Do not remove rejected candidates, findings, or earlier comma
 
 For an approved final review, both phase verdicts are `approved`, both reviewed
 commits equal `candidate_commit`, `approved_commit` equals that candidate, and the
-blocking count is `0`. For a blocked post-review record, use overall verdict
-`changes_requested`, `approved_commit: none`, both phase commits equal the candidate,
-each phase verdict is `approved|changes_requested`, and the blocking count is a
-positive integer. Both phases may be approved when the structured terminal reason
-records a separate user or manual blocker.
+blocking count is `0`. Root, implementer, and both required reviewer identities must
+be real and mutually exclusive; fixer ids may be `none` when no fix round occurred.
+
+For a blocked post-review record, use overall verdict `changes_requested`,
+`approved_commit: none`, and a positive blocking count. For a task superseded after
+review started, use overall verdict `superseded`, `approved_commit: none`, and a
+non-negative blocking count. In either case, each phase that ran records
+`approved|changes_requested`, the candidate commit, and its real reviewer. A phase
+that did not run or was unavailable records `not_run|unavailable`, reviewed commit
+`none`, and reviewer id `none`; at least one phase must have run. Both phases may be
+approved when the terminal reason records a separate user, manual, or supersession
+condition. `reviewed_at` is required whenever this file is retained.

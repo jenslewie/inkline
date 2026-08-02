@@ -168,11 +168,13 @@ Additional terminal states remain:
 Terminal records use explicit approval semantics. `complete` carries the approved
 review path and commit. A pre-review `blocked` record carries `not_run` and no review
 identity; a post-review `blocked` record carries `changes_requested` and retains the
-review evidence and actual reviewer identities. `superseded` carries
-`not_applicable` and no review identity. Non-complete states have no approved commit,
-must explain `terminal_reason`, and must provide an executable `recovery` or
-`diagnosis` successor prompt. Active `ready_for_review` work has no handoff at all;
-it continues through the review-only prompt contract.
+review evidence and the identities of phases that actually ran. A pre-review
+`superseded` record carries `not_applicable` and no review identity; a task superseded
+after review began carries `superseded` and retains partial review evidence.
+Non-complete states have no approved commit, must explain `terminal_reason`, and must
+provide an executable `recovery` or `diagnosis` successor prompt. Active
+`ready_for_review` work has no handoff at all; it continues through the review-only
+prompt contract.
 
 `ready_for_review`, `changes_requested`, and `approved` are review workflow states.
 Only `complete`, `blocked`, and `superseded` are final handoff statuses.
@@ -244,11 +246,23 @@ gate.
 The review record is append-only across review rounds. A later approval must not
 erase earlier findings or failed candidate commits.
 
+Round headings use exactly "### Round N: `<40-character-commit>`" outside fenced
+code blocks. Numbers are
+contiguous from 1, each hash must name a commit object, and the final round commit
+must equal the candidate and every phase commit that actually ran in that round.
+
 The final `handoff.md` links to `review.md`, names the approved commit, and summarizes
 resolved and deferred findings. It may use `status: complete` only when the review
 record's final verdict is `approved` for the same commit. Handoff agent fields record
 implementers, fixers, root, and both reviewers; those roles are mutually exclusive
 except that one documentation reviewer may cover both review phases.
+
+Identities are state-aware. `root_agent_id` and each reviewer field are single
+identities rather than lists. `complete` requires a real root, at least one real
+implementer, and real required reviewers; fixer ids may be `none`. For an interrupted
+post-review terminal record, each phase is `approved|changes_requested` with its
+reviewer and candidate commit, or `not_run|unavailable` with reviewer and commit both
+`none`. At least one phase must have run.
 
 The next-session prompt names the exact handoff and result commit. For `complete`, it
 also names the approved review; for post-review `blocked`, it retains rejection
@@ -256,6 +270,15 @@ evidence; pre-review `blocked` and `superseded` use `review_path: none`. It must
 a baseline where `HEAD` contains unexplained commits after the recorded result. No
 prompt is required for `next_task: none`; otherwise prompt metadata must match the
 handoff's successor task and kind.
+
+Terminal records are accepted only from the current repository's
+`docs/handovers/session-handoffs/` tree, with no symlinked run directory,
+repository-relative parent, or record file. `review_path: none` means `review.md` is
+absent; `next_task: none` means the next-session prompt is absent. Every terminal
+handoff records non-empty branch, worktree state, and generation time, every retained
+review records its review time, and the recorded branch matches the live branch.
+Completed tasks additionally require both declared and actual clean tracked index
+and worktree state; ignored and untracked local artifacts do not invalidate them.
 
 ## Updated Session Lifecycle
 

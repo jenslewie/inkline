@@ -44,14 +44,24 @@ next_task_kind: "{{NEXT_TASK_KIND}}"
 - Manual review evidence: {{MANUAL_REVIEW_RESULT}}
 
 For `complete`, use `review_verdict: approved`, a real approved commit equal to the
-result commit, and `manual_gate: passed|not_required`. A pre-review `blocked` record
-uses `review_verdict: not_run`, `review_path: none`, and reviewer ids `none`. A
-post-review `blocked` record uses `review_verdict: changes_requested`, retains
-`review.md`, and records the actual reviewer ids. Both blocked forms use
-`approved_commit: none` and `manual_gate: pending|failed|not_required`.
-`superseded` uses `review_verdict: not_applicable`, `review_path: none`, no approved
-commit, and reviewer ids `none`. `terminal_reason` must always state why this exact
-terminal status is justified.
+result commit, `manual_gate: passed|not_required`, `worktree_state: clean`, and a
+clean tracked index and worktree. Root, implementer, and required reviewer identities
+must be real; fixer ids may be `none`.
+
+A pre-review `blocked` record uses `review_verdict: not_run`, `review_path: none`,
+and reviewer ids `none`. A post-review `blocked` record uses
+`review_verdict: changes_requested` and retains `review.md`. Each phase that ran has
+a real reviewer; each `not_run|unavailable` phase has reviewer id `none`. Both blocked
+forms use `approved_commit: none` and
+`manual_gate: pending|failed|not_required`.
+
+A pre-review `superseded` record uses `review_verdict: not_applicable`,
+`review_path: none`, and reviewer ids `none`. A post-review superseded record uses
+`review_verdict: superseded` and retains the partial review and phase identities.
+`review_path: none` requires `review.md` to be absent. `next_task: none` requires
+`next-session-prompt.md` to be absent. Every terminal record requires non-empty
+`branch`, `worktree_state`, `generated_at`, and `terminal_reason` values; `branch`
+must match the live branch.
 
 ## Authoritative contracts
 
