@@ -135,6 +135,156 @@ def test_rejects_noncanonical_absolute_review_path(git_context: GitContext) -> N
     assert any("review_path" in error and "canonical" in error for error in errors)
 
 
+@pytest.mark.parametrize(
+    ("field", "canonical_value"),
+    [
+        ("workflow_version", "2"),
+        ("task_kind", "code"),
+        ("root_agent_id", "root-agent-1"),
+    ],
+)
+def test_rejects_surrounding_whitespace_in_matching_handoff_and_review_machine_fields(
+    git_context: GitContext,
+    field: str,
+    canonical_value: str,
+) -> None:
+    _write_records(git_context)
+    for record_name in ("handoff.md", "review.md"):
+        record = git_context.handoff_directory / record_name
+        original = (
+            "workflow_version: 2"
+            if field == "workflow_version"
+            else f'{field}: "{canonical_value}"'
+        )
+        record.write_text(
+            record.read_text(encoding="utf-8").replace(
+                original,
+                f'{field}: " {canonical_value} "',
+            ),
+            encoding="utf-8",
+        )
+
+    errors = _validate(git_context)
+
+    assert any(
+        record_name in error and field in error and "surrounding whitespace" in error
+        for record_name in ("handoff.md", "review.md")
+        for error in errors
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "canonical_value"),
+    [
+        ("status", "complete"),
+        ("review_path", "review.md"),
+    ],
+)
+def test_rejects_surrounding_whitespace_in_handoff_machine_fields(
+    git_context: GitContext,
+    field: str,
+    canonical_value: str,
+) -> None:
+    _write_records(git_context)
+    handoff = git_context.handoff_directory / "handoff.md"
+    handoff.write_text(
+        handoff.read_text(encoding="utf-8").replace(
+            f'{field}: "{canonical_value}"',
+            f'{field}: " {canonical_value} "',
+        ),
+        encoding="utf-8",
+    )
+
+    errors = _validate(git_context)
+
+    assert any(field in error and "surrounding whitespace" in error for error in errors)
+
+
+def test_rejects_surrounding_whitespace_in_next_prompt_machine_field(
+    git_context: GitContext,
+) -> None:
+    _write_records(git_context, next_task="next bounded task", next_task_kind="code")
+    _write_next_prompt(
+        git_context,
+        prompt_mode=" implementation ",
+    )
+
+    errors = _validate(git_context)
+
+    assert any(
+        "next-session-prompt.md" in error
+        and "prompt_mode" in error
+        and "surrounding whitespace" in error
+        for error in errors
+    )
+
+
+@pytest.mark.parametrize("status", ["blocked", "superseded"])
+@pytest.mark.parametrize("padded_none", [" none ", "\tnone\t", "\u00a0none\u00a0"])
+def test_pre_review_terminal_rejects_padded_none_as_missing_recovery_task(
+    git_context: GitContext,
+    status: str,
+    padded_none: str,
+) -> None:
+    verdict = "not_run" if status == "blocked" else "not_applicable"
+    _write_records(
+        git_context,
+        status=status,
+        handoff_approved_commit="none",
+        handoff_verdict=verdict,
+        review_path="none",
+        handoff_fixers="none",
+        handoff_spec_reviewer="none",
+        handoff_adversarial_reviewer="none",
+        terminal_reason="pre_review_terminal",
+        next_task=padded_none,
+        next_task_kind=padded_none,
+    )
+    (git_context.handoff_directory / "review.md").unlink()
+
+    errors = _validate(git_context)
+
+    assert any("must name a recovery or diagnosis task" in error for error in errors)
+
+
+@pytest.mark.parametrize("status", ["blocked", "superseded"])
+def test_post_review_terminal_rejects_padded_none_as_missing_recovery_task(
+    git_context: GitContext,
+    status: str,
+) -> None:
+    verdict = "changes_requested" if status == "blocked" else "superseded"
+    _write_records(
+        git_context,
+        status=status,
+        handoff_approved_commit="none",
+        handoff_verdict=verdict,
+        review_approved_commit="none",
+        review_verdict=verdict,
+        final_spec_verdict="changes_requested" if status == "blocked" else "approved",
+        unresolved_blocking_count="1" if status == "blocked" else "0",
+        manual_gate="pending" if status == "blocked" else "not_required",
+        terminal_reason="post_review_terminal",
+        next_task=" none ",
+        next_task_kind=" none ",
+    )
+
+    errors = _validate(git_context)
+
+    assert any("must name a recovery or diagnosis task" in error for error in errors)
+
+
+def test_agent_lists_explicitly_allow_whitespace_after_commas(
+    git_context: GitContext,
+) -> None:
+    _write_records(
+        git_context,
+        handoff_implementers="implementer-1, implementer-2",
+        review_implementers="implementer-2, implementer-1",
+    )
+
+    assert _validate(git_context) == []
+
+
 def test_rejects_outside_symlink_alias_to_current_review(git_context: GitContext) -> None:
     outside_alias = git_context.handoff_directory.parent / "review-alias.md"
     outside_alias.symlink_to(git_context.handoff_directory / "review.md")

@@ -113,9 +113,11 @@ def _front_matter(path: Path, errors: list[str]) -> dict[str, str]:
 
 
 def _require(metadata: dict[str, str], field: str, source: str, errors: list[str]) -> str:
-    value = metadata.get(field, "").strip()
-    if not value:
+    value = metadata.get(field, "")
+    if not value.strip():
         errors.append(f"{source}: required field {field!r} is missing or empty")
+    elif value != value.strip():
+        errors.append(f"{source}: field {field!r} must not contain surrounding whitespace")
     return value
 
 
@@ -774,7 +776,8 @@ def _validate_nonapproved_terminal(
         errors.append(
             f"handoff.md: manual_gate must be pending, failed, or not_required for status {status}"
         )
-    if handoff.get("next_task") in {None, "", "none"}:
+    normalized_next_task = (handoff.get("next_task") or "").strip()
+    if normalized_next_task in {"", "none"}:
         errors.append(
             f"handoff.md: status {status} must name a recovery or diagnosis task in next_task"
         )
