@@ -28,8 +28,17 @@ For any task that changes tracked implementation, contract, test, or workflow fi
    task cannot be called complete while a required check is unavailable, a blocking
    finding is unresolved, or a manual review gate is pending.
 7. Final `complete` status requires a generated `review.md` whose approved commit,
-   verdict, task metadata, and agent identities agree with `handoff.md`, as verified
-   by `scripts/validate_session_handoff.py`.
+   final-round phase commits and verdicts, zero-blocker count, manual gate, task
+   metadata, and mutually exclusive agent identities agree with `handoff.md`, as
+   verified by `scripts/validate_session_handoff.py` against the repository's real
+   commit graph and current `HEAD`.
+8. `handoff.md` is generated only for terminal status `complete`, `blocked`, or
+   `superseded`. Review workflow states such as `ready_for_review` belong in
+   `review.md`, never in handoff status. If review must continue in another session,
+   use `docs/templates/review-session-prompt.md`; do not fabricate a terminal
+   handoff. A pre-review blocker is recorded as `not_run` without reviewer evidence;
+   a post-review blocker is `changes_requested` and retains its review and reviewer
+   identities.
 
 ## Multi-session development chains
 
@@ -51,13 +60,16 @@ For work that is explicitly split across sequential Codex sessions:
 7. After implementation validation, commit a candidate and complete the independent
    review gate defined by the workflow document. Do not treat the candidate commit
    as accepted before review.
-8. After approval of the exact final local commit, write a factual review record,
-   handoff, and next-session prompt under
+8. After approval of the exact final local commit, write a factual review record and
+   terminal handoff under
    `docs/handovers/session-handoffs/<run-id>/`, using the tracked templates in
-   [`docs/templates`](docs/templates/).
-9. The generated next-session prompt must contain the actual approved commit and real
-   paths, contain no unresolved placeholders, and require the next session to verify
-   its baseline before acting.
+   [`docs/templates`](docs/templates/). Write a next-session prompt when `next_task`
+   is not `none`; omit it when no next task exists. A blocked or superseded terminal
+   handoff instead requires an executable recovery or diagnosis prompt.
+9. The generated next-session prompt must contain the actual result commit and real
+   paths; for `complete` it must also contain the approved review metadata. It must
+   contain no unresolved placeholders and require the next session to verify its
+   baseline before acting.
 10. Before reporting `complete`, run:
 
     ```bash

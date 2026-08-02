@@ -45,8 +45,11 @@ The workflow itself is version controlled:
 - `docs/templates/session-review.md`
 - `docs/templates/session-handoff.md`
 - `docs/templates/next-session-prompt.md`
+- `docs/templates/review-session-prompt.md`
 
-Per-session results are local review artifacts and are not committed:
+Per-session results are local review artifacts and are not committed. During review,
+the run directory may contain only `review.md` and an optional review-only prompt.
+`handoff.md` is created only after the task reaches a terminal state:
 
 ```text
 docs/handovers/session-handoffs/<run-id>/
@@ -54,6 +57,14 @@ docs/handovers/session-handoffs/<run-id>/
 ├── handoff.md
 └── next-session-prompt.md
 ```
+
+This full layout describes `complete` with a successor and also a post-review
+`blocked` task. A pre-review `blocked` or `superseded` directory has no `review.md`.
+For `next_task: none`, omit
+`next-session-prompt.md`. For a task that must move its
+still-active review to another session, instantiate
+`docs/templates/review-session-prompt.md`; that prompt is not a handoff and does not
+authorize terminal status.
 
 Use a sortable run id such as:
 
@@ -201,7 +212,8 @@ the independent review gate approves this exact commit.
 
 Set workflow state to `ready_for_review`. Instantiate
 `docs/templates/session-review.md` as `review.md` in the run directory and append one
-entry per review round. Never erase an earlier rejected candidate or finding.
+entry per review round. Do not create `handoff.md` yet. Never erase an earlier
+rejected candidate or finding.
 
 Dispatch reviewer subagents with fresh context and read-only tracked-file authority.
 The specification reviewer checks completeness against the task and contracts. The
@@ -235,8 +247,11 @@ If reviewers disagree, the root compares both claims to repository evidence. It 
 reject a finding only with recorded evidence. An unresolved contract decision is
 escalated to the user and approval is withheld.
 
-If review cannot fit safely in the current session, generate a separate review-task
-prompt and leave the state `ready_for_review`. Do not mark the task `complete`.
+If review cannot fit safely in the current session, instantiate
+`docs/templates/review-session-prompt.md` and leave the review state
+`ready_for_review`. The prompt uses `prompt_mode: review_only`, names the exact
+candidate and one review phase, and grants no tracked-file write authority. Do not
+generate `handoff.md` or mark the task `complete`.
 
 User-mandated manual inspection is an additional blocking gate. It runs after
 automated and agent review at the point declared by the task, and cannot be replaced
@@ -244,9 +259,10 @@ by either. A task with pending manual review remains incomplete.
 
 ### 5. Generate the handoff
 
-Only after approval of the exact final commit and any required manual gate,
-instantiate `docs/templates/session-handoff.md` in the session-handoff run directory
-using `apply_patch`, and replace every placeholder with a verified value.
+Instantiate `docs/templates/session-handoff.md` only when the session reaches one of
+the terminal statuses below. For `complete`, this occurs after approval of the exact
+final commit and any required manual gate. Use `apply_patch` and replace every
+placeholder with a verified value.
 
 The handoff records at minimum:
 
@@ -254,7 +270,9 @@ The handoff records at minimum:
 - branch and prerequisite commit;
 - result commit;
 - task kind and root/implementer/fixer agent ids;
+- specification and adversarial reviewer agent ids;
 - review path, final verdict, and approved commit;
+- manual gate state and terminal reason;
 - final worktree state;
 - authoritative contracts;
 - changed files and owned behavior;
@@ -271,19 +289,36 @@ Statuses are:
 - `superseded`: the planned task or contract was replaced before completion.
 
 `complete` requires `review.md` to name the same task, task kind, prerequisite,
-implementer identities, and exact commit; its final verdict must be `approved`.
-`blocked` and `superseded` records must state what prevented approval. Do not report
-`complete` merely because changes were committed or tests passed.
+implementer/fixer/reviewer identities, and exact commit. Its structured final round
+must record both required phases as `approved` for the same final candidate,
+`unresolved_blocking_count: 0`, and `manual_gate: passed|not_required`.
+
+Pre-review `blocked` uses `review_verdict: not_run`, `review_path: none`, and reviewer
+ids `none`. Post-review `blocked` uses `review_verdict: changes_requested`, retains
+the append-only `review.md`, and records actual reviewer ids. Its structured final
+round names the result candidate for both phases, records each phase as
+`approved|changes_requested`, and has a positive `unresolved_blocking_count`. Both
+phases may be approved when `terminal_reason` identifies a separate user or manual
+blocker. `superseded` uses
+`review_verdict: not_applicable`, `review_path: none`, and reviewer ids `none`. All
+non-complete forms use `approved_commit: none`, a non-empty `terminal_reason`, and an
+executable successor (`recovery` for blocked, `diagnosis` for superseded). Their
+`result_commit` records the real current `HEAD`, not an approved product baseline.
+Do not report `complete` merely because changes were committed or tests passed.
 
 ### 6. Generate the next-session prompt
 
-After writing the handoff, instantiate `docs/templates/next-session-prompt.md` beside
-it using `apply_patch`, and replace all placeholders.
+When `next_task` is not `none`, instantiate
+`docs/templates/next-session-prompt.md` beside the terminal handoff using
+`apply_patch`, and replace all placeholders. When `next_task: none`, also set
+`next_task_kind: none` and omit the prompt.
 
 The generated prompt must:
 
 1. point to the exact handoff path;
-2. name the actual approved result commit and final review path;
+2. for `complete`, name the approved result commit and final review path; for
+   `blocked` or `superseded`, name the unapproved current result and reproduce its
+   review path (`review.md` after a real blocked review, otherwise `none`);
 3. require the next root agent to use the repository's strict subagent roles;
 4. name every authoritative contract and accepted input artifact;
 5. state one next task and its boundary;
@@ -293,9 +328,18 @@ The generated prompt must:
 9. forbid starting the following task;
 10. contain no unresolved `{{PLACEHOLDER}}` tokens.
 
-For a `blocked` handoff, generate a recovery or diagnosis prompt rather than an
-implementation prompt. For a terminal task with no agreed successor, set
-`next_task: none` in the handoff and do not invent more work.
+The prompt front matter includes the exact `handoff_path` and must reproduce the
+handoff's workflow version, previous task, `next_task`, `next_task_kind`, result
+commit, review path, and verdict. Prompt modes are fixed by terminal status:
+
+- `complete -> implementation`;
+- `blocked -> recovery`;
+- `superseded -> diagnosis`.
+
+For a `blocked` handoff, generate a recovery prompt; for `superseded`, generate a
+diagnosis prompt. Only a `complete` terminal task with no agreed successor may set
+`next_task: none` and omit the prompt; blocked and superseded records must name the
+task that can resolve or replace them.
 
 Validate generated files before finishing. This command is a mandatory completion
 gate, not an optional lint:
@@ -303,12 +347,24 @@ gate, not an optional lint:
 ```bash
 uv run python scripts/validate_session_handoff.py \
   docs/handovers/session-handoffs/<run-id>/ \
-  --expected-commit <approved-commit>
+  --expected-commit <result-commit>
 ```
 
-The command must exit zero. It rejects unresolved placeholders, missing or stale
-review evidence, self-review, non-independent code reviewers, and commit or metadata
-mismatches.
+`--expected-commit` is required. The command finds the enclosing Git repository and
+must exit zero. For `complete`, the result commit is also the approved commit. For
+`blocked` and `superseded`, it is the current unapproved `HEAD` recorded by the
+terminal handoff. The validator rejects unresolved placeholders, nonterminal or
+unknown handoff statuses, missing successor prompts, symlinked records, path escape,
+stale review evidence, overlapping roles, incomplete final-round metadata,
+non-approved manual gates, nonexistent commits, invalid ancestry, a result different
+from the supplied commit or current `HEAD`, and cross-file metadata mismatches.
+
+This validator is a static consistency gate. It cannot prove that an agent id maps to
+the claimed process, that reviewer context was genuinely fresh, that a reviewer was
+actually read-only, that narrative findings are exhaustive, or that a human really
+performed a declared manual inspection. Agent transcripts and recorded evidence
+remain necessary for those claims; the validator deliberately does not parse or
+over-constrain free-text review prose.
 
 ## Starting the next session
 
@@ -316,22 +372,29 @@ The user can paste `next-session-prompt.md` into a new conversation without copy
 the old conversation. The new session must still read the referenced handoff,
 contracts, and artifacts and verify the repository state before acting.
 
-The next session reads `review.md` as acceptance evidence and verifies that its
-approved commit equals the handoff result commit. If `HEAD` has advanced:
+For `complete`, the next session reads `review.md` as acceptance evidence and verifies
+that its approved commit equals the handoff result commit. For post-review `blocked`,
+it reads `review.md` as rejection and blocker evidence, not acceptance. Pre-review
+`blocked` and `superseded` have `review_path: none` and therefore no review record to
+consume. In every case, if `HEAD` has advanced:
 
 - when the recorded result commit is still an ancestor, inspect every intervening
   commit and refresh the task baseline before editing;
 - when it is not an ancestor, treat the prompt as stale and stop for reconciliation.
 
-Even when the approved commit remains an ancestor, any intervening tracked change
-that affects the accepted artifact invalidates reuse of that approval for the altered
-artifact. Re-open the owning task and review the new exact commit.
+For `complete`, even when the approved commit remains an ancestor, any intervening
+tracked change that affects the accepted artifact invalidates reuse of that approval
+for the altered artifact. For non-complete recovery, intervening commits must be
+reconciled against the recorded unapproved result before acting.
 
 ## Failure, recovery, and terminal states
 
 - `blocked`: a user decision, missing authority, unavailable prerequisite, required
-  check, reviewer, or manual gate prevents approval.
+  check, reviewer, or manual gate prevents approval. Its successor prompt uses
+  `prompt_mode: recovery`.
 - `superseded`: the task or governing contract was replaced before acceptance.
+- A superseded successor prompt uses `prompt_mode: diagnosis` to establish the
+  replacement contract and baseline before implementation.
 - `complete`: all declared validation, independent reviews, and required manual gates
   approved the exact result commit.
 

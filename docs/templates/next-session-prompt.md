@@ -1,8 +1,10 @@
 ---
 workflow_version: 2
+prompt_mode: "{{PROMPT_MODE}}"
 previous_task: "{{PREVIOUS_TASK_NAME}}"
 task: "{{NEXT_TASK_NAME}}"
 task_kind: "{{NEXT_TASK_KIND}}"
+handoff_path: "{{HANDOFF_PATH}}"
 prerequisite_commit: "{{PREREQUISITE_COMMIT}}"
 review_path: "{{REVIEW_PATH}}"
 review_verdict: "{{PREVIOUS_REVIEW_VERDICT}}"
@@ -16,9 +18,11 @@ review_verdict: "{{PREVIOUS_REVIEW_VERDICT}}"
 ## Required baseline
 
 - Previous handoff: `{{HANDOFF_PATH}}`
-- Previous review: `{{REVIEW_PATH}}`
+- Previous review evidence: `{{REVIEW_PATH}}` (`none` before review or when
+  superseded; retained for post-review blocked)
 - Previous review verdict: `{{PREVIOUS_REVIEW_VERDICT}}`
-- Prerequisite and approved commit: `{{PREREQUISITE_COMMIT}}`
+- Previous result commit and new prerequisite: `{{PREREQUISITE_COMMIT}}` (approved
+  only when the previous status is `complete`)
 - Authoritative contracts:
 {{AUTHORITATIVE_CONTRACTS}}
 - Accepted upstream artifacts:
@@ -127,7 +131,8 @@ review_verdict: "{{PREVIOUS_REVIEW_VERDICT}}"
 5. 如有 blocking finding，必须交给 fixer subagent 修改并重复验证、commit 和完整
    review。不得以测试通过代替 re-review。
 6. 完成任何明确要求的人工检查；人工 gate 未通过时不得 complete。
-7. 只有 exact final commit 获得 `approved` 后，才使用：
+7. 只有 exact final commit 获得 `approved` 后，才生成 terminal handoff；
+   `blocked` 和 `superseded` 则按模板的非批准语义生成 terminal handoff。使用：
    - `docs/templates/session-review.md`
    - `docs/templates/session-handoff.md`
    - `docs/templates/next-session-prompt.md`
@@ -144,7 +149,12 @@ review_verdict: "{{PREVIOUS_REVIEW_VERDICT}}"
     ```bash
     uv run python scripts/validate_session_handoff.py \
       docs/handovers/session-handoffs/{{HANDOFF_RUN_ID}}/ \
-      --expected-commit {{APPROVED_COMMIT}}
+      --expected-commit "$(git rev-parse HEAD)"
     ```
 
 12. validator exit zero 后停止，不要在本会话开始下一任务。
+
+`prompt_mode` 必须与 previous handoff 一致：`complete -> implementation`、
+`blocked -> recovery`、`superseded -> diagnosis`。本模板只用于 terminal handoff
+之后的下一任务；跨会话继续当前候选的只读 review 时，使用
+`docs/templates/review-session-prompt.md`。

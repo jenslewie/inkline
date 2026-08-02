@@ -165,6 +165,15 @@ Additional terminal states remain:
   unavailable prerequisite;
 - `superseded`: the task or governing contract was replaced before acceptance.
 
+Terminal records use explicit approval semantics. `complete` carries the approved
+review path and commit. A pre-review `blocked` record carries `not_run` and no review
+identity; a post-review `blocked` record carries `changes_requested` and retains the
+review evidence and actual reviewer identities. `superseded` carries
+`not_applicable` and no review identity. Non-complete states have no approved commit,
+must explain `terminal_reason`, and must provide an executable `recovery` or
+`diagnosis` successor prompt. Active `ready_for_review` work has no handoff at all;
+it continues through the review-only prompt contract.
+
 `ready_for_review`, `changes_requested`, and `approved` are review workflow states.
 Only `complete`, `blocked`, and `superseded` are final handoff statuses.
 
@@ -226,15 +235,27 @@ docs/handovers/session-handoffs/<run-id>/
 - fix commits and re-review rounds;
 - final verdict and approved commit.
 
+The final decision is also machine-readable: `final_round`, each phase's reviewed
+commit and verdict, `unresolved_blocking_count`, and `manual_gate`. Both phases must
+approve the same final candidate. Narrative review rounds remain append-only, while
+the structured final fields summarize the last recorded round for the completion
+gate.
+
 The review record is append-only across review rounds. A later approval must not
 erase earlier findings or failed candidate commits.
 
 The final `handoff.md` links to `review.md`, names the approved commit, and summarizes
 resolved and deferred findings. It may use `status: complete` only when the review
-record's final verdict is `approved` for the same commit.
+record's final verdict is `approved` for the same commit. Handoff agent fields record
+implementers, fixers, root, and both reviewers; those roles are mutually exclusive
+except that one documentation reviewer may cover both review phases.
 
-The next-session prompt names the approved commit and review path. It must refuse a
-baseline where `HEAD` contains unexplained commits after the approval.
+The next-session prompt names the exact handoff and result commit. For `complete`, it
+also names the approved review; for post-review `blocked`, it retains rejection
+evidence; pre-review `blocked` and `superseded` use `review_path: none`. It must refuse
+a baseline where `HEAD` contains unexplained commits after the recorded result. No
+prompt is required for `next_task: none`; otherwise prompt metadata must match the
+handoff's successor task and kind.
 
 ## Updated Session Lifecycle
 
@@ -261,8 +282,9 @@ The revised lifecycle is:
 - If reviewers disagree, the root evaluates both findings against repository
   evidence. An unresolved contract decision is escalated to the user.
 - If context or time is insufficient for review, the task remains
-  `ready_for_review`; a separate user-visible review task is generated. It is not
-  marked `complete`.
+  `ready_for_review`; a `prompt_mode: review_only` prompt is generated from
+  `docs/templates/review-session-prompt.md`. It grants read-only tracked-file scope,
+  is not a terminal handoff, and cannot mark the task `complete`.
 - If the candidate commit is no longer an ancestor of `HEAD`, review stops until the
   baseline is reconciled.
 - If implementation reveals an upstream contract defect, the current downstream
@@ -280,6 +302,7 @@ The implementation of this design will update:
   commit;
 - `docs/templates/next-session-prompt.md` to require review-baseline verification;
 - a new tracked `docs/templates/session-review.md` template;
+- a new tracked `docs/templates/review-session-prompt.md` template;
 - focused documentation tests or validation scripts that reject `complete` handoffs
   without matching approval evidence and reject unresolved placeholders.
 
@@ -307,6 +330,8 @@ The workflow change is complete only when:
 - next-session prompts validate the approved commit and review path;
 - blocked, superseded, manual-review, and separate-session escalation paths are
   documented;
+- the validator checks real Git commits, ancestry, expected commit, and current
+  `HEAD`, plus symlink/path safety and structured final-round approval;
 - changed documentation links and placeholders pass automated checks;
 - the workflow itself receives an independent review before its implementation task
   is marked complete.
