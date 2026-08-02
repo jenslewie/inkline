@@ -17,6 +17,8 @@ from yaml.nodes import MappingNode, ScalarNode
 
 PLACEHOLDER_PATTERN = re.compile(r"\{\{[^{}]+\}\}")
 CANONICAL_NONNEGATIVE_INTEGER_PATTERN = re.compile(r"(?:0|[1-9][0-9]*)")
+CANONICAL_INTEGER_TOKEN_PATTERN = re.compile(r'(?:0|[1-9][0-9]*|"(?:0|[1-9][0-9]*)")')
+DECODED_LINE_BREAK_PATTERN = re.compile(r"[\r\n\x85\u2028\u2029]")
 COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
 TERMINAL_STATUSES = {"complete", "blocked", "superseded"}
 TASK_KINDS = {"code", "documentation"}
@@ -39,9 +41,15 @@ def _validate_generated_front_matter_key(
     enabled: bool,
     errors: list[str],
 ) -> None:
-    if enabled and PLACEHOLDER_PATTERN.search(key):
+    if not enabled:
+        return
+    if PLACEHOLDER_PATTERN.search(key):
         errors.append(
             f"{path.name}:{line_number}: unresolved placeholder in decoded front-matter key"
+        )
+    if DECODED_LINE_BREAK_PATTERN.search(key):
+        errors.append(
+            f"{path.name}:{line_number}: decoded front-matter keys must be single-line strings"
         )
 
 
@@ -49,6 +57,7 @@ def _validate_generated_front_matter_value(
     path: Path,
     key: str,
     value: str,
+    source_token: str,
     line_number: int,
     *,
     enabled: bool,
@@ -61,13 +70,19 @@ def _validate_generated_front_matter_value(
             f"{path.name}:{line_number}: unresolved placeholder "
             f"in decoded front-matter field {key!r}"
         )
-    if (
-        key in INTEGER_FRONT_MATTER_FIELDS
-        and CANONICAL_NONNEGATIVE_INTEGER_PATTERN.fullmatch(value) is None
+    if DECODED_LINE_BREAK_PATTERN.search(value):
+        errors.append(
+            f"{path.name}:{line_number}: front-matter field {key!r} "
+            "must be a single-line string scalar after YAML decoding"
+        )
+    if key in INTEGER_FRONT_MATTER_FIELDS and (
+        CANONICAL_NONNEGATIVE_INTEGER_PATTERN.fullmatch(value) is None
+        or CANONICAL_INTEGER_TOKEN_PATTERN.fullmatch(source_token) is None
     ):
         errors.append(
             f"{path.name}:{line_number}: front-matter field {key!r} "
-            "must use canonical ASCII decimal notation"
+            "must use canonical ASCII decimal notation, plain or double-quoted "
+            "and without YAML escapes"
         )
 
 
@@ -162,10 +177,12 @@ def _front_matter(
             )
             continue
         value = value_node.value
+        source_token = front_matter[value_node.start_mark.index : value_node.end_mark.index]
         _validate_generated_front_matter_value(
             path,
             key,
             value,
+            source_token,
             value_node.start_mark.line + 2,
             enabled=validate_generated_metadata,
             errors=errors,
@@ -326,7 +343,10 @@ def _validate_no_legacy_grafts(repo: Path, errors: list[str]) -> None:
 
 
 def _validate_clean_tracked_state(repo: Path, errors: list[str]) -> None:
-    status_result = _git(repo, ["status", "--porcelain", "--untracked-files=no"])
+    status_result = _git(
+        repo,
+        ["status", "--porcelain", "--untracked-files=no", "--ignore-submodules=none"],
+    )
     if status_result.returncode != 0 or status_result.stdout.strip():
         errors.append("repository tracked worktree and index must be clean for status complete")
     flags_result = _git(repo, ["ls-files", "-v", "-z"])

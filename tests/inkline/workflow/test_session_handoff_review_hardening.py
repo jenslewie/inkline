@@ -39,6 +39,52 @@ def test_complete_with_ordinary_clean_index_still_ignores_local_files(
     assert _validate(git_context) == []
 
 
+def test_complete_rejects_dirty_submodule_hidden_by_repository_config(
+    git_context: GitContext,
+) -> None:
+    submodule_origin = git_context.repo.parent / "submodule-origin"
+    submodule_origin.mkdir()
+    _git(submodule_origin, "init", "-q", "-b", "main")
+    _git(submodule_origin, "config", "user.email", "workflow-test@example.invalid")
+    _git(submodule_origin, "config", "user.name", "Workflow Test")
+    submodule_file = submodule_origin / "tracked.txt"
+    submodule_file.write_text("first\n", encoding="utf-8")
+    _git(submodule_origin, "add", "tracked.txt")
+    _git(submodule_origin, "commit", "-q", "-m", "test: first submodule commit")
+
+    _git(
+        git_context.repo,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-q",
+        str(submodule_origin),
+        "child-module",
+    )
+    _git(git_context.repo, "commit", "-q", "-am", "test: add submodule")
+    parent_candidate = _git(git_context.repo, "rev-parse", "HEAD")
+    submodule_context = GitContext(
+        repo=git_context.repo,
+        handoff_directory=git_context.handoff_directory,
+        prerequisite=git_context.candidate,
+        candidate=parent_candidate,
+    )
+    _write_records(submodule_context)
+
+    submodule_file.write_text("second\n", encoding="utf-8")
+    _git(submodule_origin, "add", "tracked.txt")
+    _git(submodule_origin, "commit", "-q", "-m", "test: second submodule commit")
+    child_checkout = git_context.repo / "child-module"
+    _git(child_checkout, "fetch", "-q", "origin")
+    _git(child_checkout, "checkout", "-q", _git(submodule_origin, "rev-parse", "HEAD"))
+    _git(git_context.repo, "config", "submodule.child-module.ignore", "all")
+
+    errors = _validate(submodule_context)
+
+    assert any("tracked worktree and index must be clean" in error for error in errors)
+
+
 def test_complete_ignores_hostile_git_index_file_environment(
     git_context: GitContext,
     monkeypatch: pytest.MonkeyPatch,
