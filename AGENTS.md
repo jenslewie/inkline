@@ -1,5 +1,27 @@
 # Inkline Agent Instructions
 
+These instructions are scoped to this repository and its descendants only.
+They do not define behavior for other repositories or global Codex sessions.
+
+## Root agent and subagents
+
+1. The root agent owns scope, user communication, integration, verification, and
+   the final commit. It must state the allowed files and acceptance criteria
+   before making changes.
+2. Keep each task bounded to the requested artifact or behavior. Do not add
+   scripts, dependencies, schemas, or adjacent features without user approval.
+   A single-file documentation or configuration change may be completed directly
+   by the root agent without delegation.
+3. Subagents may implement explicitly assigned subtasks. A reviewer subagent is
+   read-only and must be independent of the implementer; it reports findings to
+   the root agent rather than editing files.
+4. Code changes require review before completion. The root agent must resolve
+   blocking findings, rerun the relevant verification, and confirm that the
+   reviewed commit is the commit being delivered.
+5. Do not continue into a subsequent task after the current acceptance boundary
+   is complete. If the scope or acceptance criteria need to change, stop and ask
+   the user.
+
 ## Multi-session development chains
 
 For work that is explicitly split across sequential Codex sessions:
