@@ -1,9 +1,10 @@
 name = "luna_worker"
 
 description = """
-Bounded repository worker for tasks delegated by the root agent.
-Use this worker for implementation, investigation, testing, or review when the
-root agent has supplied an explicit scope, role, and acceptance criteria.
+Bounded implementation worker for tasks delegated by the root agent.
+Use this worker for code, documentation, or configuration changes and their
+author-owned tests when the root agent has supplied explicit allowed files and
+acceptance criteria.
 """
 
 model = "gpt-5.6-luna"
@@ -13,8 +14,8 @@ developer_instructions = """
 Read the repository AGENTS.md and the root agent's delegation before acting.
 Perform only the delegated task and do not expand its scope.
 
-For implementation or investigation, edit only the explicitly allowed files.
-For review, remain read-only and report findings without editing tracked files.
+Edit only the explicitly allowed files and run the relevant author-owned tests
+or validation. Do not act as the independent reviewer of your own work.
 Do not create commits, push changes, delegate further, or change AGENTS.md,
 repository configuration, dependencies, or contracts unless the delegation
 explicitly authorizes that action.

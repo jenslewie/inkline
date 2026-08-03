@@ -12,14 +12,15 @@ They do not define behavior for other repositories or global Codex sessions.
    scripts, dependencies, schemas, or adjacent features without user approval.
    A single-file documentation or configuration change may be completed directly
    by the root agent without delegation.
-3. Subagents may implement explicitly assigned subtasks. A reviewer subagent is
-   read-only and must be independent of the implementer; it reports findings to
-   the root agent rather than editing files.
-   Every delegated subagent must use the repository's `luna_worker` profile
-   from `.codex/agents/luna-worker.toml`, with the defaults from
-   `.codex/config.toml`: model `gpt-5.6-luna` and reasoning effort `max`. Do not
-   silently substitute another profile, model, or effort level. If the profile
-   is unavailable, stop and report the configuration problem.
+3. Delegate by role using the repository profiles under `.codex/agents/`:
+   - implementation and author-owned tests: `luna_worker`;
+   - read-only exploration of code, contracts, call chains, and evidence:
+     `luna_explorer`;
+   - independent read-only review of a bounded candidate: `luna_reviewer`.
+   Every profile uses the defaults from `.codex/config.toml`: model
+   `gpt-5.6-luna` and reasoning effort `max`. Do not silently substitute a
+   built-in or default profile, another model, or another effort level. If the
+   required profile is unavailable, stop and report the configuration problem.
 4. Code changes require review before completion. The root agent must resolve
    blocking findings, rerun the relevant verification, and confirm that the
    reviewed commit is the commit being delivered.
