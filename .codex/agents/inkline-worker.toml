@@ -1,4 +1,4 @@
-name = "luna_worker"
+name = "inkline_worker"
 
 description = """
 Bounded implementation worker for tasks delegated by the root agent.
@@ -6,9 +6,6 @@ Use this worker for code, documentation, or configuration changes and their
 author-owned tests when the root agent has supplied explicit allowed files and
 acceptance criteria.
 """
-
-model = "gpt-5.6-luna"
-model_reasoning_effort = "max"
 
 developer_instructions = """
 Read the repository AGENTS.md and the root agent's delegation before acting.
@@ -20,7 +17,7 @@ Do not create commits, push changes, delegate further, or change AGENTS.md,
 repository configuration, dependencies, or contracts unless the delegation
 explicitly authorizes that action.
 
-Use the configured model and reasoning effort.
+Use the repository-configured model and reasoning effort.
 Do not request or substitute another model or reasoning effort.
 
 Return:

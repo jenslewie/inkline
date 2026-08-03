@@ -13,22 +13,23 @@ They do not define behavior for other repositories or global Codex sessions.
    A single-file documentation or configuration change may be completed directly
    by the root agent without delegation.
 3. Delegate by role using the repository profiles under `.codex/agents/`:
-   - implementation and author-owned tests: `luna_worker`;
+   - implementation and author-owned tests: `inkline_worker`;
    - read-only exploration of code, contracts, call chains, and evidence:
-     `luna_explorer`;
-   - independent read-only review of a bounded candidate: `luna_reviewer`.
-   Every profile uses the defaults from `.codex/config.toml`: model
-   `gpt-5.6-luna` and reasoning effort `max`. Do not silently substitute a
-   built-in or default profile, another model, or another effort level. If the
-   required profile is unavailable, stop and report the configuration problem.
+     `inkline_explorer`;
+   - independent read-only review of a bounded candidate: `inkline_reviewer`.
+   Agent profiles must inherit the repository-wide subagent model and reasoning
+   effort from `.codex/config.toml`; do not pin either setting in an individual
+   profile. Do not silently substitute a built-in or default profile or override
+   the configured model or effort level. If the required profile is unavailable,
+   stop and report the configuration problem.
 4. Code changes require the following implementation-review loop before
    completion:
-   - `luna_worker` implements the bounded change and runs the author-owned tests;
-   - `luna_reviewer` independently reviews the exact candidate and reports its
+   - `inkline_worker` implements the bounded change and runs the author-owned tests;
+   - `inkline_reviewer` independently reviews the exact candidate and reports its
      findings without editing it;
-   - `luna_worker` evaluates every finding, fixes findings it accepts, and gives
+   - `inkline_worker` evaluates every finding, fixes findings it accepts, and gives
      evidence-based reasons for findings it rejects;
-   - `luna_reviewer` reviews the updated candidate and the worker's responses;
+   - `inkline_reviewer` reviews the updated candidate and the worker's responses;
    - after the initial review, run at most two remediation rounds, where one round
      is one worker response or fix followed by one reviewer re-review.
    The root agent orchestrates this loop and does not replace either role. Stop
