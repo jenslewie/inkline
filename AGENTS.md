@@ -5,9 +5,9 @@ They do not define behavior for other repositories or global Codex sessions.
 
 ## Root agent and subagents
 
-1. The root agent owns scope, user communication, integration, verification, and
-   the final commit. It must state the allowed files and acceptance criteria
-   before making changes.
+1. The root agent owns scope, user communication, orchestration, integration,
+   the final acceptance decision, and the final commit. It must state the
+   allowed files and acceptance criteria before making changes.
 2. Keep each task bounded to the requested artifact or behavior. Do not add
    scripts, dependencies, schemas, or adjacent features without user approval.
    A single-file documentation or configuration change may be completed directly
@@ -21,9 +21,19 @@ They do not define behavior for other repositories or global Codex sessions.
    `gpt-5.6-luna` and reasoning effort `max`. Do not silently substitute a
    built-in or default profile, another model, or another effort level. If the
    required profile is unavailable, stop and report the configuration problem.
-4. Code changes require review before completion. The root agent must resolve
-   blocking findings, rerun the relevant verification, and confirm that the
-   reviewed commit is the commit being delivered.
+4. Code changes require the following implementation-review loop before
+   completion:
+   - `luna_worker` implements the bounded change and runs the author-owned tests;
+   - `luna_reviewer` independently reviews the exact candidate and reports its
+     findings without editing it;
+   - `luna_worker` evaluates every finding, fixes findings it accepts, and gives
+     evidence-based reasons for findings it rejects;
+   - `luna_reviewer` reviews the updated candidate and the worker's responses;
+   - repeat until the worker and reviewer agree that no blocking finding remains.
+   The root agent orchestrates this loop and does not replace either role. If a
+   disagreement cannot be resolved, the root agent makes and records the final
+   ruling. Before proceeding, the root agent must confirm that the reviewed and
+   accepted commit is the exact commit being delivered.
 5. Do not continue into a subsequent task after the current acceptance boundary
    is complete. If the scope or acceptance criteria need to change, stop and ask
    the user.
