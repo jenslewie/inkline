@@ -29,11 +29,16 @@ They do not define behavior for other repositories or global Codex sessions.
    - `luna_worker` evaluates every finding, fixes findings it accepts, and gives
      evidence-based reasons for findings it rejects;
    - `luna_reviewer` reviews the updated candidate and the worker's responses;
-   - repeat until the worker and reviewer agree that no blocking finding remains.
-   The root agent orchestrates this loop and does not replace either role. If a
-   disagreement cannot be resolved, the root agent makes and records the final
-   ruling. Before proceeding, the root agent must confirm that the reviewed and
-   accepted commit is the exact commit being delivered.
+   - after the initial review, run at most two remediation rounds, where one round
+     is one worker response or fix followed by one reviewer re-review.
+   The root agent orchestrates this loop and does not replace either role. Stop
+   the subagent loop early if the same blocking finding is repeated without new
+   evidence or resolving it would expand the accepted scope. If any blocking
+   finding remains after the second re-review, the root agent must not launch
+   another remediation round. The root agent then makes and records the final
+   ruling, or asks the user if that ruling would change scope or acceptance
+   criteria. Before proceeding, the root agent must confirm that the reviewed
+   and accepted commit is the exact commit being delivered.
 5. Do not continue into a subsequent task after the current acceptance boundary
    is complete. If the scope or acceptance criteria need to change, stop and ask
    the user.
