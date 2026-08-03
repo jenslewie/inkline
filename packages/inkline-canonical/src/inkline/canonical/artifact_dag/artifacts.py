@@ -64,23 +64,36 @@ def _validate_completed_artifacts(bundle: CanonicalArtifactBundle) -> None:
     )
     from inkline.canonical.note_marker_review import (
         validate_note_marker_review,
+        validate_note_marker_review_against_plan,
         validate_note_marker_review_plan,
+        validate_note_marker_review_plan_against_sources,
     )
     from inkline.canonical.note_resolution import (
         validate_note_resolution,
         validate_note_resolution_against_sources,
     )
-    from inkline.canonical.note_system import validate_note_system_review
+    from inkline.canonical.note_system import (
+        validate_note_system_review,
+        validate_note_system_review_against_sources,
+    )
     from inkline.canonical.section_map import (
         validate_section_map,
+        validate_section_map_against_sources,
         validate_section_map_artifact_links,
     )
-    from inkline.canonical.table_flow import validate_table_flow
+    from inkline.canonical.table_flow import (
+        validate_table_flow,
+        validate_table_flow_against_sources,
+    )
     from inkline.canonical.text_flow import (
         validate_final_text_flow_artifact_links,
         validate_text_flow,
+        validate_text_flow_against_sources,
     )
-    from inkline.canonical.visual_relations import validate_visual_relation_review
+    from inkline.canonical.visual_relations import (
+        validate_visual_relation_review,
+        validate_visual_relation_review_against_sources,
+    )
 
     visual = _required_artifact(bundle.visual_relation_review)
     systems = _required_artifact(bundle.note_system_review)
@@ -91,16 +104,51 @@ def _validate_completed_artifacts(bundle: CanonicalArtifactBundle) -> None:
     inventory = _required_artifact(bundle.note_inventory)
     sections = _required_artifact(bundle.section_map)
     resolution = _required_artifact(bundle.note_resolution)
+    page_assets = _required_artifact(bundle.page_assets)
     validate_visual_relation_review(visual)
+    validate_visual_relation_review_against_sources(
+        visual, bundle.observed_index, bundle.page_layout, bundle.page_review, page_assets,
+        table_flow=tables,
+    )
     validate_note_system_review(systems)
+    validate_note_system_review_against_sources(
+        systems,
+        bundle.observed_index,
+        bundle.page_layout,
+        bundle.skeleton,
+        bundle.page_review,
+        page_assets,
+    )
     validate_note_marker_review_plan(plan)
+    validate_note_marker_review_plan_against_sources(
+        plan, bundle.observed_index, bundle.page_layout, systems
+    )
     validate_note_marker_review(markers)
+    validate_note_marker_review_against_plan(markers, plan, bundle.observed_index, page_assets)
     validate_table_flow(tables)
+    validate_table_flow_against_sources(
+        tables, bundle.observed, bundle.observed_index, bundle.page_review
+    )
     validate_text_flow(text)
+    validate_text_flow_against_sources(
+        text,
+        bundle.observed,
+        bundle.skeleton,
+        bundle.page_review,
+        bundle.page_layout,
+        observed_index=bundle.observed_index,
+    )
     validate_final_text_flow_artifact_links(text, visual, systems, markers)
     validate_note_inventory(inventory)
-    validate_note_inventory_against_sources(inventory, text, systems, markers)
+    validate_note_inventory_against_sources(inventory, text, systems, plan, markers)
     validate_section_map(sections)
+    validate_section_map_against_sources(
+        sections,
+        bundle.skeleton,
+        text["text_units"],
+        bundle.observed,
+        bundle.page_review,
+    )
     validate_section_map_artifact_links(sections, text, tables, visual, inventory)
     validate_note_resolution(resolution)
     validate_note_resolution_against_sources(resolution, inventory, sections)

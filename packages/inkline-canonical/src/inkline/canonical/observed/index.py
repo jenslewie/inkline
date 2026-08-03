@@ -21,16 +21,26 @@ class ObservedIndex:
     observation_ids_by_page: Mapping[int, tuple[str, ...]]
     assets_by_id: Mapping[str, Mapping[str, Any]]
 
+    def __deepcopy__(self, memo: dict[int, Any]) -> ObservedIndex:
+        """Return this detached immutable snapshot without recreating its topology."""
+
+        if not _is_immutable(self):
+            raise TypeError("ObservedIndex contains mutable data")
+        memo[id(self)] = self
+        return self
+
 
 def build_observed_index(document: dict[str, Any]) -> ObservedIndex:
-    """Index validated source records without copying or interpreting them."""
+    """Build a detached recursively immutable lookup topology over validated records."""
 
     validate_observed_document(document)
     pages_by_number = {
-        int(page["page"]): page for page in sorted(document["pages"], key=lambda item: item["page"])
+        int(page["page"]): _freeze(page)
+        for page in sorted(document["pages"], key=lambda item: item["page"])
     }
     observations_by_id = {
-        str(observation["observation_id"]): observation for observation in document["observations"]
+        str(observation["observation_id"]): _freeze(observation)
+        for observation in document["observations"]
     }
     observation_ids_by_page: dict[int, list[str]] = {
         page_number: [] for page_number in pages_by_number
@@ -40,7 +50,7 @@ def build_observed_index(document: dict[str, Any]) -> ObservedIndex:
     assets_by_id = _index_assets(document["assets"])
     return ObservedIndex(
         doc_id=str(document["metadata"]["doc_id"]),
-        metadata=MappingProxyType(document["metadata"]),
+        metadata=_freeze(document["metadata"]),
         page_numbers=tuple(pages_by_number),
         pages_by_number=MappingProxyType(pages_by_number),
         observations_by_id=MappingProxyType(observations_by_id),
@@ -62,7 +72,7 @@ def _index_assets(assets: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
             continue
         if asset_id in indexed:
             raise ValidationError(f"duplicate asset_id: {asset_id}")
-        indexed[asset_id] = record
+        indexed[asset_id] = _freeze(record)
     return indexed
 
 
@@ -77,3 +87,23 @@ def _asset_records(value: Any) -> Iterator[Mapping[str, Any]]:
     if isinstance(value, list | tuple):
         for nested in value:
             yield from _asset_records(nested)
+
+
+def _freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(nested) for key, nested in value.items()})
+    if isinstance(value, list | tuple):
+        return tuple(_freeze(nested) for nested in value)
+    if isinstance(value, set | frozenset):
+        return frozenset(_freeze(nested) for nested in value)
+    return value
+
+
+def _is_immutable(value: Any) -> bool:
+    if isinstance(value, ObservedIndex):
+        return all(_is_immutable(field) for field in vars(value).values())
+    if isinstance(value, MappingProxyType):
+        return all(_is_immutable(key) and _is_immutable(nested) for key, nested in value.items())
+    if isinstance(value, tuple | frozenset):
+        return all(_is_immutable(nested) for nested in value)
+    return value is None or isinstance(value, str | bytes | int | float | bool)

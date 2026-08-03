@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from html import unescape
 from html.parser import HTMLParser
 from typing import Any, Mapping
@@ -202,7 +203,7 @@ def _materialize_table(
             {
                 "observation_id": str(observation["observation_id"]),
                 "page": int(observation["page"]),
-                "bbox": observation.get("bbox"),
+                "bbox": _materialized_bbox(observation.get("bbox")),
             }
             for observation in observations
         ],
@@ -221,9 +222,15 @@ def _materialize_table(
 def _table_text_list(observation: Mapping[str, Any], key: str) -> list[str]:
     table = _normalized_table_attrs(observation)
     values = table.get(key) if table is not None else None
-    if not isinstance(values, list):
+    if not isinstance(values, Sequence) or isinstance(values, str | bytes):
         return []
     return [value for value in values if isinstance(value, str) and value]
+
+
+def _materialized_bbox(value: Any) -> list[Any] | None:
+    """Copy frozen source geometry into the JSON-list artifact boundary."""
+
+    return list(value) if value is not None else None
 
 
 def _unique_texts(values: Any) -> list[str]:

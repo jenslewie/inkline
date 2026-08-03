@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from itertools import pairwise
 from statistics import median
@@ -355,13 +356,13 @@ def _indent_units(units: list[dict[str, Any]]) -> list[float]:
 def _text_line_metrics(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for unit in units:
-        attrs = unit.get("attrs") if isinstance(unit.get("attrs"), dict) else {}
+        attrs = unit.get("attrs") if isinstance(unit.get("attrs"), Mapping) else {}
         by_observation = attrs.get("text_line_metrics_by_observation")  # pyright: ignore[reportOptionalMemberAccess]
-        if not isinstance(by_observation, dict):
+        if not isinstance(by_observation, Mapping):
             continue
         for metrics in by_observation.values():
-            if isinstance(metrics, dict):
-                records.append(metrics)
+            if isinstance(metrics, Mapping):
+                records.append(dict(metrics))
     return records
 
 
@@ -624,7 +625,7 @@ def _reference_bboxes(unit: dict[str, Any], page: int) -> list[list[float]]:
     span_bboxes = [
         [float(value) for value in span["bbox"]]
         for span in unit.get("spans") or []
-        if isinstance(span, dict)
+        if isinstance(span, Mapping)
         and _span_page(span, page) == page
         and valid_bbox(span.get("bbox"))
     ]
@@ -636,7 +637,7 @@ def _reference_bboxes(unit: dict[str, Any], page: int) -> list[list[float]]:
     return []
 
 
-def _span_page(span: dict[str, Any], fallback: int) -> int:
+def _span_page(span: Mapping[str, Any], fallback: int) -> int:
     value = span.get("page")
     return int(value) if isinstance(value, int) else fallback
 
@@ -730,7 +731,7 @@ def _unit_record(
 
 def _is_caption_candidate(unit: dict[str, Any]) -> bool:
     attrs = unit.get("attrs")
-    return isinstance(attrs, dict) and attrs.get("layout_role") == "caption_candidate"
+    return isinstance(attrs, Mapping) and attrs.get("layout_role") == "caption_candidate"
 
 
 def _unit_metrics(bbox: list[float], profile: dict[str, Any]) -> dict[str, float]:
@@ -748,9 +749,13 @@ def _unit_metrics(bbox: list[float], profile: dict[str, Any]) -> dict[str, float
 
 
 def _short_line_group(unit: dict[str, Any], page_sizes: dict[int, dict[str, float]]) -> str | None:
-    attrs = unit.get("attrs") if isinstance(unit.get("attrs"), dict) else {}
+    attrs_value = unit.get("attrs")
+    attrs: Mapping[str, Any] = attrs_value if isinstance(attrs_value, Mapping) else {}
+    reasons_value = attrs.get("merge_reasons")
     merge_reasons = (
-        attrs.get("merge_reasons") if isinstance(attrs.get("merge_reasons"), list) else []  # pyright: ignore[reportOptionalMemberAccess]
+        reasons_value
+        if isinstance(reasons_value, Sequence) and not isinstance(reasons_value, str | bytes)
+        else []
     )
     if "same_page_short_line_group" not in merge_reasons:  # pyright: ignore[reportOperatorIssue]
         return None

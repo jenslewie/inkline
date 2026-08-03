@@ -91,7 +91,7 @@ def test_final_text_flow_rejects_grouped_caption_declared_as_display_block() -> 
     systems = {
         "metadata": {
             "schema_name": "inkline_note_system_review",
-            "schema_version": "0.1-shadow",
+            "schema_version": "0.2-shadow",
             "doc_id": "sample",
         },
         "evidence": [],
@@ -101,7 +101,7 @@ def test_final_text_flow_rejects_grouped_caption_declared_as_display_block() -> 
     markers = {
         "metadata": {
             "schema_name": "inkline_note_marker_review",
-            "schema_version": "0.1-shadow",
+            "schema_version": "0.2-shadow",
             "doc_id": "sample",
         },
         "outcomes": [],

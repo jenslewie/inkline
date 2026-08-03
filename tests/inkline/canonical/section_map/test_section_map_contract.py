@@ -40,7 +40,7 @@ def _section_map() -> dict:
     return {
         "metadata": {
             "schema_name": "inkline_section_map",
-            "schema_version": "0.1-shadow",
+            "schema_version": "0.2-shadow",
             "doc_id": "sample",
         },
         "sections": [
@@ -49,6 +49,7 @@ def _section_map() -> dict:
                 "title": "第一章",
                 "level": 1,
                 "parent_section_id": None,
+                "chapter_scope_id": "s000000",
                 "skeleton_entry_index": 0,
                 "anchor_evidence_ids": ["sa000000", "obs000001", "obs000002"],
                 "title_text_unit_ids": ["tu000001"],
@@ -151,6 +152,12 @@ def test_validate_section_map_rejects_invalid_physical_ranges() -> None:
         section_map["sections"][0]["physical_ranges"] = ranges
         with pytest.raises(ValidationError):
             validate_section_map(section_map)
+
+
+def test_section_map_accepts_explicit_chapter_scope_identity() -> None:
+    section_map = _section_map()
+
+    validate_section_map(section_map)
 
 
 def test_validate_section_map_rejects_conflicting_page_placements() -> None:
@@ -329,7 +336,7 @@ def _map_for_entry(skeleton: dict, text_units: list[dict], entry_index: int = 0)
     return {
         "metadata": {
             "schema_name": "inkline_section_map",
-            "schema_version": "0.1-shadow",
+            "schema_version": "0.2-shadow",
             "doc_id": skeleton["metadata"]["doc_id"],
         },
         "sections": [
@@ -338,6 +345,7 @@ def _map_for_entry(skeleton: dict, text_units: list[dict], entry_index: int = 0)
                 "title": entry["display_title"],
                 "level": entry["level"],
                 "parent_section_id": None,
+                "chapter_scope_id": f"s{entry_index:06d}",
                 "skeleton_entry_index": entry_index,
                 "anchor_evidence_ids": [
                     anchor["anchor_id"],
@@ -381,7 +389,7 @@ def _offset_map(skeleton: dict, text_units: list[dict]) -> dict:
     return {
         "metadata": {
             "schema_name": "inkline_section_map",
-            "schema_version": "0.1-shadow",
+            "schema_version": "0.2-shadow",
             "doc_id": skeleton["metadata"]["doc_id"],
         },
         "sections": [
@@ -390,6 +398,7 @@ def _offset_map(skeleton: dict, text_units: list[dict]) -> dict:
                 "title": entry["display_title"],
                 "level": entry["level"],
                 "parent_section_id": None,
+                "chapter_scope_id": "s000001",
                 "skeleton_entry_index": 1,
                 "anchor_evidence_ids": [
                     anchor["anchor_id"],

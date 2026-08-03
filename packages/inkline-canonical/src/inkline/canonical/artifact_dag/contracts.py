@@ -74,7 +74,7 @@ CANONICAL_ARTIFACT_CONTRACTS = (
     ),
     ArtifactContract(
         "NoteInventory",
-        ("TextFlow", "NoteSystemReview", "NoteMarkerReview"),
+        ("TextFlow", "NoteSystemReview", "NoteMarkerReviewPlan", "NoteMarkerReview"),
         "definitions, inline references, note groups, and unresolved coverage",
         ("note membership audit", "normalized marker inventory", "coverage state"),
         ("authoritative note targets", "section membership", "TextFlow mutation"),

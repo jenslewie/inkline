@@ -90,13 +90,7 @@ def validate_visual_relation_review_against_sources(
     }
     table_caption_ids = _table_caption_ids(table_flow)
     page_assets_by_id = _page_assets_by_id(page_assets)
-    for evidence in review["evidence"]:
-        for page_asset_id in evidence["page_asset_ids"]:
-            asset_page = page_assets_by_id.get(page_asset_id)
-            if asset_page is None or asset_page not in evidence["pages"]:
-                raise ValidationError(
-                    f"visual evidence references invalid page asset: {page_asset_id}"
-                )
+    _validate_evidence_against_sources(review["evidence"], observations, page_assets_by_id)
     for asset_id in _all_endpoint_ids(review, "asset_observation_ids"):
         observation = observations.get(asset_id)
         if observation is None or observation.get("kind") != "image_region":
@@ -123,6 +117,7 @@ def validate_visual_relation_review_against_sources(
             raise ValidationError(
                 f"visual group page provenance differs: {group['visual_group_id']}"
             )
+    _validate_unresolved_pages(review["unresolved_candidates"], observations)
 
 
 def _validate_evidence(value: Any) -> set[str]:
@@ -223,6 +218,34 @@ def _validate_known_evidence(value: Any, known: set[str], path: str) -> None:
     evidence_ids = set(validate_id_list(value, f"{path}.evidence_ids", required=True))
     if not evidence_ids <= known:
         raise ValidationError(f"{path}.evidence_ids contain unknown evidence")
+
+
+def _validate_evidence_against_sources(
+    evidence_records: list[dict[str, Any]],
+    observations: Any,
+    page_assets_by_id: dict[str, int],
+) -> None:
+    for evidence in evidence_records:
+        for observation_id in evidence["observation_ids"]:
+            observation = observations.get(observation_id)
+            if observation is None or observation.get("page") not in evidence["pages"]:
+                raise ValidationError(f"visual evidence observation is invalid: {observation_id}")
+        for page_asset_id in evidence["page_asset_ids"]:
+            asset_page = page_assets_by_id.get(page_asset_id)
+            if asset_page is None or asset_page not in evidence["pages"]:
+                raise ValidationError(
+                    f"visual evidence references invalid page asset: {page_asset_id}"
+                )
+
+
+def _validate_unresolved_pages(candidates: list[dict[str, Any]], observations: Any) -> None:
+    for candidate in candidates:
+        endpoint_ids = candidate["asset_observation_ids"] + candidate["caption_observation_ids"]
+        pages = {int(observations[endpoint_id]["page"]) for endpoint_id in endpoint_ids}
+        if pages != set(candidate["physical_pages"]):
+            raise ValidationError(
+                f"unresolved candidate page provenance differs: {candidate['candidate_id']}"
+            )
 
 
 def _validate_endpoint_partitions(

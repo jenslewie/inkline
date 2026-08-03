@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from inkline.canonical.book_skeleton.contract import (
@@ -144,7 +145,7 @@ def _caption_parent_ids(observations: list[dict[str, Any]]) -> set[str]:
         if observation.get("role_hint") != "caption_text":
             continue
         attrs = observation.get("attrs")
-        if not isinstance(attrs, dict):
+        if not isinstance(attrs, Mapping):
             continue
         parent_id = attrs.get("visual_parent_observation_id")
         if isinstance(parent_id, str) and parent_id:
@@ -563,7 +564,7 @@ def _is_direct_anchor_eligible_caption(observation: dict[str, Any]) -> bool:
         return False
     attrs = observation.get("attrs")
     return (
-        isinstance(attrs, dict)
+        isinstance(attrs, Mapping)
         and attrs.get("direct_anchor_eligible") is True
         and attrs.get("bbox_provenance") == "mineru_middle"
         and _is_precise_bbox(observation.get("bbox"))
@@ -572,7 +573,8 @@ def _is_direct_anchor_eligible_caption(observation: dict[str, Any]) -> bool:
 
 def _is_precise_bbox(bbox: Any) -> bool:
     return (
-        isinstance(bbox, list)
+        isinstance(bbox, Sequence)
+        and not isinstance(bbox, str | bytes)
         and len(bbox) == 4
         and all(isinstance(value, int | float) and not isinstance(value, bool) for value in bbox)
         and bbox[2] > bbox[0]

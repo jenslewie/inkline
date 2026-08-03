@@ -3,7 +3,7 @@ from __future__ import annotations
 NOTE_MARKER_REVIEW_PLAN_SCHEMA_NAME = "inkline_note_marker_review_plan"
 NOTE_MARKER_REVIEW_PLAN_SCHEMA_VERSION = "0.1-shadow"
 NOTE_MARKER_REVIEW_SCHEMA_NAME = "inkline_note_marker_review"
-NOTE_MARKER_REVIEW_SCHEMA_VERSION = "0.1-shadow"
+NOTE_MARKER_REVIEW_SCHEMA_VERSION = "0.2-shadow"
 
 MARKER_REGION_KINDS = {"definition", "reference"}
 MARKER_REVIEW_REASONS = {
@@ -41,6 +41,7 @@ OUTCOME_FIELDS = {
     "failure_reason",
     "model_name",
     "prompt_version",
+    "page_asset_ids",
 }
 MARKER_FIELDS = {
     "marker_evidence_id",

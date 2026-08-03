@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 NOTE_RESOLUTION_SCHEMA_NAME = "inkline_note_resolution"
-NOTE_RESOLUTION_SCHEMA_VERSION = "0.1-shadow"
+NOTE_RESOLUTION_SCHEMA_VERSION = "0.2-shadow"
 
 NOTE_RESOLUTION_SCOPES = {"page", "chapter", "book"}
 NOTE_RESOLUTION_DECISION_SOURCES = {

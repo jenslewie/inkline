@@ -66,7 +66,7 @@ def _review(status: str = "found") -> dict:
     return {
         "metadata": {
             "schema_name": "inkline_note_marker_review",
-            "schema_version": "0.1-shadow",
+            "schema_version": "0.2-shadow",
             "doc_id": "sample",
         },
         "outcomes": [
@@ -77,6 +77,7 @@ def _review(status: str = "found") -> dict:
                 "failure_reason": "model_timeout" if status == "failed" else None,
                 "model_name": None if status == "not_run" else "test-model",
                 "prompt_version": None if status == "not_run" else "note-marker-v1",
+                "page_asset_ids": [] if status == "not_run" else ["page-0001-review"],
             }
         ],
     }
@@ -115,9 +116,19 @@ def test_marker_review_distinguishes_not_run_failed_and_absent() -> None:
         validate_note_marker_review(_review(status))
 
 
+def test_marker_review_outcomes_require_page_asset_provenance() -> None:
+    review = _review()
+    validate_note_marker_review(review)
+
+
 def test_marker_review_rejects_marker_outside_planned_region() -> None:
     review = _review()
     review["outcomes"][0]["markers"][0]["bbox"] = [101, 101, 110, 110]
 
     with pytest.raises(ValidationError, match="outside planned region"):
-        validate_note_marker_review_against_plan(review, _plan(), _index())
+        validate_note_marker_review_against_plan(
+            review,
+            _plan(),
+            _index(),
+            {"images": [{"image_id": "page-0001-review", "source": {"page": 1}}]},
+        )

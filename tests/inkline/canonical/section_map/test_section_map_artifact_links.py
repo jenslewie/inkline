@@ -10,7 +10,7 @@ def _section_map() -> dict:
     return {
         "metadata": {
             "schema_name": "inkline_section_map",
-            "schema_version": "0.1-shadow",
+            "schema_version": "0.2-shadow",
             "doc_id": "sample",
         },
         "sections": [
@@ -19,6 +19,7 @@ def _section_map() -> dict:
                 "title": "Chapter",
                 "level": 1,
                 "parent_section_id": None,
+                "chapter_scope_id": "s000000",
                 "skeleton_entry_index": 0,
                 "anchor_evidence_ids": ["sa000000"],
                 "title_text_unit_ids": ["tu000001"],

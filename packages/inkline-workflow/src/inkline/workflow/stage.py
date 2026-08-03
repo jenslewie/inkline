@@ -58,13 +58,9 @@ def _load_or_run(
     if artifact_store is not None and artifact_store.has(stage.output):
         return artifact_store.load(stage.output)
     inputs = {name: artifacts[name] for name in stage.inputs}
-    mutable_snapshots = {
-        name: deepcopy(value)
-        for name, value in inputs.items()
-        if isinstance(value, dict | list | set)
-    }
+    snapshots = {name: deepcopy(value) for name, value in inputs.items()}
     output = stage.run(**inputs)
-    for name, snapshot in mutable_snapshots.items():
+    for name, snapshot in snapshots.items():
         if inputs[name] != snapshot:
             raise ValueError(f"stage {stage.name} mutated upstream artifact {name}")
     return output

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from typing import Any
 
@@ -93,7 +94,7 @@ def _profile_pages(layout_audit: dict[str, Any]) -> set[int]:
     return {
         int(record["page"])
         for record in layout_audit.get("page_layout_profiles", [])
-        if isinstance(record, dict)
+        if isinstance(record, Mapping)
         and isinstance(record.get("page"), int)
         and record.get("profile_scope") == "page"
     }
@@ -103,7 +104,7 @@ def _analysis_profile_pages(page_layout: dict[str, Any]) -> set[int]:
     return {
         int(record["page"])
         for record in page_layout["pages"]
-        if isinstance(record.get("body_lane"), dict)
+        if isinstance(record.get("body_lane"), Mapping)
         and record["body_lane"].get("profile_scope") == "page"
     }
 
@@ -815,7 +816,8 @@ def _bbox_top(bbox: list[float]) -> float:
 
 def _valid_bbox(value: Any) -> bool:
     return (
-        isinstance(value, list)
+        isinstance(value, Sequence)
+        and not isinstance(value, str | bytes)
         and len(value) == 4
         and all(isinstance(number, int | float) for number in value)
     )

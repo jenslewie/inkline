@@ -13,7 +13,7 @@ def _resolution() -> dict:
     return {
         "metadata": {
             "schema_name": "inkline_note_resolution",
-            "schema_version": "0.1-shadow",
+            "schema_version": "0.2-shadow",
             "doc_id": "sample",
         },
         "relations": [
@@ -40,6 +40,11 @@ def _resolution() -> dict:
 
 def test_note_resolution_accepts_immutable_relation_artifact() -> None:
     validate_note_resolution(_resolution())
+
+
+def test_note_resolution_accepts_schema_v2() -> None:
+    resolution = _resolution()
+    validate_note_resolution(resolution)
 
 
 def test_note_resolution_rejects_resolved_target_written_into_unresolved_record() -> None:
@@ -107,6 +112,7 @@ def _section_map_with_sibling_members() -> dict:
                 "title": f"Section {index}",
                 "level": level,
                 "parent_section_id": parent,
+                "chapter_scope_id": "s000000",
                 "skeleton_entry_index": index,
                 "anchor_evidence_ids": [f"sa{index:06d}"],
                 "title_text_unit_ids": [],
@@ -124,7 +130,7 @@ def _section_map_with_sibling_members() -> dict:
     return {
         "metadata": {
             "schema_name": "inkline_section_map",
-            "schema_version": "0.1-shadow",
+            "schema_version": "0.2-shadow",
             "doc_id": "sample",
         },
         "sections": sections,

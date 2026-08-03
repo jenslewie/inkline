@@ -10,7 +10,7 @@ def _review() -> dict:
     return {
         "metadata": {
             "schema_name": "inkline_note_system_review",
-            "schema_version": "0.1-shadow",
+            "schema_version": "0.2-shadow",
             "doc_id": "sample",
         },
         "evidence": [
@@ -20,6 +20,9 @@ def _review() -> dict:
                 "pages": [10],
                 "skeleton_entry_indexes": [2],
                 "decision_source": "structural_rule",
+                "page_asset_ids": [],
+                "model_name": None,
+                "prompt_version": None,
             },
             {
                 "evidence_id": "nse000002",
@@ -27,6 +30,9 @@ def _review() -> dict:
                 "pages": [20],
                 "skeleton_entry_indexes": [3],
                 "decision_source": "structural_rule",
+                "page_asset_ids": [],
+                "model_name": None,
+                "prompt_version": None,
             },
         ],
         "note_systems": [
@@ -70,5 +76,20 @@ def test_note_system_review_rejects_incompatible_scope() -> None:
 def test_note_system_review_allows_distinct_systems_on_same_physical_page() -> None:
     review = _review()
     review["note_systems"][1]["definition_ranges"] = [[10, 10]]
+
+    validate_note_system_review(review)
+
+
+def test_note_system_review_requires_explicit_page_asset_and_model_provenance() -> None:
+    review = _review()
+    evidence = review["evidence"][0]
+    evidence.update(
+        {
+            "page_asset_ids": ["page-0010-review"],
+            "model_name": "test-model",
+            "prompt_version": "note-system-v1",
+        }
+    )
+    evidence["decision_source"] = "bounded_multimodal_review"
 
     validate_note_system_review(review)

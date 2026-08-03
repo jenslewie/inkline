@@ -110,7 +110,7 @@ flowchart TD
 | `NoteMarkerReview` | `ObservedIndex`, `PageAssets`, `NoteMarkerReviewPlan` | per-request `found`, `absent`, `not_run`, `failed`, or `unresolved` outcomes and localized marker evidence | printed definition/reference marker location and model provenance | invented markers, TextUnits, section membership, targets | exact request coverage, region containment, adjacent-text anchoring, distinct execution states |
 | final `TextFlow` | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, resolved `PageReview`, `VisualRelationReview`, `NoteSystemReview`, `NoteMarkerReview` | ordered final `tu...` TextUnits and unresolved `note_ref` inline runs | TextUnit identity/order/type, caption units, note-reference location | visual pairing, note targets, section membership, tables | observation/order/anchor coverage, caption-group coverage, reference-marker coverage, unresolved target invariant |
 | `TableFlow` | `ObservedDocument`, `ObservedIndex`, resolved `PageReview` | logical readable tables, excluded runs, unresolved runs | structured-table continuation, table captions, readable serialization | non-table visual captions, section membership, half-table materialization | every table observation consumed/excluded/unresolved exactly once, PageReview consistency, source provenance |
-| `NoteInventory` | final `TextFlow`, `NoteSystemReview`, `NoteMarkerReview` | definitions, inline references, note groups, unresolved/duplicate/orphan/ambiguous cases | note membership and marker-coverage audit | authoritative targets, section membership, TextFlow mutation | no dangling TextUnit/run/system/evidence ids, complete `note_ref` coverage, system separation |
+| `NoteInventory` | final `TextFlow`, `NoteSystemReview`, `NoteMarkerReviewPlan`, `NoteMarkerReview` | definitions, inline references, note groups, unresolved-definition coverage, unresolved/duplicate/orphan/ambiguous cases | note membership and marker-coverage audit | authoritative targets, section membership, TextFlow mutation | no dangling TextUnit/run/system/evidence ids, complete footnote and `note_ref` coverage, system separation |
 | `SectionMap` | `BookSkeleton`, resolved `PageReview`, final `TextFlow`, `TableFlow`, `VisualRelationReview`, `NoteInventory` | hierarchy, ranges, page placements, and TextUnit/table/visual-group/note-group placements | section membership and explicit `section_member`/`standalone`/`unresolved` state | paragraph/type repair, visual relation discovery, table reinterpretation, note targets | all upstream ids placed once, evidence-backed range/membership, tree validity, page/resource coverage |
 | `NoteResolution` | `NoteInventory`, confirmed `SectionMap` | immutable resolved relations and unresolved references | unique page/chapter/book-scoped target relations | mutation of TextFlow, NoteInventory, or SectionMap | complete reference partition, marker/system identity, page/chapter scope consistency |
 | BookGraph assembler | completed validated `CanonicalArtifactBundle` | public BookGraph and internal canonical view | identity projection, `caption_of`/`contains`/`references_note` edges, public/internal views | parser repair, TextUnit rebuilding, section inference, upstream mutation | bundle completeness, upstream id mapping, projection parity |
@@ -119,7 +119,8 @@ flowchart TD
 
 All artifacts use exact top-level fields and metadata containing exactly
 `schema_name`, `schema_version`, and `doc_id`. Current frozen versions are
-pre-release `0.1-shadow`; breaking changes regenerate development artifacts and do not
+pre-release `0.1-shadow` except the contract-corrected `0.2-shadow` artifacts below;
+breaking changes regenerate development artifacts and do not
 receive compatibility readers.
 
 ### VisualRelationReview
@@ -141,10 +142,13 @@ receive compatibility readers.
 
 ### NoteSystemReview
 
-- Schema: `inkline_note_system_review` `0.1-shadow`.
+- Schema: `inkline_note_system_review` `0.2-shadow`.
 - Top-level fields: `metadata`, `evidence`, `note_systems`,
   `unresolved_system_candidates`.
 - System ids are `ns000001...`; evidence ids are `nse000001...`.
+- Evidence contains `page_asset_ids`, `model_name`, and `prompt_version`. Bounded
+  multimodal evidence names non-empty real PageAssets on its evidence pages and
+  non-null model/prompt provenance; a structural rule has neither.
 - `page_footnote` uses page scope/reset. `chapter_endnote` uses chapter scope/reset.
   `book_endnote` may use book scope/reset or explicit chapter grouping/reset.
 - A mixed book is multiple separate systems. It is never one scalar `mixed` system.
@@ -160,11 +164,14 @@ receive compatibility readers.
   more page+bbox+observation regions, one or more structural reasons, and evidence.
 - Every known note system appears in exactly one plan state: has requests,
   `not_required`, or `unresolved`.
-- Result schema: `inkline_note_marker_review` `0.1-shadow`; marker evidence ids are
+- Result schema: `inkline_note_marker_review` `0.2-shadow`; marker evidence ids are
   globally ordered `nmr000001...`.
 - Every request has exactly one outcome. `not_run`, `failed`, `absent`, and
-  `unresolved` are distinct. Only `found` contains marker evidence. A result cannot
-  leave the planned page, crop, or observation.
+  `unresolved` are distinct. Outcomes add `page_asset_ids`: `not_run` has none,
+  `found` covers every marker page, `absent` covers every planned-region page,
+  `unresolved` has at least one in-scope asset, and `failed` has zero or more.
+  Only `found` contains marker evidence. A result cannot leave the planned page,
+  crop, or observation.
 
 ### Final TextFlow
 
@@ -196,21 +203,26 @@ receive compatibility readers.
 
 ### NoteInventory
 
-- Schema: `inkline_note_inventory` `0.1-shadow`.
+- Schema: `inkline_note_inventory` `0.2-shadow`.
 - Definition ids are `nd000001...`, reference ids `nr000001...`, note-group ids
   `ng000001...`, and unresolved-case ids `niu000001...`.
 - Definitions identify final footnote TextUnits, physical pages, system ids, markers,
   optional group ids, and marker evidence. References identify an exact TextUnit and
   inline-run index.
+- `unresolved_definitions` records each non-defined final footnote exactly once with
+  request/outcome state and source evidence; it is disjoint from definitions.
 - Every final TextFlow `note_ref` location appears once. Note groups preserve system
   identity and physical definition ranges. The artifact can report candidates and
   ambiguity but contains no authoritative target id.
 
 ### SectionMap
 
-- Schema: `inkline_section_map` `0.1-shadow`.
+- Schema: `inkline_section_map` `0.2-shadow`.
 - A section owns `text_unit_ids`, `table_ids`, `visual_group_ids`, `note_group_ids`,
   physical ranges, title/anchor evidence, and decision provenance.
+- Every section has nullable `chapter_scope_id`. A non-null scope is an
+  ancestor-or-self that self-identifies; `None` deliberately means no confirmed
+  chapter scope.
 - `page_placements` cover physical pages. `resource_placements` cover every logical
   upstream TextUnit, table, visual group, and note group exactly once as
   `section_member`, `standalone`, or `unresolved`.
@@ -221,11 +233,11 @@ receive compatibility readers.
 
 ### NoteResolution and Assembly
 
-- Resolution schema: `inkline_note_resolution` `0.1-shadow`; relation ids are
+- Resolution schema: `inkline_note_resolution` `0.2-shadow`; relation ids are
   `nrel000001...`.
 - Each inventory reference is either resolved once or explicitly unresolved.
   Page-scoped relations stay on one physical page; chapter-scoped relations require
-  one confirmed SectionMap scope ancestor shared by the source and definition;
+  an explicit shared `chapter_scope_id` on source, definition, and scope section;
   book scope still requires unique evidence-backed identity.
 - The relation stores source TextUnit/run, source/target sections, a confirmed
   chapter scope ancestor when chapter-scoped, target definition and note TextUnit,

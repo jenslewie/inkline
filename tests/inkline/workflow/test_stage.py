@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -77,6 +78,29 @@ def test_runner_rejects_builder_mutation_of_upstream_artifact() -> None:
 
     def mutating_builder(source):
         source["items"].append(2)
+        return {"derived": True}
+
+    stage = Stage(
+        name="derive",
+        inputs=("source",),
+        output="derived",
+        run=mutating_builder,
+        validate=lambda value: None,
+    )
+
+    with pytest.raises(ValueError, match="mutated upstream artifact source"):
+        run_stages({"source": source}, [stage])
+
+
+def test_runner_rejects_mutation_inside_tuple_and_dataclass_inputs() -> None:
+    @dataclass
+    class Wrapped:
+        items: list[int]
+
+    source = (Wrapped([1]),)
+
+    def mutating_builder(source):
+        source[0].items.append(2)
         return {"derived": True}
 
     stage = Stage(

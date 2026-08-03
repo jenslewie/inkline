@@ -216,7 +216,9 @@ def _validate_table_sources(table: dict[str, Any], index: ObservedIndex) -> None
         observation = index.observations_by_id.get(observation_id)
         if observation is None or observation["kind"] != "table_region":
             raise ValidationError(f"TableFlow source is not a table observation: {observation_id}")
-        if int(observation["page"]) != span["page"] or observation.get("bbox") != span["bbox"]:
+        source_bbox = observation.get("bbox")
+        normalized_source_bbox = list(source_bbox) if source_bbox is not None else None
+        if int(observation["page"]) != span["page"] or normalized_source_bbox != span["bbox"]:
             raise ValidationError(f"TableFlow span differs from source: {observation_id}")
     primary = index.observations_by_id[table["primary_observation_id"]]
     attrs = primary.get("attrs")

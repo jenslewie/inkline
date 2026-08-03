@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 NOTE_SYSTEM_REVIEW_SCHEMA_NAME = "inkline_note_system_review"
-NOTE_SYSTEM_REVIEW_SCHEMA_VERSION = "0.1-shadow"
+NOTE_SYSTEM_REVIEW_SCHEMA_VERSION = "0.2-shadow"
 
 NOTE_SYSTEM_KINDS = {"page_footnote", "chapter_endnote", "book_endnote"}
 NOTE_REFERENCE_SCOPES = {"page", "chapter", "book", "unresolved"}
@@ -29,6 +29,9 @@ EVIDENCE_FIELDS = {
     "pages",
     "skeleton_entry_indexes",
     "decision_source",
+    "page_asset_ids",
+    "model_name",
+    "prompt_version",
 }
 NOTE_SYSTEM_FIELDS = {
     "note_system_id",

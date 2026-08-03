@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 SECTION_MAP_SCHEMA_NAME = "inkline_section_map"
-SECTION_MAP_SCHEMA_VERSION = "0.1-shadow"
+SECTION_MAP_SCHEMA_VERSION = "0.2-shadow"
 SECTION_MAP_EVIDENCE_SCHEMA_NAME = "inkline_section_map_evidence"
 SECTION_MAP_EVIDENCE_SCHEMA_VERSION = "0.1-shadow"
 
@@ -38,6 +38,7 @@ REQUIRED_SECTION_FIELDS: dict[str, type[Any] | tuple[type[Any], ...]] = {
     "title": str,
     "level": int,
     "parent_section_id": (str, type(None)),
+    "chapter_scope_id": (str, type(None)),
     "skeleton_entry_index": int,
     "anchor_evidence_ids": list,
     "title_text_unit_ids": list,

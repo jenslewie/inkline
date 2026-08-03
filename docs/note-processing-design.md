@@ -40,8 +40,9 @@ flowchart TD
 ```
 
 TextFlow is materialized once. NoteSystemReview and NoteMarkerReview operate on
-observations, page/layout evidence, and page images; they do not create provisional
-TextUnits.
+observations, page/layout evidence, and PageAssets; they do not create provisional
+TextUnits. Bounded multimodal note-system evidence records non-empty in-scope asset
+ids plus model and prompt provenance, while structural evidence records none.
 
 ## NoteSystemReview
 
@@ -152,7 +153,8 @@ SectionMap does not insert or edit these runs.
 
 ## NoteInventory
 
-NoteInventory is generated once from the final TextFlow and NoteSystemReview. It
+NoteInventory is generated once from the final TextFlow, NoteSystemReview,
+NoteMarkerReviewPlan, and NoteMarkerReview. It
 contains:
 
 - note-definition TextUnit ids and normalized markers;
@@ -161,6 +163,12 @@ contains:
 - the candidate note-system id for every definition and reference;
 - marker coverage audits within the correct scope; and
 - explicit unresolved, duplicate, orphan, and ambiguous cases.
+
+Every final footnote TextUnit is covered exactly once as either a definition or an
+`unresolved_definition`. An unresolved definition records its candidate id, source
+page, nullable system/request ids, a distinct review status, evidence, and reason;
+when a request exists it is a definition request whose region overlaps the footnote
+source observations and has one matching outcome.
 
 NoteInventory may record deterministic same-page or same-scope candidates, but it
 does not publish an authoritative target relation.
@@ -171,6 +179,10 @@ SectionMap consumes NoteInventory so chapter-end and book-end note groups are no
 silently assigned to the preceding ordinary subsection. It assigns note definitions,
 group headings, and physical pages to confirmed note sections or leaves them
 standalone/unresolved.
+
+SectionMap sections carry nullable `chapter_scope_id`; non-null values are explicit
+ancestor-or-self chapter identities, not inferred from hierarchy. Chapter-scoped
+NoteResolution relations require matching source, target, and scope identities.
 
 NoteResolution then consumes NoteInventory and SectionMap. It emits a new immutable
 relation artifact:

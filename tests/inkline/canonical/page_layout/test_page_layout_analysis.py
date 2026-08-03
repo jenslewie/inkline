@@ -195,6 +195,14 @@ def test_page_layout_analysis_reuses_supplied_observed_index(
     assert analysis["metadata"]["doc_id"] == "book"
 
 
+def test_page_layout_preserves_metrics_from_immutable_observed_index() -> None:
+    document = _document()
+
+    analysis = build_page_layout_analysis(document, observed_index=build_observed_index(document))
+
+    assert analysis["book_layout_profile"]["indent_unit"] == 20.0
+
+
 def test_page_layout_analysis_rejects_mismatched_observed_index() -> None:
     document = _document()
     other = _document()

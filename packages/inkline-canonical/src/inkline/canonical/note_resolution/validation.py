@@ -60,6 +60,14 @@ def validate_note_resolution_against_sources(
     definitions = {
         definition["definition_id"]: definition for definition in note_inventory["definitions"]
     }
+    source_evidence_by_reference = {
+        reference["reference_id"]: set(reference.get("evidence_ids", []))
+        for reference in note_inventory["references"]
+    }
+    target_evidence_by_definition = {
+        definition["definition_id"]: set(definition.get("evidence_ids", []))
+        for definition in note_inventory["definitions"]
+    }
     section_by_text_unit = _section_by_member(section_map, "text_unit_ids")
     sections_by_id = {
         section["section_id"]: section for section in section_map["sections"]
@@ -77,12 +85,35 @@ def validate_note_resolution_against_sources(
             section_by_text_unit,
             sections_by_id,
         )
+        if "evidence_ids" in reference and "evidence_ids" in definition:
+            expected_evidence = (
+                source_evidence_by_reference[reference["reference_id"]]
+                | target_evidence_by_definition[definition["definition_id"]]
+                | set(sections_by_id[section_id]["evidence_ids"])
+                for section_id in {
+                    relation["source_section_id"],
+                    relation["target_section_id"],
+                    relation["scope_section_id"],
+                }
+                if section_id is not None
+            )
+            if not set(relation["evidence_ids"]) <= set().union(*expected_evidence):
+                raise ValidationError("NoteResolution relation has unrelated evidence")
     for unresolved in resolution["unresolved_references"]:
         reference = references.get(unresolved["reference_id"])
         if reference is None or reference["note_system_id"] != unresolved["note_system_id"]:
             raise ValidationError("NoteResolution unresolved reference is invalid")
         if not set(unresolved["candidate_definition_ids"]) <= set(definitions):
             raise ValidationError("NoteResolution has unknown candidate definition")
+        if "evidence_ids" in reference and all(
+            "evidence_ids" in definitions[candidate]
+            for candidate in unresolved["candidate_definition_ids"]
+        ):
+            expected_evidence = source_evidence_by_reference[unresolved["reference_id"]] | set().union(
+                *(target_evidence_by_definition[candidate] for candidate in unresolved["candidate_definition_ids"])
+            )
+            if not set(unresolved["evidence_ids"]) <= expected_evidence:
+                raise ValidationError("NoteResolution unresolved reference has unrelated evidence")
     covered = {
         relation["reference_id"] for relation in resolution["relations"]
     } | {
@@ -194,8 +225,9 @@ def _validate_relation_sections(
             scope_section is None
             or source_section is None
             or target_section is None
-            or not _is_same_or_ancestor(scope_section, source_section, sections_by_id)
-            or not _is_same_or_ancestor(scope_section, target_section, sections_by_id)
+            or sections_by_id[source_section]["chapter_scope_id"] != scope_section
+            or sections_by_id[target_section]["chapter_scope_id"] != scope_section
+            or sections_by_id[scope_section]["chapter_scope_id"] != scope_section
         ):
             raise ValidationError(
                 "chapter-scoped note relation lacks one confirmed scope ancestor"

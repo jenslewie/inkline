@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any, TypeGuard
 
@@ -230,16 +230,16 @@ def _unit_from_observation_group(
 
 def _merge_observation_attrs(attrs: dict[str, Any], observation: dict[str, Any]) -> None:
     observation_attrs = observation.get("attrs")
-    if not isinstance(observation_attrs, dict):
+    if not isinstance(observation_attrs, Mapping):
         return
     metrics = observation_attrs.get("text_line_metrics")
-    if isinstance(metrics, dict):
+    if isinstance(metrics, Mapping):
         attrs.setdefault("text_line_metrics_by_observation", {})[
             str(observation["observation_id"])
         ] = deepcopy(metrics)
     for field in ("inline_runs", "note_refs"):
         value = observation_attrs.get(field)
-        if isinstance(value, list):
+        if isinstance(value, Sequence) and not isinstance(value, str | bytes):
             attrs.setdefault(field, []).extend(deepcopy(value))
 
 
@@ -338,23 +338,23 @@ def _merge_inline_attrs(
     source_text: str,
 ) -> None:
     metrics = source_attrs.get("text_line_metrics_by_observation")
-    if isinstance(metrics, dict):
+    if isinstance(metrics, Mapping):
         target_attrs.setdefault("text_line_metrics_by_observation", {}).update(deepcopy(metrics))
     inline_runs = source_attrs.get("inline_runs")
-    if isinstance(inline_runs, list):
+    if isinstance(inline_runs, Sequence) and not isinstance(inline_runs, str | bytes):
         if "inline_runs" not in target_attrs and target_text:
             target_attrs["inline_runs"] = [{"type": "text", "text": target_text}]
         target_attrs.setdefault("inline_runs", []).extend(deepcopy(inline_runs))
     elif "inline_runs" in target_attrs and source_text:
         target_attrs["inline_runs"].append({"type": "text", "text": source_text})
     note_refs = source_attrs.get("note_refs")
-    if isinstance(note_refs, list):
+    if isinstance(note_refs, Sequence) and not isinstance(note_refs, str | bytes):
         target_attrs.setdefault("note_refs", []).extend(deepcopy(note_refs))
 
 
 def _first_span_bbox(unit: dict[str, Any]) -> Any:
     for span in unit.get("spans") or []:
-        bbox = span.get("bbox") if isinstance(span, dict) else None
+        bbox = span.get("bbox") if isinstance(span, Mapping) else None
         if _valid_bbox(bbox):
             return bbox
     return unit.get("bbox")
@@ -362,7 +362,7 @@ def _first_span_bbox(unit: dict[str, Any]) -> Any:
 
 def _last_span_bbox(unit: dict[str, Any]) -> Any:
     for span in reversed(unit.get("spans") or []):
-        bbox = span.get("bbox") if isinstance(span, dict) else None
+        bbox = span.get("bbox") if isinstance(span, Mapping) else None
         if _valid_bbox(bbox):
             return bbox
     return unit.get("bbox")
@@ -371,12 +371,12 @@ def _last_span_bbox(unit: dict[str, Any]) -> Any:
 def _unit_starts_new_paragraph(unit: dict[str, Any]) -> bool:
     observation_ids = list(unit.get("observation_ids") or [])
     attrs_value = unit.get("attrs")
-    attrs = attrs_value if isinstance(attrs_value, dict) else {}
+    attrs = attrs_value if isinstance(attrs_value, Mapping) else {}
     metrics_by_observation = attrs.get("text_line_metrics_by_observation")
-    if not observation_ids or not isinstance(metrics_by_observation, dict):
+    if not observation_ids or not isinstance(metrics_by_observation, Mapping):
         return False
     metrics = metrics_by_observation.get(str(observation_ids[0]))
-    if not isinstance(metrics, dict):
+    if not isinstance(metrics, Mapping):
         return False
     line_count = _metric_int(metrics, "line_count")
     if line_count is not None and line_count < 2:
@@ -386,14 +386,14 @@ def _unit_starts_new_paragraph(unit: dict[str, Any]) -> bool:
     return indent is not None and indent >= max(_MIN_FIRST_LINE_INDENT, (char_width or 10.0) * 1.15)
 
 
-def _metric_float(metrics: dict[str, Any], key: str) -> float | None:
+def _metric_float(metrics: Mapping[str, Any], key: str) -> float | None:
     try:
         return float(metrics[key])
     except (KeyError, TypeError, ValueError):
         return None
 
 
-def _metric_int(metrics: dict[str, Any], key: str) -> int | None:
+def _metric_int(metrics: Mapping[str, Any], key: str) -> int | None:
     try:
         return int(metrics[key])
     except (KeyError, TypeError, ValueError):
@@ -402,25 +402,26 @@ def _metric_int(metrics: dict[str, Any], key: str) -> int | None:
 
 def _observation_spans(observation: dict[str, Any]) -> list[dict[str, Any]]:
     spans = observation.get("spans")
-    if isinstance(spans, list) and spans:
-        return deepcopy(spans)
+    if isinstance(spans, Sequence) and not isinstance(spans, str | bytes) and spans:
+        return [dict(span) for span in spans if isinstance(span, Mapping)]
     bbox = observation.get("bbox")
     if _valid_bbox(bbox):
         return [{"page": observation["page"], "bbox": deepcopy(bbox)}]
     return []
 
 
-def _valid_bbox(value: Any) -> TypeGuard[list[float]]:
+def _valid_bbox(value: Any) -> TypeGuard[Sequence[float]]:
     return (
-        isinstance(value, list)
+        isinstance(value, Sequence)
+        and not isinstance(value, str | bytes)
         and len(value) == 4
         and all(isinstance(number, int | float) for number in value)
     )
 
 
-def _union_bbox(left: list[float] | None, right: list[float]) -> list[float]:
+def _union_bbox(left: Sequence[float] | None, right: Sequence[float]) -> list[float]:
     if left is None:
-        return deepcopy(right)
+        return [float(value) for value in right]
     return [
         min(float(left[0]), float(right[0])),
         min(float(left[1]), float(right[1])),
@@ -429,15 +430,15 @@ def _union_bbox(left: list[float] | None, right: list[float]) -> list[float]:
     ]
 
 
-def _left_delta(left: list[float], right: list[float]) -> float:
+def _left_delta(left: Sequence[float], right: Sequence[float]) -> float:
     return abs(float(left[0]) - float(right[0]))
 
 
-def _max_left_delta(bbox: list[float]) -> float:
+def _max_left_delta(bbox: Sequence[float]) -> float:
     return max(24.0, (float(bbox[2]) - float(bbox[0])) * 0.08)
 
 
-def _horizontal_overlap_ratio(left: list[float], right: list[float]) -> float:
+def _horizontal_overlap_ratio(left: Sequence[float], right: Sequence[float]) -> float:
     overlap = max(0.0, min(float(left[2]), float(right[2])) - max(float(left[0]), float(right[0])))
     width = min(float(left[2]) - float(left[0]), float(right[2]) - float(right[0]))
     return overlap / width if width > 0 else 0.0

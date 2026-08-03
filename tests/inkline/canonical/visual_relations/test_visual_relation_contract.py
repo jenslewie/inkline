@@ -93,6 +93,32 @@ def test_visual_relation_review_accepts_same_page_group() -> None:
     validate_visual_relation_review_against_sources(_review(), *_sources())
 
 
+def test_visual_relation_review_rejects_evidence_observation_outside_evidence_pages() -> None:
+    review = _review()
+    review["evidence"][0]["pages"] = [2]
+
+    with pytest.raises(ValidationError, match="evidence observation"):
+        validate_visual_relation_review_against_sources(review, *_sources())
+
+
+def test_visual_relation_review_rejects_unresolved_pages_that_differ_from_endpoints() -> None:
+    review = _review()
+    group = review["visual_groups"].pop()
+    review["unresolved_candidates"] = [
+        {
+            "candidate_id": "vrc000001",
+            "asset_observation_ids": group["asset_observation_ids"],
+            "caption_observation_ids": group["caption_observation_ids"],
+            "physical_pages": [2],
+            "evidence_ids": group["evidence_ids"],
+            "reason": "ambiguous_caption",
+        }
+    ]
+
+    with pytest.raises(ValidationError, match="unresolved candidate page provenance"):
+        validate_visual_relation_review_against_sources(review, *_sources())
+
+
 def test_visual_relation_review_rejects_duplicate_endpoint_ownership() -> None:
     review = _review()
     duplicate = deepcopy(review["visual_groups"][0])

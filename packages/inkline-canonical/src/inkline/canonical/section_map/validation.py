@@ -133,6 +133,7 @@ def _validate_sections(sections: list[Any]) -> dict[str, dict[str, Any]]:
     _validate_section_cycles(sections_by_id)
     for section in sections_by_id.values():
         _validate_parent_level(section, sections_by_id)
+        _validate_chapter_scope(section, sections_by_id)
     return sections_by_id
 
 
@@ -226,6 +227,25 @@ def _validate_parent_level(
     parent = sections_by_id[parent_id]
     if parent["level"] >= section["level"]:
         raise ValidationError(f"section {section['section_id']} parent level must be lower")
+
+
+def _validate_chapter_scope(
+    section: dict[str, Any], sections_by_id: dict[str, dict[str, Any]]
+) -> None:
+    scope_id = section["chapter_scope_id"]
+    if scope_id is None:
+        return
+    scope = sections_by_id.get(scope_id)
+    if scope is None or scope["chapter_scope_id"] != scope_id:
+        raise ValidationError(f"section {section['section_id']} has invalid chapter scope identity")
+    if not _is_ancestor_or_self(scope_id, section["section_id"], sections_by_id):
+        raise ValidationError(f"section {section['section_id']} chapter scope is not an ancestor")
+
+
+def _is_ancestor_or_self(
+    ancestor: str, descendant: str, sections_by_id: dict[str, dict[str, Any]]
+) -> bool:
+    return ancestor == descendant or _is_ancestor(ancestor, descendant, sections_by_id)
 
 
 def _validate_section_cycles(sections_by_id: dict[str, dict[str, Any]]) -> None:

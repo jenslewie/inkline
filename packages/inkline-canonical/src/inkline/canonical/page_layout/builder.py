@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from statistics import median
 from typing import Any, TypeGuard, cast
@@ -90,14 +91,14 @@ def _layout_fragments(
             continue
         bboxes = _observation_bboxes(observation)
         attrs_value = observation.get("attrs")
-        attrs = attrs_value if isinstance(attrs_value, dict) else {}
+        attrs = attrs_value if isinstance(attrs_value, Mapping) else {}
         metrics = attrs.get("text_line_metrics")
         for bbox in bboxes:
             fragments.append(
                 {
                     "page": page,
                     "bbox": bbox,
-                    "text_line_metrics": metrics if isinstance(metrics, dict) else None,
+                    "text_line_metrics": metrics if isinstance(metrics, Mapping) else None,
                 }
             )
     return fragments
@@ -149,7 +150,7 @@ def _is_title_cluster_page(observations: list[dict[str, Any]], page_size: dict[s
 
 def _observation_order(observation: dict[str, Any]) -> tuple[int, int, float, float, str]:
     attrs_value = observation.get("attrs")
-    attrs = attrs_value if isinstance(attrs_value, dict) else {}
+    attrs = attrs_value if isinstance(attrs_value, Mapping) else {}
     reading_order = attrs.get("reading_order")
     bbox = observation.get("bbox")
     return (
@@ -167,7 +168,7 @@ def _observation_bboxes(observation: dict[str, Any]) -> list[list[float]]:
     span_bboxes = [
         [float(value) for value in span["bbox"]]
         for span in spans or []
-        if isinstance(span, dict)
+        if isinstance(span, Mapping)
         and (not isinstance(span.get("page"), int) or int(span["page"]) == page)
         and _valid_bbox(span.get("bbox"))
     ]
@@ -294,7 +295,7 @@ def _indent_units(fragments: list[dict[str, Any]]) -> list[float]:
     seen_metrics: set[int] = set()
     for fragment in fragments:
         metrics = fragment.get("text_line_metrics")
-        if not isinstance(metrics, dict) or id(metrics) in seen_metrics:
+        if not isinstance(metrics, Mapping) or id(metrics) in seen_metrics:
             continue
         seen_metrics.add(id(metrics))
         indent = _float_or_none(metrics.get("first_line_indent"))
@@ -411,7 +412,7 @@ def _visual_regions(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if observation.get("kind") not in VISUAL_KINDS or not _valid_bbox(observation.get("bbox")):
             continue
         attrs_value = observation.get("attrs")
-        attrs = attrs_value if isinstance(attrs_value, dict) else {}
+        attrs = attrs_value if isinstance(attrs_value, Mapping) else {}
         reading_order = attrs.get("reading_order")
         regions.append(
             {
@@ -584,17 +585,18 @@ def _float_or_none(value: Any) -> float | None:
         return None
 
 
-def _valid_bbox(value: Any) -> TypeGuard[list[float]]:
+def _valid_bbox(value: Any) -> TypeGuard[Sequence[float]]:
     return (
-        isinstance(value, list)
+        isinstance(value, Sequence)
+        and not isinstance(value, str | bytes)
         and len(value) == 4
         and all(isinstance(number, int | float) for number in value)
     )
 
 
-def _width(bbox: list[float]) -> float:
+def _width(bbox: Sequence[float]) -> float:
     return float(bbox[2]) - float(bbox[0])
 
 
-def _height(bbox: list[float]) -> float:
+def _height(bbox: Sequence[float]) -> float:
     return float(bbox[3]) - float(bbox[1])

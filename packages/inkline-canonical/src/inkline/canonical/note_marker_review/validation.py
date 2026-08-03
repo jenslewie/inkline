@@ -104,6 +104,13 @@ def validate_note_marker_review_plan_against_sources(
     known_pages = set(observed_index.page_numbers)
     known_observations = observed_index.observations_by_id
     for request in plan["review_requests"]:
+        known_evidence = {
+            evidence.get("evidence_id")
+            for evidence in note_system_review.get("evidence", [])
+            if isinstance(evidence, dict)
+        }
+        if not set(request["evidence_ids"]) <= known_evidence:
+            raise ValidationError("marker review request references unknown note-system evidence")
         for region in request["regions"]:
             if region["page"] not in known_pages:
                 raise ValidationError("marker review region references unknown page")
@@ -148,6 +155,7 @@ def validate_note_marker_review(review: dict[str, Any]) -> None:
         prompt_version = validate_nullable_string(
             outcome["prompt_version"], f"{path}.prompt_version"
         )
+        validate_id_list(outcome["page_asset_ids"], f"{path}.page_asset_ids")
         _validate_outcome_state(
             status, markers, failure_reason, model_name, prompt_version, path
         )
@@ -157,6 +165,7 @@ def validate_note_marker_review_against_plan(
     review: dict[str, Any],
     plan: dict[str, Any],
     observed_index: ObservedIndex,
+    page_assets: dict[str, Any],
 ) -> None:
     """Validate request coverage, region containment, text anchors, and provenance."""
 
@@ -170,8 +179,11 @@ def validate_note_marker_review_against_plan(
     outcomes = {outcome["review_request_id"]: outcome for outcome in review["outcomes"]}
     if set(outcomes) != set(requests):
         raise ValidationError("NoteMarkerReview must cover every planned request exactly once")
+    assets_by_id = _page_assets_by_id(page_assets)
     for request_id, outcome in outcomes.items():
         request = requests[request_id]
+        region_pages = {region["page"] for region in request["regions"]}
+        asset_pages = _validate_outcome_assets(outcome, assets_by_id, region_pages)
         for marker in outcome["markers"]:
             if marker["note_system_id"] != request["note_system_id"]:
                 raise ValidationError("marker evidence note_system_id differs from plan")
@@ -184,6 +196,12 @@ def validate_note_marker_review_against_plan(
             adjacent_text = marker["adjacent_text"]
             if adjacent_text and adjacent_text not in str(observation.get("text") or ""):
                 raise ValidationError("marker adjacent_text is not anchored in observation")
+            if not set(marker["evidence_ids"]) <= set(request["evidence_ids"]):
+                raise ValidationError("marker evidence ids differ from owning request evidence")
+        if outcome["status"] == "found" and not {
+            marker["page"] for marker in outcome["markers"]
+        } <= asset_pages:
+            raise ValidationError("found marker outcome lacks page asset coverage")
 
 
 def _validate_regions(value: Any, request_path: str) -> None:
@@ -244,6 +262,45 @@ def _validate_outcome_state(
             raise ValidationError(f"{path} not_run status must not claim model provenance")
     elif model_name is None or prompt_version is None:
         raise ValidationError(f"{path} executed status requires model provenance")
+
+
+def _page_assets_by_id(page_assets: dict[str, Any]) -> dict[str, int]:
+    images = page_assets.get("images")
+    if not isinstance(images, list):
+        raise ValidationError("PageAssets images must be list")
+    assets: dict[str, int] = {}
+    for record in images:
+        image_id = record.get("image_id") if isinstance(record, dict) else None
+        source = record.get("source") if isinstance(record, dict) else None
+        page = source.get("page") if isinstance(source, dict) else None
+        if not isinstance(image_id, str) or not image_id or type(page) is not int or page <= 0:
+            raise ValidationError("PageAssets image record is invalid")
+        if image_id in assets:
+            raise ValidationError("duplicate PageAssets image_id")
+        assets[image_id] = page
+    return assets
+
+
+def _validate_outcome_assets(
+    outcome: dict[str, Any], assets_by_id: dict[str, int], region_pages: set[int]
+) -> set[int]:
+    asset_ids = outcome["page_asset_ids"]
+    asset_pages: set[int] = set()
+    for asset_id in asset_ids:
+        page = assets_by_id.get(asset_id)
+        if page is None:
+            raise ValidationError("marker outcome references unknown PageAssets image")
+        if page not in region_pages:
+            raise ValidationError("marker outcome PageAssets image is outside planned region")
+        asset_pages.add(page)
+    status = outcome["status"]
+    if status == "not_run" and asset_ids:
+        raise ValidationError("not_run marker outcome must not use page assets")
+    if status == "absent" and asset_pages != region_pages:
+        raise ValidationError("absent marker outcome lacks planned-region asset coverage")
+    if status == "unresolved" and not asset_ids:
+        raise ValidationError("unresolved marker outcome requires an in-scope page asset")
+    return asset_pages
 
 
 def _validate_marker_against_regions(

@@ -23,6 +23,8 @@ from inkline.canonical.note_inventory.contract import (
     REFERENCE_FIELDS,
     TOP_LEVEL_FIELDS,
     UNRESOLVED_CASE_FIELDS,
+    UNRESOLVED_DEFINITION_FIELDS,
+    UNRESOLVED_DEFINITION_STATUSES,
 )
 from inkline.canonical.schema import ValidationError
 from inkline.canonical.text_flow import validate_text_flow
@@ -39,6 +41,13 @@ def validate_note_inventory(inventory: dict[str, Any]) -> None:
         path="note_inventory.metadata",
     )
     definitions = _validate_definitions(inventory["definitions"])
+    unresolved_definitions = _validate_unresolved_definitions(
+        inventory["unresolved_definitions"]
+    )
+    if {definition["text_unit_id"] for definition in definitions.values()} & {
+        candidate["text_unit_id"] for candidate in unresolved_definitions.values()
+    }:
+        raise ValidationError("defined and unresolved footnote TextUnits must be disjoint")
     references = _validate_references(inventory["references"])
     groups = _validate_groups(inventory["note_groups"], definitions)
     _validate_definition_group_links(definitions, groups)
@@ -49,6 +58,7 @@ def validate_note_inventory_against_sources(
     inventory: dict[str, Any],
     text_flow: dict[str, Any],
     note_system_review: dict[str, Any],
+    note_marker_review_plan: dict[str, Any],
     note_marker_review: dict[str, Any],
 ) -> None:
     """Validate TextUnit, inline-run, note-system, and marker-evidence references."""
@@ -59,6 +69,7 @@ def validate_note_inventory_against_sources(
     for name, source in (
         ("TextFlow", text_flow),
         ("NoteSystemReview", note_system_review),
+        ("NoteMarkerReviewPlan", note_marker_review_plan),
         ("NoteMarkerReview", note_marker_review),
     ):
         if source.get("metadata", {}).get("doc_id") != doc_id:
@@ -75,6 +86,24 @@ def validate_note_inventory_against_sources(
     system_evidence_ids = {
         evidence["evidence_id"] for evidence in note_system_review.get("evidence", [])
     }
+    plan_evidence_ids = {
+        evidence_id
+        for request in note_marker_review_plan.get("review_requests", [])
+        if isinstance(request, dict)
+        for evidence_id in request.get("evidence_ids", [])
+        if isinstance(evidence_id, str)
+    }
+    known_note_evidence_ids = system_evidence_ids | plan_evidence_ids | marker_ids
+    requests = {
+        request["review_request_id"]: request
+        for request in note_marker_review_plan.get("review_requests", [])
+        if isinstance(request, dict)
+    }
+    outcomes = {
+        outcome["review_request_id"]: outcome
+        for outcome in note_marker_review.get("outcomes", [])
+        if isinstance(outcome, dict)
+    }
     for definition in inventory["definitions"]:
         unit = units.get(definition["text_unit_id"])
         if unit is None or unit["unit_type"] != "footnote":
@@ -85,6 +114,31 @@ def validate_note_inventory_against_sources(
         _validate_system_and_evidence(
             definition, system_ids, marker_ids, system_evidence_ids
         )
+    definition_units = {definition["text_unit_id"] for definition in inventory["definitions"]}
+    unresolved_units = {
+        candidate["text_unit_id"] for candidate in inventory["unresolved_definitions"]
+    }
+    footnote_units = {
+        unit_id for unit_id, unit in units.items() if unit.get("unit_type") == "footnote"
+    }
+    if footnote_units != definition_units | unresolved_units:
+        raise ValidationError("NoteInventory must partition every final footnote TextUnit")
+    for candidate in inventory["unresolved_definitions"]:
+        _validate_unresolved_definition_against_sources(
+            candidate,
+            units,
+            system_ids,
+            system_evidence_ids,
+            requests,
+            outcomes,
+            marker_ids,
+        )
+    _validate_collection_evidence(
+        inventory["note_groups"], known_note_evidence_ids, "note group"
+    )
+    _validate_collection_evidence(
+        inventory["unresolved_cases"], known_note_evidence_ids, "unresolved case"
+    )
     inventoried_reference_locations: set[tuple[str, int]] = set()
     for reference in inventory["references"]:
         unit = units.get(reference["text_unit_id"])
@@ -151,6 +205,35 @@ def _validate_references(value: Any) -> dict[str, dict[str, Any]]:
         validate_id_list(record["evidence_ids"], f"{path}.evidence_ids", required=True)
         references[record["reference_id"]] = record
     return references
+
+
+def _validate_unresolved_definitions(value: Any) -> dict[str, dict[str, Any]]:
+    records = validate_ordered_ids(
+        value,
+        id_field="candidate_id",
+        prefix="ndc",
+        path="note_inventory.unresolved_definitions",
+    )
+    candidates: dict[str, dict[str, Any]] = {}
+    unit_ids: set[str] = set()
+    for index, record in enumerate(records):
+        path = f"note_inventory.unresolved_definitions[{index}]"
+        validate_exact_fields(record, UNRESOLVED_DEFINITION_FIELDS, path)
+        text_unit_id = validate_non_empty_string(record["text_unit_id"], f"{path}.text_unit_id")
+        if text_unit_id in unit_ids:
+            raise ValidationError("one TextUnit cannot have multiple unresolved definitions")
+        unit_ids.add(text_unit_id)
+        _validate_positive_page(record["physical_page"], f"{path}.physical_page")
+        validate_nullable_string(record["note_system_id"], f"{path}.note_system_id")
+        validate_nullable_string(record["marker_review_request_id"], f"{path}.marker_review_request_id")
+        validate_choice(
+            record["marker_review_status"], UNRESOLVED_DEFINITION_STATUSES,
+            f"{path}.marker_review_status",
+        )
+        validate_id_list(record["evidence_ids"], f"{path}.evidence_ids", required=True)
+        validate_reason(record["reason"], f"{path}.reason")
+        candidates[record["candidate_id"]] = record
+    return candidates
 
 
 def _validate_groups(
@@ -262,6 +345,61 @@ def _validate_system_and_evidence(
         raise ValidationError("NoteInventory references unknown note evidence")
     if not evidence_ids & marker_ids:
         raise ValidationError("NoteInventory record lacks marker evidence")
+
+
+def _validate_collection_evidence(
+    records: list[dict[str, Any]], known_evidence_ids: set[str], noun: str
+) -> None:
+    for record in records:
+        if not set(record["evidence_ids"]) <= known_evidence_ids:
+            raise ValidationError(f"{noun} references unknown note evidence")
+
+
+def _validate_unresolved_definition_against_sources(
+    candidate: dict[str, Any],
+    units: dict[str, dict[str, Any]],
+    system_ids: set[str],
+    system_evidence_ids: set[str],
+    requests: dict[str, dict[str, Any]],
+    outcomes: dict[str, dict[str, Any]],
+    marker_ids: set[str],
+) -> None:
+    unit = units.get(candidate["text_unit_id"])
+    if unit is None or unit.get("unit_type") != "footnote":
+        raise ValidationError("unresolved definition references non-footnote TextUnit")
+    _validate_page_membership(candidate["physical_page"], unit, "unresolved definition")
+    note_system_id = candidate["note_system_id"]
+    if note_system_id is not None and note_system_id not in system_ids:
+        raise ValidationError("unresolved definition references unknown note system")
+    request_id = candidate["marker_review_request_id"]
+    status = candidate["marker_review_status"]
+    if request_id is None:
+        if status != "not_planned":
+            raise ValidationError("unresolved definition without request must be not_planned")
+        if not set(candidate["evidence_ids"]) <= system_evidence_ids:
+            raise ValidationError("unresolved definition has unknown note-system evidence")
+        return
+    request = requests.get(request_id)
+    outcome = outcomes.get(request_id)
+    if request is None or request.get("region_kind") != "definition":
+        raise ValidationError("unresolved definition has invalid marker review request")
+    if note_system_id != request.get("note_system_id"):
+        raise ValidationError("unresolved definition request differs from note system")
+    if outcome is None or outcome.get("status") != status:
+        raise ValidationError("unresolved definition request outcome differs from status")
+    request_pages = {region.get("page") for region in request.get("regions", [])}
+    request_observations = {
+        observation_id
+        for region in request.get("regions", [])
+        for observation_id in region.get("observation_ids", [])
+    }
+    if candidate["physical_page"] not in request_pages or not (
+        set(unit.get("observation_ids", [])) & request_observations
+    ):
+        raise ValidationError("unresolved definition request does not overlap footnote source")
+    allowed_evidence = set(request.get("evidence_ids", [])) | system_evidence_ids | marker_ids
+    if not set(candidate["evidence_ids"]) <= allowed_evidence:
+        raise ValidationError("unresolved definition has unknown review evidence")
 
 
 def _validate_positive_page(value: Any, path: str) -> None:

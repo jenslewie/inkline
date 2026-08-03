@@ -30,20 +30,20 @@ flowchart LR
 | Builder or stage | Required inputs | Output | Acceptance gate |
 | --- | --- | --- | --- |
 | Parser adapter | Parser-specific source artifacts | `ObservedDocument` | ObservedDocument contract validation |
-| Observed index | `ObservedDocument` | `ObservedIndex` | Contract tests plus regenerated 13-book Skeleton golden comparison after Skeleton adopts the index |
+| Observed index | `ObservedDocument` | `ObservedIndex` | Detached recursively immutable snapshot; contract tests plus regenerated 13-book Skeleton golden comparison after Skeleton adopts the index |
 | Book skeleton | `ObservedIndex` | `BookSkeleton` | 13-book Skeleton golden comparison |
 | Page layout | `ObservedIndex` | `PageLayoutAnalysis` | Contract and geometry characterization tests |
 | Page review | `BookSkeleton`, `PageLayoutAnalysis` | `PageReview` | Staged regeneration and 13-book PageReview golden comparison |
 | Page assets | `ObservedDocument`, `PageReview` | `PageAssets` | Asset provenance and page-action validation |
 | Visual relations | `ObservedIndex`, `PageLayoutAnalysis`, `PageReview`, `PageAssets` | `VisualRelationReview` | Relation, endpoint-kind, ownership, and unpaired-endpoint validation |
-| Note systems | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, `PageReview`, `PageAssets` | `NoteSystemReview` | 13-book system/range/scope audit; mixed systems remain separate |
+| Note systems | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, `PageReview`, `PageAssets` | `NoteSystemReview` | 13-book system/range/scope audit plus real PageAssets/model provenance; mixed systems remain separate |
 | Note marker plan | `ObservedIndex`, `PageLayoutAnalysis`, `NoteSystemReview` | `NoteMarkerReviewPlan` | Every review request has a bounded region and structural reason |
-| Note marker review | `ObservedIndex`, `PageAssets`, `NoteMarkerReviewPlan` | `NoteMarkerReview` | Marker/anchor/provenance validation; absent, failed, and unresolved remain distinct |
+| Note marker review | `ObservedIndex`, `PageAssets`, `NoteMarkerReviewPlan` | `NoteMarkerReview` | Marker/anchor/provenance and outcome-specific PageAssets coverage; absent, failed, and unresolved remain distinct |
 | Text flow | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, `PageReview`, `VisualRelationReview`, `NoteSystemReview`, `NoteMarkerReview` | `TextFlow` | 13-book freeze; one TextFlow build per workflow run |
 | Table flow | `ObservedDocument`, `ObservedIndex`, resolved `PageReview` | `TableFlow` | Parser-neutral table contract tests; every table observation consumed, excluded, or unresolved |
-| Note inventory | `TextFlow`, `NoteSystemReview`, `NoteMarkerReview` | `NoteInventory` | Definition/reference/group coverage; no dangling TextUnit or inline-run ids |
+| Note inventory | `TextFlow`, `NoteSystemReview`, `NoteMarkerReviewPlan`, `NoteMarkerReview` | `NoteInventory` | Definition/reference/group coverage and exact final-footnote definition-or-unresolved partition |
 | Section map | `BookSkeleton`, `PageReview`, `TextFlow`, `TableFlow`, `VisualRelationReview`, `NoteInventory` | `SectionMap` | Automated membership gates; Task 4 manual acceptance |
-| Note resolution | `NoteInventory`, `SectionMap` | `NoteResolution` | Reference, scope, and unresolved-case validation |
+| Note resolution | `NoteInventory`, `SectionMap` | `NoteResolution` | Reference, explicit chapter-scope identity, evidence, and unresolved-case validation |
 | BookGraph assembler | Validated `CanonicalArtifactBundle` | Public `BookGraph` and internal canonical view | Projection parity; no upstream recomputation |
 
 Use small local diagrams when a fan-in deserves explanation. For example, the core
@@ -181,8 +181,8 @@ may rebuild their own units. Switching those projections remains later work.
 Major DAG nodes are independently validated development artifacts. Orchestration may
 materialize them for golden review, resume, debugging, or agent scheduling; domain
 builders return values and do not choose filesystem paths. `ObservedIndex` is the
-exception: it is a read-only in-memory lookup over ObservedDocument rather than a
-separately persisted contract.
+exception: it is a detached recursively immutable in-memory snapshot over
+ObservedDocument rather than a separately persisted contract.
 
 During pre-release development, artifact schemas may use temporary versions such as
 `0.1-shadow`. Breaking changes do not require compatibility readers or migrations;

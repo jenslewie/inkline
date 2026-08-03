@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any, TypeGuard
 
@@ -171,24 +172,24 @@ def _candidate_from_observation(
 def _candidate_attrs(observation: dict[str, Any]) -> dict[str, Any]:
     attrs: dict[str, Any] = {}
     observation_attrs = observation.get("attrs")
-    if not isinstance(observation_attrs, dict):
+    if not isinstance(observation_attrs, Mapping):
         return attrs
     text_line_metrics = observation_attrs.get("text_line_metrics")
-    if isinstance(text_line_metrics, dict):
+    if isinstance(text_line_metrics, Mapping):
         attrs["text_line_metrics_by_observation"] = {
             str(observation["observation_id"]): deepcopy(text_line_metrics)
         }
     for field in ("inline_runs", "note_refs"):
         value = observation_attrs.get(field)
-        if isinstance(value, list):
+        if isinstance(value, Sequence) and not isinstance(value, str | bytes):
             attrs[field] = deepcopy(value)
     return attrs
 
 
 def _observation_spans(observation: dict[str, Any]) -> list[dict[str, Any]]:
     spans = observation.get("spans")
-    if isinstance(spans, list) and spans:
-        return deepcopy(spans)
+    if isinstance(spans, Sequence) and not isinstance(spans, str | bytes) and spans:
+        return [dict(span) for span in spans if isinstance(span, Mapping)]
     bbox = observation.get("bbox")
     if _valid_bbox(bbox):
         return [{"page": observation["page"], "bbox": deepcopy(bbox)}]
@@ -261,14 +262,15 @@ def _visual_dominant_annotation_page(
 
 
 def _reading_order(observation: dict[str, Any]) -> int:
-    attrs = observation.get("attrs") if isinstance(observation.get("attrs"), dict) else {}
+    attrs = observation.get("attrs") if isinstance(observation.get("attrs"), Mapping) else {}
     value = attrs.get("reading_order")  # pyright: ignore[reportOptionalMemberAccess]
     return int(value) if isinstance(value, int) else 999999
 
 
-def _valid_bbox(value: Any) -> TypeGuard[list[float]]:
+def _valid_bbox(value: Any) -> TypeGuard[Sequence[float]]:
     return (
-        isinstance(value, list)
+        isinstance(value, Sequence)
+        and not isinstance(value, str | bytes)
         and len(value) == 4
         and all(isinstance(number, int | float) for number in value)
     )
@@ -282,23 +284,23 @@ def _bbox_left(value: Any) -> float:
     return float(value[0]) if _valid_bbox(value) else 999999.0
 
 
-def _vertical_gap(left: list[float], right: list[float]) -> float:
+def _vertical_gap(left: Sequence[float], right: Sequence[float]) -> float:
     return float(right[1]) - float(left[3])
 
 
-def _left_delta(left: list[float], right: list[float]) -> float:
+def _left_delta(left: Sequence[float], right: Sequence[float]) -> float:
     return abs(float(left[0]) - float(right[0]))
 
 
-def _height(bbox: list[float]) -> float:
+def _height(bbox: Sequence[float]) -> float:
     return float(bbox[3]) - float(bbox[1])
 
 
-def _width(bbox: list[float]) -> float:
+def _width(bbox: Sequence[float]) -> float:
     return float(bbox[2]) - float(bbox[0])
 
 
-def _horizontal_overlap_ratio(left: list[float], right: list[float]) -> float:
+def _horizontal_overlap_ratio(left: Sequence[float], right: Sequence[float]) -> float:
     overlap = max(0.0, min(float(left[2]), float(right[2])) - max(float(left[0]), float(right[0])))
     width = min(float(left[2]) - float(left[0]), float(right[2]) - float(right[0]))
     if width <= 0:

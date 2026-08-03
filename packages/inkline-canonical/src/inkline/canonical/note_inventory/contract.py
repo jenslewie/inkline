@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 NOTE_INVENTORY_SCHEMA_NAME = "inkline_note_inventory"
-NOTE_INVENTORY_SCHEMA_VERSION = "0.1-shadow"
+NOTE_INVENTORY_SCHEMA_VERSION = "0.2-shadow"
 
 NOTE_INVENTORY_ISSUE_KINDS = {
     "duplicate_definition",
@@ -14,9 +14,21 @@ NOTE_INVENTORY_ISSUE_KINDS = {
 TOP_LEVEL_FIELDS = {
     "metadata",
     "definitions",
+    "unresolved_definitions",
     "references",
     "note_groups",
     "unresolved_cases",
+}
+UNRESOLVED_DEFINITION_STATUSES = {"not_planned", "absent", "not_run", "failed", "unresolved"}
+UNRESOLVED_DEFINITION_FIELDS = {
+    "candidate_id",
+    "text_unit_id",
+    "physical_page",
+    "note_system_id",
+    "marker_review_request_id",
+    "marker_review_status",
+    "evidence_ids",
+    "reason",
 }
 DEFINITION_FIELDS = {
     "definition_id",
