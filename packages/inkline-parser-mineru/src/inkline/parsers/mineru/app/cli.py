@@ -157,6 +157,10 @@ def parse_args() -> argparse.Namespace:
         help="Optional Phase 4A PageReview audit output for canonical-version v2",
     )
     p.add_argument(
+        "--visual-relation-review-output",
+        help="Optional VisualRelationReview audit output for canonical-version v2",
+    )
+    p.add_argument(
         "--book-skeleton-llm",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -183,6 +187,12 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=False,
         help="Use local multimodal LLM for Phase 4A selected-page review in canonical-version v2",
+    )
+    p.add_argument(
+        "--visual-relation-review-llm",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use the configured multimodal LLM only for bounded VisualRelationReview pages in canonical-version v2",
     )
     p.add_argument("--doc-id", default=None)
     p.add_argument("--title", default=None)

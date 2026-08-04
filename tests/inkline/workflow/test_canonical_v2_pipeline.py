@@ -43,6 +43,7 @@ def test_resolved_workflow_builds_text_flow_once_and_assembly_reuses_it(monkeypa
 
     assert len(calls) == 1
     assert bundle.table_flow is not None
+    assert bundle.visual_relation_review is not None
     assert bundle.text_flow is not None
     assert bundle.page_assets == observed["assets"]
     assert bundle.page_assets is not observed["assets"]
@@ -70,3 +71,15 @@ def test_unresolved_review_returns_intermediate_bundle_without_text_flow() -> No
 
     assert bundle.table_flow is None
     assert bundle.text_flow is None
+
+
+def test_visual_relation_stage_runs_after_assets_before_text_flow_and_enters_bundle() -> None:
+    stages = canonical_artifact_stages()
+    names = [stage.name for stage in stages]
+
+    assert names[names.index("table_flow") : names.index("text_flow") + 1] == [
+        "table_flow",
+        "page_assets",
+        "visual_relation_review",
+        "text_flow",
+    ]

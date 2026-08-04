@@ -12,12 +12,13 @@ dependencies, identity/provenance rules, validation boundaries, and acceptance o
 It does not claim that every target builder or workflow stage already exists.
 
 The live `build_canonical_artifacts()` runtime currently builds `ObservedIndex`,
-`BookSkeleton`, `PageLayoutAnalysis`, resolved `PageReview`, `TableFlow`, a TextFlow
-foundation, and `PageAssets`. It does not yet build `VisualRelationReview`,
+`BookSkeleton`, `PageLayoutAnalysis`, resolved `PageReview`, `TableFlow`, `PageAssets`,
+`VisualRelationReview`, and a TextFlow foundation. It does not yet build
 `NoteSystemReview`, `NoteMarkerReviewPlan`, `NoteMarkerReview`, `NoteInventory`,
-`SectionMap`, or `NoteResolution`. The live BookGraph assembler consumes the current
-TextFlow directly and still invokes the legacy BookGraph note resolver. Those are
-development facts, not the target dependency contract.
+`SectionMap`, or `NoteResolution`. The foundation does not yet materialize visual
+relations into final TextFlow semantics; the live BookGraph assembler still consumes
+the current TextFlow directly and invokes the legacy BookGraph note resolver. Those
+are development facts, not the target dependency contract.
 
 The executable responsibility registry is
 `inkline.canonical.artifact_dag.CANONICAL_ARTIFACT_CONTRACTS`. The schema names,
@@ -81,6 +82,7 @@ flowchart TD
     observed --> tables
     index --> tables
     review --> tables
+    tables --> visual
     text --> inventory
     systems --> inventory
     markers --> inventory
@@ -104,7 +106,7 @@ flowchart TD
 
 | artifact | inputs | outputs | owns | must_not_own | validation |
 | --- | --- | --- | --- | --- | --- |
-| `VisualRelationReview` | `ObservedIndex`, `PageLayoutAnalysis`, resolved `PageReview`, `PageAssets` | visual groups, relation evidence, unpaired endpoints, unresolved candidates | same-page non-table visual/caption relations and endpoint audit state | caption text, table captions, OCR repair, section membership, BookGraph nodes | endpoint identity/kind, single ownership, same-page scope, evidence/model provenance, TableFlow caption exclusion |
+| `VisualRelationReview` | `ObservedIndex`, `PageLayoutAnalysis`, resolved `PageReview`, `TableFlow`, `PageAssets` | visual groups, relation evidence, unpaired endpoints, unresolved candidates | same-page non-table visual/caption relations and endpoint audit state | caption text, table captions, OCR repair, section membership, BookGraph nodes | endpoint identity/kind, single ownership, same-page scope, evidence/model provenance, TableFlow caption exclusion |
 | `NoteSystemReview` | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, resolved `PageReview`, `PageAssets` | separate page-foot, chapter-end, and book-end systems plus unresolved candidates | definition ranges, reference scope, marker styles, reset policy | printed marker recognition, TextUnits, section membership, final targets | range/scope/reset consistency, evidence identity, mixed-system separation |
 | `NoteMarkerReviewPlan` | `ObservedIndex`, `PageLayoutAnalysis`, `NoteSystemReview` | bounded definition/reference review requests and explicit no-review/unresolved partitions | regions, structural review reasons, request coverage | visual recognition results, TextUnits, section membership, targets | non-empty bounded regions, known ids, complete one-state partition of note systems |
 | `NoteMarkerReview` | `ObservedIndex`, `PageAssets`, `NoteMarkerReviewPlan` | per-request `found`, `absent`, `not_run`, `failed`, or `unresolved` outcomes and localized marker evidence | printed definition/reference marker location and model provenance | invented markers, TextUnits, section membership, targets | exact request coverage, region containment, adjacent-text anchoring, distinct execution states |
@@ -139,6 +141,9 @@ receive compatibility readers.
   physical page, evidence ids, decision source, and confidence.
 - An endpoint has one audit state: grouped, unpaired, or unresolved. TableFlow-owned
   caption observations cannot also be visual endpoints.
+- `deterministic_candidate` evidence may record geometry-selected unresolved work and
+  real PageAssets availability with null model/prompt provenance. It can never prove
+  a visual group; parser provenance or bounded multimodal review must do that.
 
 ### NoteSystemReview
 

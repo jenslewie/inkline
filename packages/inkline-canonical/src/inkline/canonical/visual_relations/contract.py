@@ -4,7 +4,11 @@ VISUAL_RELATION_REVIEW_SCHEMA_NAME = "inkline_visual_relation_review"
 VISUAL_RELATION_REVIEW_SCHEMA_VERSION = "0.1-shadow"
 
 VISUAL_DECISION_SOURCES = {"parser_provenance", "bounded_multimodal_review"}
-VISUAL_EVIDENCE_KINDS = {"parser_provenance", "bounded_multimodal_review"}
+VISUAL_EVIDENCE_KINDS = {
+    "parser_provenance",
+    "bounded_multimodal_review",
+    "deterministic_candidate",
+}
 
 TOP_LEVEL_FIELDS = {
     "metadata",

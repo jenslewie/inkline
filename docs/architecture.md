@@ -35,7 +35,7 @@ flowchart LR
 | Page layout | `ObservedIndex` | `PageLayoutAnalysis` | Contract and geometry characterization tests |
 | Page review | `BookSkeleton`, `PageLayoutAnalysis` | `PageReview` | Staged regeneration and 13-book PageReview golden comparison |
 | Page assets | `ObservedDocument`, `PageReview` | `PageAssets` | Asset provenance and page-action validation |
-| Visual relations | `ObservedIndex`, `PageLayoutAnalysis`, `PageReview`, `PageAssets` | `VisualRelationReview` | Relation, endpoint-kind, ownership, and unpaired-endpoint validation |
+| Visual relations | `ObservedIndex`, `PageLayoutAnalysis`, `PageReview`, `TableFlow`, `PageAssets` | `VisualRelationReview` | Relation, endpoint-kind, ownership, and unpaired-endpoint validation |
 | Note systems | `ObservedIndex`, `PageLayoutAnalysis`, `BookSkeleton`, `PageReview`, `PageAssets` | `NoteSystemReview` | 13-book system/range/scope audit plus real PageAssets/model provenance; mixed systems remain separate |
 | Note marker plan | `ObservedIndex`, `PageLayoutAnalysis`, `NoteSystemReview` | `NoteMarkerReviewPlan` | Every review request has a bounded region and structural reason |
 | Note marker review | `ObservedIndex`, `PageAssets`, `NoteMarkerReviewPlan` | `NoteMarkerReview` | Marker/anchor/provenance and outcome-specific PageAssets coverage; absent, failed, and unresolved remain distinct |
@@ -145,9 +145,10 @@ flowchart TD
     skeleton["BookSkeleton"]
     review["Resolved PageReview"]
     assets["PageAssets"]
+    visual["VisualRelationReview"]
     currentFlow["Current TextFlow foundation"]
     currentTables["In-progress TableFlow"]
-    missing["Missing target inputs:<br/>VisualRelationReview and note artifacts"]
+    missing["Missing target inputs:<br/>note artifacts"]
 
     observed --> index
     observed --> layout
@@ -156,21 +157,29 @@ flowchart TD
     layout --> review
     observed --> assets
     review --> assets
+    observed --> currentTables
+    index --> currentTables
+    review --> currentTables
+    index --> visual
+    layout --> visual
+    review --> visual
+    currentTables --> visual
+    assets --> visual
     index --> currentFlow
     layout --> currentFlow
     skeleton --> currentFlow
     review --> currentFlow
-    observed --> currentTables
-    index --> currentTables
-    review --> currentTables
+    visual --> currentFlow
     missing -.-> currentFlow
 ```
 
 The framework-neutral `build_canonical_artifacts()` workflow currently materializes
-`ObservedIndex`, `PageLayoutAnalysis`, resolved `PageReview`, a TextFlow foundation,
-`TableFlow`, and `PageAssets`. The SectionMap contract exists in
+`ObservedIndex`, `PageLayoutAnalysis`, resolved `PageReview`, `TableFlow`, `PageAssets`,
+VisualRelationReview, and a TextFlow foundation. VisualRelationReview runs after
+PageAssets and before the foundation; the foundation deliberately does not yet consume
+its semantic grouping. The SectionMap contract exists in
 `inkline-canonical`, but SectionMap is not a live workflow stage. The workflow does
-not yet materialize VisualRelationReview, the note review artifacts, or NoteInventory.
+not yet materialize the note review artifacts or NoteInventory.
 Consequently, its current TextFlow output is a development foundation, not the
 accepted final forms described by the target DAG. The release-facing observed
 BookGraph and internal-canonical builders still use their separate legacy path and

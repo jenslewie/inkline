@@ -18,7 +18,7 @@ class ArtifactContract:
 CANONICAL_ARTIFACT_CONTRACTS = (
     ArtifactContract(
         "VisualRelationReview",
-        ("ObservedIndex", "PageLayoutAnalysis", "PageReview", "PageAssets"),
+        ("ObservedIndex", "PageLayoutAnalysis", "PageReview", "TableFlow", "PageAssets"),
         "visual groups, relation evidence, and explicit unpaired/unresolved endpoints",
         ("same-page non-table visual/caption relations", "visual endpoint audit state"),
         ("caption text", "table captions", "section membership", "OCR repair"),

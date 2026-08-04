@@ -47,6 +47,13 @@ def test_target_artifact_contracts_freeze_revised_dependency_direction() -> None
         "NoteSystemReview",
         "NoteMarkerReview",
     )
+    assert artifact_contract("VisualRelationReview").inputs == (
+        "ObservedIndex",
+        "PageLayoutAnalysis",
+        "PageReview",
+        "TableFlow",
+        "PageAssets",
+    )
     assert artifact_contract("SectionMap").inputs[-3:] == (
         "TableFlow",
         "VisualRelationReview",

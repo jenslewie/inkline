@@ -12,6 +12,7 @@ from inkline.canonical import (
     build_page_review_plan,
     build_table_flow,
     build_text_flow,
+    build_visual_relation_review,
     classify_observed_page_roles,
     validate_book_skeleton_against_index,
     validate_observed_document,
@@ -20,6 +21,7 @@ from inkline.canonical import (
     validate_table_flow,
     validate_table_flow_against_sources,
     validate_text_flow_against_sources,
+    validate_visual_relation_review_against_sources,
 )
 from inkline.canonical.observed.index import ObservedIndex
 from inkline.workflow.artifact_store import ArtifactStore
@@ -28,6 +30,7 @@ from inkline.workflow.stage import Stage, run_stages
 SkeletonBuilder = Callable[..., dict[str, Any]]
 PageReviewBuilder = Callable[..., dict[str, Any]]
 PageAssetsBuilder = Callable[..., dict[str, Any] | None]
+VisualRelationBuilder = Callable[..., dict[str, Any] | None]
 
 
 def canonical_artifact_stages(
@@ -35,6 +38,7 @@ def canonical_artifact_stages(
     skeleton_builder: SkeletonBuilder | None = None,
     page_review_builder: PageReviewBuilder | None = None,
     page_assets_builder: PageAssetsBuilder | None = None,
+    visual_relation_builder: VisualRelationBuilder | None = None,
 ) -> tuple[Stage, ...]:
     """Declare the canonical DAG without executing any stage."""
 
@@ -75,18 +79,32 @@ def canonical_artifact_stages(
             _validate_optional_table_flow,
         ),
         Stage(
-            "text_flow",
-            ("observed", "observed_index", "skeleton", "page_review", "page_layout"),
-            "text_flow",
-            _build_text_flow_if_resolved,
-            _validate_optional_text_flow,
-        ),
-        Stage(
             "page_assets",
             ("observed", "page_review"),
             "page_assets",
             page_assets_builder or _build_page_assets,
             _validate_page_assets,
+        ),
+        Stage(
+            "visual_relation_review",
+            ("observed_index", "page_layout", "page_review", "table_flow", "page_assets"),
+            "visual_relation_review",
+            visual_relation_builder or _build_visual_relation_review_if_resolved,
+            _validate_optional_visual_relation_review,
+        ),
+        Stage(
+            "text_flow",
+            (
+                "observed",
+                "observed_index",
+                "skeleton",
+                "page_review",
+                "page_layout",
+                "visual_relation_review",
+            ),
+            "text_flow",
+            _build_text_flow_if_resolved,
+            _validate_optional_text_flow,
         ),
     )
 
@@ -117,6 +135,7 @@ def build_canonical_artifacts(
         table_flow=artifacts["table_flow"],
         text_flow=artifacts["text_flow"],
         page_assets=artifacts["page_assets"],
+        visual_relation_review=artifacts["visual_relation_review"],
     )
 
 
@@ -152,7 +171,9 @@ def _build_text_flow_if_resolved(
     skeleton: dict[str, Any],
     page_review: dict[str, Any],
     page_layout: dict[str, Any],
+    visual_relation_review: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
+    del visual_relation_review
     if not _page_review_is_resolved(page_review):
         return None
     return build_text_flow(
@@ -161,6 +182,20 @@ def _build_text_flow_if_resolved(
         page_review,
         page_layout,
         observed_index=observed_index,
+    )
+
+
+def _build_visual_relation_review_if_resolved(
+    observed_index: ObservedIndex,
+    page_layout: dict[str, Any],
+    page_review: dict[str, Any],
+    table_flow: dict[str, Any] | None,
+    page_assets: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not _page_review_is_resolved(page_review) or table_flow is None or page_assets is None:
+        return None
+    return build_visual_relation_review(
+        observed_index, page_layout, page_review, table_flow, page_assets
     )
 
 
@@ -196,6 +231,11 @@ def _validate_optional_table_flow(table_flow: Any) -> None:
         validate_table_flow(table_flow)
 
 
+def _validate_optional_visual_relation_review(review: Any) -> None:
+    if review is not None and not isinstance(review, dict):
+        raise TypeError("visual_relation_review stage must produce object or None")
+
+
 def _validate_page_assets(page_assets: Any) -> None:
     if page_assets is not None and not isinstance(page_assets, dict):
         raise TypeError("page_assets stage must produce object or None")
@@ -208,6 +248,7 @@ def _validate_artifact_relationships(artifacts: dict[str, Any]) -> None:
     page_layout = artifacts["page_layout"]
     page_review = artifacts["page_review"]
     table_flow = artifacts["table_flow"]
+    visual_relation_review = artifacts["visual_relation_review"]
     validate_book_skeleton_against_index(skeleton, index)
     doc_id = index.doc_id
     if page_layout.get("metadata", {}).get("doc_id") != doc_id:
@@ -216,6 +257,18 @@ def _validate_artifact_relationships(artifacts: dict[str, Any]) -> None:
         raise ValueError("PageReview and ObservedDocument doc_id values differ")
     if table_flow is not None:
         validate_table_flow_against_sources(table_flow, observed, index, page_review)
+    if visual_relation_review is not None:
+        page_assets = artifacts["page_assets"]
+        if page_assets is None or table_flow is None:
+            raise ValueError("VisualRelationReview requires PageAssets and TableFlow")
+        validate_visual_relation_review_against_sources(
+            visual_relation_review,
+            index,
+            page_layout,
+            page_review,
+            page_assets,
+            table_flow=table_flow,
+        )
     review_pages = [record.get("page") for record in page_review.get("pages") or []]
     if review_pages != list(index.page_numbers):
         raise ValueError("PageReview must contain every observed page exactly once in order")

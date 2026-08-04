@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from inkline.canonical import (
+    build_observed_index,
+    make_observation,
+    make_observed_document,
+    make_observed_page,
+)
 from inkline.parsers.mineru.app import canonical_v2
 
 
@@ -162,3 +168,73 @@ def test_v2_cli_writes_public_only_after_resolved_review(tmp_path, monkeypatch) 
     assert (tmp_path / "skeleton.json").exists()
     assert (tmp_path / "review.json").exists()
     assert (tmp_path / "internal.json").exists()
+
+
+def test_visual_relation_transport_composition_is_opt_in_and_bounded(tmp_path, monkeypatch) -> None:
+    observed = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "en",
+            "source_file": "x",
+            "parser_name": "test",
+            "parser_mode": "structured",
+        },
+        [make_observed_page(1, width=100, height=100)],
+        [
+            make_observation("obs000001", "image_region", page=1, bbox=[0, 0, 40, 40]),
+            make_observation(
+                "obs000002",
+                "text_region",
+                page=1,
+                bbox=[41, 0, 90, 20],
+                text="caption",
+                role_hint="caption_text",
+            ),
+        ],
+    )
+    image = tmp_path / "page.png"
+    image.write_bytes(b"fake")
+    requests = []
+    monkeypatch.setattr(
+        canonical_v2,
+        "vision_chat_json",
+        lambda path, config, *, prompt: (
+            requests.append((path, config, prompt))
+            or {
+                "groups": [
+                    {
+                        "asset_observation_ids": ["obs000001"],
+                        "caption_observation_ids": ["obs000002"],
+                        "confidence": "high",
+                    }
+                ],
+                "unpaired_asset_observation_ids": [],
+                "unpaired_caption_observation_ids": [],
+            }
+        ),
+    )
+    builder = canonical_v2._visual_relation_review_builder(
+        output_dir=tmp_path,
+        use_llm=True,
+        model_name="fake-model",
+        api_url="http://example.test/chat",
+        timeout_seconds=12,
+    )
+
+    review = builder(
+        build_observed_index(observed),
+        {"metadata": {"doc_id": "sample"}, "pages": [{"page": 1}]},
+        {"metadata": {"doc_id": "sample"}, "pages": [{"page": 1}]},
+        {
+            "metadata": {"doc_id": "sample"},
+            "tables": [],
+            "unresolved_table_observation_runs": [],
+            "excluded_table_observation_runs": [],
+        },
+        {"images": [{"image_id": "page-0001-review", "path": "page.png", "source": {"page": 1}}]},
+    )
+
+    assert review["visual_groups"][0]["decision_source"] == "bounded_multimodal_review"
+    assert requests[0][0] == image
+    assert requests[0][1].model == "fake-model"

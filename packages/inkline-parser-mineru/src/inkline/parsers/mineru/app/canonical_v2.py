@@ -11,12 +11,18 @@ from typing import Any
 from inkline.canonical import (
     build_bookgraph_from_artifacts,
     build_internal_canonical_from_artifacts,
+    build_visual_relation_review,
     validate_book_skeleton,
     validate_bookgraph,
     validate_internal_canonical,
     validate_observed_document,
 )
-from inkline.llm import DEFAULT_OLLAMA_CHAT_URL, DEFAULT_QWEN_MODEL
+from inkline.llm import (
+    DEFAULT_OLLAMA_CHAT_URL,
+    DEFAULT_QWEN_MODEL,
+    OllamaChatConfig,
+    vision_chat_json,
+)
 from inkline.workflow import build_canonical_artifacts, canonical_artifact_stages
 
 from ..extraction.io import load_inputs, load_json
@@ -38,6 +44,7 @@ def build_v2_artifacts(
     allow_missing_pdf_text: bool = False,
     use_skeleton_llm: bool = True,
     use_page_review_llm: bool = True,
+    use_visual_relation_review_llm: bool = False,
     llm_model: str = DEFAULT_QWEN_MODEL,
     llm_api_url: str = DEFAULT_OLLAMA_CHAT_URL,
     llm_timeout_seconds: int = 300,
@@ -92,10 +99,19 @@ def build_v2_artifacts(
             output_dir=output_dir,
         )
 
+    visual_relation_builder = _visual_relation_review_builder(
+        output_dir=output_dir,
+        use_llm=use_visual_relation_review_llm,
+        model_name=llm_model,
+        api_url=llm_api_url,
+        timeout_seconds=llm_timeout_seconds,
+    )
+
     stages = canonical_artifact_stages(
         skeleton_builder=skeleton_builder,
         page_review_builder=page_review_builder,
         page_assets_builder=page_assets_builder,
+        visual_relation_builder=visual_relation_builder,
     )
     bundle = build_canonical_artifacts(
         observed,
@@ -108,6 +124,7 @@ def build_v2_artifacts(
         "observed": observed,
         "book_skeleton": bundle.skeleton,
         "page_review": bundle.page_review,
+        "visual_relation_review": getattr(bundle, "visual_relation_review", None),
         "artifact_bundle": bundle,
         "public_graph": None,
         "internal_canonical": None,
@@ -127,8 +144,54 @@ def _emit_workflow_stage(
 ) -> None:
     if name == "skeleton":
         _emit_stage(callback, "book_skeleton", artifact)
-    elif name == "page_review":
+    elif name == "page_review" or name == "visual_relation_review":
         _emit_stage(callback, name, artifact)
+
+
+def _visual_relation_review_builder(
+    *,
+    output_dir: Path,
+    use_llm: bool,
+    model_name: str,
+    api_url: str,
+    timeout_seconds: int,
+) -> Callable[..., dict[str, Any]]:
+    """Compose optional MinerU transport around canonical's bounded request protocol."""
+
+    def builder(observed_index, page_layout, page_review, table_flow, page_assets):
+        image_paths = {
+            str(record["image_id"]): output_dir / str(record["path"])
+            for record in page_assets.get("images", [])
+            if isinstance(record, dict)
+            and isinstance(record.get("image_id"), str)
+            and isinstance(record.get("path"), str)
+        }
+
+        def callback(request: dict[str, Any]) -> dict[str, Any]:
+            image_path = image_paths.get(str(request["page_asset_id"]))
+            if image_path is None:
+                raise RuntimeError("PageAssets image path is unavailable for visual review")
+            return vision_chat_json(
+                image_path,
+                OllamaChatConfig(
+                    model=model_name,
+                    api_url=api_url,
+                    timeout_seconds=timeout_seconds,
+                ),
+                prompt=str(request["prompt"]),
+            )
+
+        return build_visual_relation_review(
+            observed_index,
+            page_layout,
+            page_review,
+            table_flow,
+            page_assets,
+            review_callback=callback if use_llm else None,
+            model_name=model_name if use_llm else None,
+        )
+
+    return builder
 
 
 def _emit_stage(
@@ -160,6 +223,7 @@ def run_v2_cli(args: Any) -> None:
         allow_missing_pdf_text=args.allow_missing_pdf_text,
         use_skeleton_llm=args.book_skeleton_llm,
         use_page_review_llm=args.page_review_llm,
+        use_visual_relation_review_llm=getattr(args, "visual_relation_review_llm", False),
         llm_model=args.book_skeleton_llm_model,
         llm_api_url=args.book_skeleton_llm_api_url,
         llm_timeout_seconds=args.book_skeleton_llm_timeout_seconds,
@@ -188,6 +252,9 @@ def _write_optional_artifacts(args: Any, artifacts: dict[str, Any]) -> None:
         _write_json(Path(args.book_skeleton_output), artifacts["book_skeleton"])
     if args.page_review_output:
         _write_json(Path(args.page_review_output), artifacts["page_review"])
+    visual_output = getattr(args, "visual_relation_review_output", None)
+    if visual_output and artifacts["visual_relation_review"] is not None:
+        _write_json(Path(visual_output), artifacts["visual_relation_review"])
 
 
 def _write_stage_artifact(args: Any, stage: str, artifact: dict[str, Any]) -> None:
@@ -199,6 +266,8 @@ def _write_stage_artifact(args: Any, stage: str, artifact: dict[str, Any]) -> No
         _write_json(Path(args.book_skeleton_output), artifact)
     elif stage == "page_review" and args.page_review_output:
         _write_json(Path(args.page_review_output), artifact)
+    elif stage == "visual_relation_review" and getattr(args, "visual_relation_review_output", None):
+        _write_json(Path(args.visual_relation_review_output), artifact)
 
 
 def _observed_metadata(args: Any, output_path: Path) -> dict[str, Any]:

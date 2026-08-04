@@ -160,6 +160,26 @@ def test_book_skeleton_cli_parses_optional_observed_output(monkeypatch) -> None:
     assert args.observed_output == "observed.json"
 
 
+def test_mineru_cli_parses_opt_in_visual_relation_review_arguments(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mineru-to-canonical",
+            "--canonical-version",
+            "v2",
+            "--visual-relation-review-llm",
+            "--visual-relation-review-output",
+            "visual.json",
+        ],
+    )
+
+    args = mineru_cli.parse_args()
+
+    assert args.visual_relation_review_llm is True
+    assert args.visual_relation_review_output == "visual.json"
+
+
 def test_book_skeleton_cli_rejects_equal_resolved_output_paths(tmp_path, monkeypatch) -> None:
     output = tmp_path / "artifacts" / "sample.json"
     args = _book_skeleton_cli_args(

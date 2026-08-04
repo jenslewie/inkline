@@ -140,8 +140,12 @@ from inkline.canonical.text_flow import (
 )
 from inkline.canonical.types import CanonicalBlock, CanonicalSource, NoteRef
 from inkline.canonical.visual_relations import (
+    VISUAL_RELATION_REVIEW_PROMPT_VERSION,
     VISUAL_RELATION_REVIEW_SCHEMA_NAME,
     VISUAL_RELATION_REVIEW_SCHEMA_VERSION,
+    build_visual_relation_review,
+    build_visual_relation_review_request,
+    normalize_visual_relation_review_response,
     validate_visual_relation_review,
     validate_visual_relation_review_against_sources,
 )
@@ -179,6 +183,7 @@ __all__ = [
     "TEXT_FLOW_SCHEMA_NAME",
     "TEXT_FLOW_SCHEMA_VERSION",
     "TEXT_UNIT_TYPES",
+    "VISUAL_RELATION_REVIEW_PROMPT_VERSION",
     "VISUAL_RELATION_REVIEW_SCHEMA_NAME",
     "VISUAL_RELATION_REVIEW_SCHEMA_VERSION",
     "ArtifactContract",
@@ -211,6 +216,8 @@ __all__ = [
     "build_table_flow",
     "build_text_flow",
     "build_text_units",
+    "build_visual_relation_review",
+    "build_visual_relation_review_request",
     "classify_observed_page_roles",
     "classify_text_units_by_layout",
     "make_block",
@@ -227,6 +234,7 @@ __all__ = [
     "migrate_document",
     "normalize_bookgraph_note_sections",
     "normalize_bookgraph_notes",
+    "normalize_visual_relation_review_response",
     "resolve_bookgraph_note_refs",
     "resolve_page_footnote_refs",
     "resolve_page_review",

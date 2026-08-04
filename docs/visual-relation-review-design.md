@@ -1,6 +1,7 @@
 # VisualRelationReview Before TextFlow
 
-**Status:** Frozen contract; implementation not started.
+**Status:** Implemented candidate-stage contract; first-run corpus outputs remain
+review candidates, not semantically accepted artifacts.
 
 The exact schema, dependency, validator, and 13-book acceptance boundary is frozen in
 [BookGraph upstream artifact contracts](bookgraph-upstream-artifact-contracts.md).
@@ -41,7 +42,8 @@ VisualRelationReview consumes:
 - `ObservedIndex`, for parser-neutral observation identity, kind, text, page, bbox,
   and provenance;
 - `PageLayoutAnalysis`, for ordered visual and text regions;
-- resolved `PageReview`, for page consumption and retained-asset policy; and
+- resolved `PageReview`, for page consumption and retained-asset policy;
+- `TableFlow`, solely to exclude captions it already owns; and
 - `PageAssets`, for bounded multimodal review of selected physical pages.
 
 PageAssets must include a whole-page image for every PageReview-retained page and
@@ -62,7 +64,7 @@ It emits immutable visual groups and explicit unresolved endpoints:
       "relation_type": "caption_of",
       "physical_pages": [25],
       "evidence_ids": ["vre000001"],
-      "decision_source": "multimodal_review",
+      "decision_source": "bounded_multimodal_review",
       "confidence": "high"
     }
   ],
@@ -75,6 +77,11 @@ It emits immutable visual groups and explicit unresolved endpoints:
 The model may select only supplied observation ids. It must not transcribe or
 rewrite caption text, invent an asset, merge unrelated captions, assign a section,
 or create a BookGraph node.
+
+When a model is not configured, cannot run, or returns an invalid bounded response,
+the builder emits `deterministic_candidate` evidence and explicit unresolved
+candidates. This evidence may name a real page asset when one is available, but has
+null model and prompt provenance and can never establish a group.
 
 ## Candidate Selection
 
