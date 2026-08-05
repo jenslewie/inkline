@@ -161,6 +161,10 @@ def parse_args() -> argparse.Namespace:
         help="Optional VisualRelationReview audit output for canonical-version v2",
     )
     p.add_argument(
+        "--note-system-review-output",
+        help="Optional NoteSystemReview audit output for canonical-version v2",
+    )
+    p.add_argument(
         "--book-skeleton-llm",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -193,6 +197,12 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=False,
         help="Use the configured multimodal LLM only for bounded VisualRelationReview pages in canonical-version v2",
+    )
+    p.add_argument(
+        "--note-system-review-llm",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use the configured multimodal LLM only for bounded NoteSystemReview candidates in canonical-version v2",
     )
     p.add_argument("--doc-id", default=None)
     p.add_argument("--title", default=None)

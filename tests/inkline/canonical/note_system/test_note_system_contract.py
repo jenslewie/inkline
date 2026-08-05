@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import Any, cast
+
 import pytest
 
-from inkline.canonical import ValidationError
-from inkline.canonical.note_system import validate_note_system_review
+from inkline.canonical import (
+    ValidationError,
+    build_observed_index,
+    make_observation,
+    make_observed_document,
+    make_observed_page,
+)
+from inkline.canonical.note_system import (
+    validate_note_system_review,
+    validate_note_system_review_against_sources,
+)
 
 
 def _review() -> dict:
@@ -93,3 +106,53 @@ def test_note_system_review_requires_explicit_page_asset_and_model_provenance() 
     evidence["decision_source"] = "bounded_multimodal_review"
 
     validate_note_system_review(review)
+
+
+def test_source_validation_accepts_frozen_mappings_and_sequences() -> None:
+    observed = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "en",
+            "source_file": "sample.pdf",
+            "parser_name": "test",
+            "parser_mode": "structured",
+        },
+        [make_observed_page(10, width=100, height=100)],
+        [make_observation("obs000001", "footnote_region", page=10, bbox=[0, 80, 100, 100])],
+    )
+    review = _review()
+    review["evidence"] = [{**review["evidence"][0], "pages": [10]}]
+    review["note_systems"] = [{**review["note_systems"][0], "definition_ranges": [[10, 10]]}]
+    review["unresolved_system_candidates"] = []
+
+    validate_note_system_review_against_sources(
+        cast(Mapping[str, Any], _freeze(review)),
+        build_observed_index(observed),
+        cast(
+            Mapping[str, Any],
+            _freeze({"metadata": {"doc_id": "sample"}, "pages": [{"page": 10}]}),
+        ),
+        cast(
+            Mapping[str, Any],
+            _freeze({"metadata": {"doc_id": "sample"}, "toc_entries": [{"entry_index": 2}]}),
+        ),
+        cast(
+            Mapping[str, Any],
+            _freeze(
+            {
+                "metadata": {"doc_id": "sample"},
+                "pages": [{"page": 10, "text_flow_action": "include"}],
+            }
+            ),
+        ),
+        cast(Mapping[str, Any], _freeze({"images": []})),
+    )
+
+
+def _freeze(value):
+    if isinstance(value, dict):
+        return MappingProxyType({key: _freeze(nested) for key, nested in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze(nested) for nested in value)
+    return value

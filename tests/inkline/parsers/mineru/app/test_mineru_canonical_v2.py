@@ -238,3 +238,70 @@ def test_visual_relation_transport_composition_is_opt_in_and_bounded(tmp_path, m
     assert review["visual_groups"][0]["decision_source"] == "bounded_multimodal_review"
     assert requests[0][0] == image
     assert requests[0][1].model == "fake-model"
+
+
+def test_note_system_transport_composition_is_opt_in_and_bounded(tmp_path, monkeypatch) -> None:
+    observed = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "en",
+            "source_file": "x",
+            "parser_name": "test",
+            "parser_mode": "structured",
+        },
+        [make_observed_page(1, width=100, height=100)],
+        [
+            make_observation("obs000001", "footnote_region", page=1, bbox=[0, 80, 100, 100]),
+            make_observation(
+                "obs000002",
+                "text_region",
+                page=1,
+                bbox=[0, 82, 100, 95],
+                text="note",
+                role_hint="footnote_text",
+            ),
+        ],
+    )
+    image = tmp_path / "page.png"
+    image.write_bytes(b"fake")
+    requests = []
+    monkeypatch.setattr(
+        canonical_v2,
+        "vision_chat_json",
+        lambda path, config, *, prompt: (
+            requests.append((path, config, prompt))
+            or {
+                "systems": [
+                    {
+                        "kind": "page_footnote",
+                        "definition_ranges": [[1, 1]],
+                        "reference_scope": "page",
+                        "marker_styles": ["numeric"],
+                        "reset_policy": "page",
+                        "confidence": "high",
+                    }
+                ]
+            }
+        ),
+    )
+    builder = canonical_v2._note_system_review_builder(
+        output_dir=tmp_path,
+        use_llm=True,
+        model_name="fake-model",
+        api_url="http://example.test/chat",
+        timeout_seconds=12,
+    )
+
+    review = builder(
+        build_observed_index(observed),
+        {"metadata": {"doc_id": "sample"}, "pages": [{"page": 1}]},
+        {"metadata": {"doc_id": "sample"}, "toc_entries": []},
+        {"metadata": {"doc_id": "sample"}, "pages": [{"page": 1}]},
+        {"images": [{"image_id": "page-0001-review", "path": "page.png", "source": {"page": 1}}]},
+    )
+
+    assert review["note_systems"][0]["kind"] == "page_footnote"
+    assert review["evidence"][0]["decision_source"] == "bounded_multimodal_review"
+    assert requests[0][0] == image
+    assert requests[0][1].model == "fake-model"

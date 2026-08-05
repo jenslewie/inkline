@@ -1,5 +1,8 @@
+# ruff: noqa: PLR0912
+
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from inkline.canonical.artifact_dag.validation import (
@@ -39,9 +42,10 @@ _KIND_SCOPE_POLICIES = {
 }
 
 
-def validate_note_system_review(review: dict[str, Any]) -> None:
+def validate_note_system_review(review: Mapping[str, Any]) -> None:
     """Validate separate, evidence-backed note-system declarations."""
 
+    review = _mutable(review)
     validate_exact_fields(review, TOP_LEVEL_FIELDS, "note_system_review")
     validate_metadata(
         review["metadata"],
@@ -55,15 +59,20 @@ def validate_note_system_review(review: dict[str, Any]) -> None:
 
 
 def validate_note_system_review_against_sources(
-    review: dict[str, Any],
+    review: Mapping[str, Any],
     observed_index: ObservedIndex,
-    page_layout: dict[str, Any],
-    skeleton: dict[str, Any],
-    page_review: dict[str, Any],
-    page_assets: dict[str, Any],
+    page_layout: Mapping[str, Any],
+    skeleton: Mapping[str, Any],
+    page_review: Mapping[str, Any],
+    page_assets: Mapping[str, Any],
 ) -> None:
     """Validate note-system evidence ids and ranges against immutable sources."""
 
+    review = _mutable(review)
+    page_layout = _mutable(page_layout)
+    skeleton = _mutable(skeleton)
+    page_review = _mutable(page_review)
+    page_assets = _mutable(page_assets)
     validate_note_system_review(review)
     doc_id = review["metadata"]["doc_id"]
     if observed_index.doc_id != doc_id:
@@ -81,17 +90,21 @@ def validate_note_system_review_against_sources(
     known_entry_indexes = {
         entry.get("entry_index")
         for entry in skeleton.get("toc_entries", [])
-        if isinstance(entry, dict)
+        if isinstance(entry, Mapping)
     }
+    evidence_by_id = {evidence["evidence_id"]: evidence for evidence in review["evidence"]}
+    layout_pages = _known_pages(page_layout, "PageLayoutAnalysis")
+    reviewed_pages = _eligible_reviewed_pages(page_review)
     assets_by_id = _page_assets_by_id(page_assets)
     for evidence in review["evidence"]:
-        if not set(evidence["pages"]) <= known_pages:
+        if not set(evidence["pages"]) <= known_pages or not set(evidence["pages"]) <= layout_pages:
             raise ValidationError("note-system evidence references unknown page")
+        if not set(evidence["pages"]) <= reviewed_pages:
+            raise ValidationError("note-system evidence references ineligible PageReview page")
         if not set(evidence["observation_ids"]) <= known_observations:
             raise ValidationError("note-system evidence references unknown observation")
         if any(
-            observed_index.observations_by_id[observation_id].get("page")
-            not in evidence["pages"]
+            observed_index.observations_by_id[observation_id].get("page") not in evidence["pages"]
             for observation_id in evidence["observation_ids"]
         ):
             raise ValidationError("note-system evidence observation differs from evidence pages")
@@ -101,22 +114,38 @@ def validate_note_system_review_against_sources(
             if assets_by_id.get(asset_id) not in evidence["pages"]:
                 raise ValidationError("note-system evidence references invalid PageAssets image")
     for candidate in review["unresolved_system_candidates"]:
+        if (
+            not set(candidate["pages"]) <= known_pages
+            or not set(candidate["pages"]) <= layout_pages
+        ):
+            raise ValidationError("unresolved note-system candidate references unknown page")
+        if not set(candidate["pages"]) <= reviewed_pages:
+            raise ValidationError(
+                "unresolved note-system candidate references ineligible PageReview page"
+            )
+        if not set(candidate["observation_ids"]) <= known_observations:
+            raise ValidationError("unresolved note-system candidate references unknown observation")
         if any(
-            observed_index.observations_by_id[observation_id].get("page")
-            not in candidate["pages"]
+            observed_index.observations_by_id[observation_id].get("page") not in candidate["pages"]
             for observation_id in candidate["observation_ids"]
         ):
             raise ValidationError("unresolved note-system observation differs from candidate pages")
     for system in review["note_systems"]:
         pages = {
-            page
-            for start, end in system["definition_ranges"]
-            for page in range(start, end + 1)
+            page for start, end in system["definition_ranges"] for page in range(start, end + 1)
         }
         if not pages <= known_pages:
             raise ValidationError(
                 f"note system references unknown definition page: {system['note_system_id']}"
             )
+        if not pages <= layout_pages or not pages <= reviewed_pages:
+            raise ValidationError("note system definition range is not eligible in sources")
+        if not any(
+            pages & set(evidence_by_id[evidence_id]["pages"])
+            for evidence_id in system["evidence_ids"]
+        ):
+            raise ValidationError("note system evidence does not overlap definition range")
+    _validate_exact_evidence_coverage(review, evidence_by_id)
 
 
 def _validate_evidence(value: Any) -> set[str]:
@@ -163,21 +192,19 @@ def _validate_systems(value: Any, evidence_ids: set[str]) -> None:
         path = f"note_system_review.note_systems[{index}]"
         validate_exact_fields(record, NOTE_SYSTEM_FIELDS, path)
         kind = validate_choice(record["kind"], NOTE_SYSTEM_KINDS, f"{path}.kind")
-        validate_ranges(
-            record["definition_ranges"], f"{path}.definition_ranges", required=True
-        )
+        validate_ranges(record["definition_ranges"], f"{path}.definition_ranges", required=True)
         scope = validate_choice(
             record["reference_scope"], NOTE_REFERENCE_SCOPES, f"{path}.reference_scope"
         )
-        reset = validate_choice(
-            record["reset_policy"], NOTE_RESET_POLICIES, f"{path}.reset_policy"
-        )
+        reset = validate_choice(record["reset_policy"], NOTE_RESET_POLICIES, f"{path}.reset_policy")
         if scope == "unresolved":
             if reset != "unknown":
                 raise ValidationError(f"{path} unresolved scope requires unknown reset policy")
         elif (scope, reset) not in _KIND_SCOPE_POLICIES[kind]:
             raise ValidationError(f"{path} has incompatible kind, scope, and reset policy")
-        validate_string_choices(record["marker_styles"], NOTE_MARKER_STYLES, f"{path}.marker_styles")
+        validate_string_choices(
+            record["marker_styles"], NOTE_MARKER_STYLES, f"{path}.marker_styles"
+        )
         _validate_known_evidence(record["evidence_ids"], evidence_ids, path)
         validate_confidence(record["confidence"], f"{path}.confidence")
 
@@ -204,8 +231,8 @@ def _validate_known_evidence(value: Any, known: set[str], path: str) -> None:
         raise ValidationError(f"{path}.evidence_ids contain unknown evidence")
 
 
-def _page_assets_by_id(page_assets: dict[str, Any]) -> dict[str, int]:
-    images = page_assets.get("images")
+def _page_assets_by_id(page_assets: Mapping[str, Any]) -> dict[str, int]:
+    images = page_assets.get("images", [])
     if not isinstance(images, list):
         raise ValidationError("PageAssets images must be list")
     indexed: dict[str, int] = {}
@@ -219,3 +246,65 @@ def _page_assets_by_id(page_assets: dict[str, Any]) -> dict[str, int]:
             raise ValidationError("duplicate PageAssets image_id")
         indexed[image_id] = page
     return indexed
+
+
+def _known_pages(source: Mapping[str, Any], name: str) -> set[int]:
+    pages = source.get("pages")
+    if not isinstance(pages, list):
+        raise ValidationError(f"{name} pages must be list")
+    values: set[int] = set()
+    for record in pages:
+        page = record.get("page") if isinstance(record, Mapping) else None
+        if type(page) is not int or page <= 0:
+            raise ValidationError(f"{name} pages are invalid")
+        values.add(page)
+    if len(values) != len(pages):
+        raise ValidationError(f"{name} pages are invalid")
+    return values
+
+
+def _eligible_reviewed_pages(page_review: Mapping[str, Any]) -> set[int]:
+    pages: set[int] = set()
+    for record in page_review["pages"]:
+        if type(record["page"]) is int and record.get("text_flow_action") != "needs_review":
+            pages.add(record["page"])
+    return pages
+
+
+def _validate_exact_evidence_coverage(
+    review: Mapping[str, Any], evidence_by_id: Mapping[str, Mapping[str, Any]]
+) -> None:
+    references: dict[str, int] = dict.fromkeys(evidence_by_id, 0)
+    for system in review["note_systems"]:
+        for evidence_id in system["evidence_ids"]:
+            references[evidence_id] += 1
+    for candidate in review["unresolved_system_candidates"]:
+        candidate_evidence = [
+            evidence_by_id[evidence_id] for evidence_id in candidate["evidence_ids"]
+        ]
+        if set(candidate["pages"]) != set().union(
+            *(set(item["pages"]) for item in candidate_evidence)
+        ):
+            raise ValidationError(
+                "unresolved note-system candidate lacks exact evidence page coverage"
+            )
+        if set(candidate["observation_ids"]) != set().union(
+            *(set(item["observation_ids"]) for item in candidate_evidence)
+        ):
+            raise ValidationError(
+                "unresolved note-system candidate lacks exact evidence observation coverage"
+            )
+        for evidence_id in candidate["evidence_ids"]:
+            references[evidence_id] += 1
+    if any(count != 1 for count in references.values()):
+        raise ValidationError(
+            "note-system evidence must have exactly one system or candidate owner"
+        )
+
+
+def _mutable(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _mutable(nested) for key, nested in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes):
+        return [_mutable(nested) for nested in value]
+    return value

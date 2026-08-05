@@ -64,8 +64,11 @@ from inkline.canonical.note_resolution import (
     validate_note_resolution_against_sources,
 )
 from inkline.canonical.note_system import (
+    NOTE_SYSTEM_REVIEW_PROMPT_VERSION,
     NOTE_SYSTEM_REVIEW_SCHEMA_NAME,
     NOTE_SYSTEM_REVIEW_SCHEMA_VERSION,
+    build_note_system_review,
+    build_note_system_review_request,
     validate_note_system_review,
     validate_note_system_review_against_sources,
 )
@@ -167,6 +170,7 @@ __all__ = [
     "NOTE_MARKER_REVIEW_SCHEMA_VERSION",
     "NOTE_RESOLUTION_SCHEMA_NAME",
     "NOTE_RESOLUTION_SCHEMA_VERSION",
+    "NOTE_SYSTEM_REVIEW_PROMPT_VERSION",
     "NOTE_SYSTEM_REVIEW_SCHEMA_NAME",
     "NOTE_SYSTEM_REVIEW_SCHEMA_VERSION",
     "OBSERVED_SCHEMA_NAME",
@@ -208,6 +212,8 @@ __all__ = [
     "build_bookgraph_from_observed",
     "build_internal_canonical_from_artifacts",
     "build_internal_canonical_from_observed",
+    "build_note_system_review",
+    "build_note_system_review_request",
     "build_observed_index",
     "build_page_layout_analysis",
     "build_page_review_plan",

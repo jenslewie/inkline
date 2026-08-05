@@ -81,5 +81,6 @@ def test_visual_relation_stage_runs_after_assets_before_text_flow_and_enters_bun
         "table_flow",
         "page_assets",
         "visual_relation_review",
+        "note_system_review",
         "text_flow",
     ]

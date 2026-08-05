@@ -7,6 +7,7 @@ from typing import Any
 from inkline.canonical import (
     CanonicalArtifactBundle,
     build_book_skeleton_from_index,
+    build_note_system_review,
     build_observed_index,
     build_page_layout_analysis,
     build_page_review_plan,
@@ -15,6 +16,7 @@ from inkline.canonical import (
     build_visual_relation_review,
     classify_observed_page_roles,
     validate_book_skeleton_against_index,
+    validate_note_system_review_against_sources,
     validate_observed_document,
     validate_page_layout_analysis,
     validate_resolved_page_review,
@@ -31,6 +33,7 @@ SkeletonBuilder = Callable[..., dict[str, Any]]
 PageReviewBuilder = Callable[..., dict[str, Any]]
 PageAssetsBuilder = Callable[..., dict[str, Any] | None]
 VisualRelationBuilder = Callable[..., dict[str, Any] | None]
+NoteSystemBuilder = Callable[..., dict[str, Any] | None]
 
 
 def canonical_artifact_stages(
@@ -39,6 +42,7 @@ def canonical_artifact_stages(
     page_review_builder: PageReviewBuilder | None = None,
     page_assets_builder: PageAssetsBuilder | None = None,
     visual_relation_builder: VisualRelationBuilder | None = None,
+    note_system_builder: NoteSystemBuilder | None = None,
 ) -> tuple[Stage, ...]:
     """Declare the canonical DAG without executing any stage."""
 
@@ -93,6 +97,13 @@ def canonical_artifact_stages(
             _validate_optional_visual_relation_review,
         ),
         Stage(
+            "note_system_review",
+            ("observed_index", "page_layout", "skeleton", "page_review", "page_assets"),
+            "note_system_review",
+            note_system_builder or _build_note_system_review_if_resolved,
+            _validate_optional_note_system_review,
+        ),
+        Stage(
             "text_flow",
             (
                 "observed",
@@ -101,6 +112,7 @@ def canonical_artifact_stages(
                 "page_review",
                 "page_layout",
                 "visual_relation_review",
+                "note_system_review",
             ),
             "text_flow",
             _build_text_flow_if_resolved,
@@ -136,6 +148,7 @@ def build_canonical_artifacts(
         text_flow=artifacts["text_flow"],
         page_assets=artifacts["page_assets"],
         visual_relation_review=artifacts["visual_relation_review"],
+        note_system_review=artifacts["note_system_review"],
     )
 
 
@@ -172,8 +185,9 @@ def _build_text_flow_if_resolved(
     page_review: dict[str, Any],
     page_layout: dict[str, Any],
     visual_relation_review: dict[str, Any] | None,
+    note_system_review: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    del visual_relation_review
+    del visual_relation_review, note_system_review
     if not _page_review_is_resolved(page_review):
         return None
     return build_text_flow(
@@ -197,6 +211,18 @@ def _build_visual_relation_review_if_resolved(
     return build_visual_relation_review(
         observed_index, page_layout, page_review, table_flow, page_assets
     )
+
+
+def _build_note_system_review_if_resolved(
+    observed_index: ObservedIndex,
+    page_layout: dict[str, Any],
+    skeleton: dict[str, Any],
+    page_review: dict[str, Any],
+    page_assets: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not _page_review_is_resolved(page_review) or page_assets is None:
+        return None
+    return build_note_system_review(observed_index, page_layout, skeleton, page_review, page_assets)
 
 
 def _build_page_assets(observed: dict[str, Any], page_review: dict[str, Any]) -> dict[str, Any]:
@@ -236,6 +262,11 @@ def _validate_optional_visual_relation_review(review: Any) -> None:
         raise TypeError("visual_relation_review stage must produce object or None")
 
 
+def _validate_optional_note_system_review(review: Any) -> None:
+    if review is not None and not isinstance(review, dict):
+        raise TypeError("note_system_review stage must produce object or None")
+
+
 def _validate_page_assets(page_assets: Any) -> None:
     if page_assets is not None and not isinstance(page_assets, dict):
         raise TypeError("page_assets stage must produce object or None")
@@ -249,6 +280,7 @@ def _validate_artifact_relationships(artifacts: dict[str, Any]) -> None:
     page_review = artifacts["page_review"]
     table_flow = artifacts["table_flow"]
     visual_relation_review = artifacts["visual_relation_review"]
+    note_system_review = artifacts["note_system_review"]
     validate_book_skeleton_against_index(skeleton, index)
     doc_id = index.doc_id
     if page_layout.get("metadata", {}).get("doc_id") != doc_id:
@@ -268,6 +300,18 @@ def _validate_artifact_relationships(artifacts: dict[str, Any]) -> None:
             page_review,
             page_assets,
             table_flow=table_flow,
+        )
+    if note_system_review is not None:
+        page_assets = artifacts["page_assets"]
+        if page_assets is None:
+            raise ValueError("NoteSystemReview requires PageAssets")
+        validate_note_system_review_against_sources(
+            note_system_review,
+            index,
+            page_layout,
+            skeleton,
+            page_review,
+            page_assets,
         )
     review_pages = [record.get("page") for record in page_review.get("pages") or []]
     if review_pages != list(index.page_numbers):
