@@ -124,6 +124,42 @@ risks, and exact references. The root must not repeat that investigation.
 6. Compact only at a semantic phase boundary when root context is large and
    substantial orchestration remains, not merely because a new turn starts.
 
+## Subagent execution efficiency
+
+1. Use one model turn for one coherent unit of work, not one shell command,
+   assertion, or line-level edit.
+2. Batch 2–4 independent bounded read-only commands into one tool call. Keep
+   combined returned output below 12,000 tokens. Locate symbols first and read
+   only relevant ranges.
+3. When a behavior change requires new or changed tests, apply TDD at
+   acceptance-criterion granularity:
+   - add the complete focused red-test group;
+   - confirm the expected failure once;
+   - implement the coherent production change in one patch;
+   - run the focused green-test group once.
+   Do not patch individual failures separately when they share one root cause.
+4. Do not rerun an identical validation command unless relevant files changed,
+   or a patch was applied for its previous failure. Run lint and type checks at
+   phase boundaries and the full suite once before each candidate handoff when
+   those checks are warranted by the task contract and risk.
+5. A subagent may send only one genuine blocker message and one final report per
+   task turn. Do not send progress updates, partial findings, test milestones,
+   or status messages.
+6. The initial reviewer reports all currently observable findings in one batch.
+   Re-review checks only accepted blocker closure, remediation regressions, and
+   previously unavailable evidence.
+7. Treat these as target tool-call budgets, not hard limits:
+   - explorer: 25;
+   - worker initial implementation: 120;
+   - worker remediation: 45;
+   - reviewer initial review: 50;
+   - reviewer re-review: 15.
+   Exceeding a target triggers consolidation and root adjudication, not
+   automatic user escalation.
+8. Compact only after a stable checkpoint when substantial work remains.
+   Explorers should normally report before reaching compaction. Reviewers should
+   avoid re-reading material already represented in the candidate manifest.
+
 ## Verification and commits
 
 1. Verification must match risk and acceptance criteria. Run narrow checks first,
