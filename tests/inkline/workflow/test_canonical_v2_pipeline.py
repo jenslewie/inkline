@@ -44,6 +44,8 @@ def test_resolved_workflow_builds_text_flow_once_and_assembly_reuses_it(monkeypa
     assert len(calls) == 1
     assert bundle.table_flow is not None
     assert bundle.visual_relation_review is not None
+    assert bundle.note_marker_review_plan is not None
+    assert bundle.note_marker_review is not None
     assert bundle.text_flow is not None
     assert bundle.page_assets == observed["assets"]
     assert bundle.page_assets is not observed["assets"]
@@ -82,5 +84,7 @@ def test_visual_relation_stage_runs_after_assets_before_text_flow_and_enters_bun
         "page_assets",
         "visual_relation_review",
         "note_system_review",
+        "note_marker_review_plan",
+        "note_marker_review",
         "text_flow",
     ]

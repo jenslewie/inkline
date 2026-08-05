@@ -305,3 +305,214 @@ def test_note_system_transport_composition_is_opt_in_and_bounded(tmp_path, monke
     assert review["evidence"][0]["decision_source"] == "bounded_multimodal_review"
     assert requests[0][0] == image
     assert requests[0][1].model == "fake-model"
+
+
+def test_note_marker_transport_composition_is_opt_in_and_bounded(tmp_path, monkeypatch) -> None:
+    observed = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "en",
+            "source_file": "x",
+            "parser_name": "test",
+            "parser_mode": "structured",
+        },
+        [make_observed_page(1, width=100, height=100)],
+        [
+            make_observation(
+                "obs000001",
+                "footnote_region",
+                page=1,
+                bbox=[0, 80, 100, 100],
+                text="1 Note",
+                role_hint="footnote_text",
+            )
+        ],
+    )
+    image = tmp_path / "page.png"
+    image.write_bytes(b"fake")
+    requests = []
+    monkeypatch.setattr(
+        canonical_v2,
+        "vision_chat_json",
+        lambda path, config, *, prompt: (
+            requests.append((path, config, prompt))
+            or {
+                "markers": [
+                    {
+                        "marker": "1",
+                        "page": 1,
+                        "observation_id": "obs000001",
+                        "bbox": [0, 80, 5, 85],
+                        "adjacent_text": "1 Note",
+                        "confidence": "high",
+                    }
+                ]
+            }
+        ),
+    )
+    builder = canonical_v2._note_marker_review_builder(
+        output_dir=tmp_path,
+        use_llm=True,
+        model_name="fake-model",
+        api_url="http://example.test/chat",
+        timeout_seconds=12,
+    )
+    plan = {
+        "metadata": {
+            "schema_name": "inkline_note_marker_review_plan",
+            "schema_version": "0.1-shadow",
+            "doc_id": "sample",
+        },
+        "review_requests": [
+            {
+                "review_request_id": "nmp000001",
+                "note_system_id": "ns000001",
+                "region_kind": "definition",
+                "regions": [
+                    {"page": 1, "bbox": [0, 80, 100, 100], "observation_ids": ["obs000001"]}
+                ],
+                "reasons": ["definition_marker_unreadable"],
+                "evidence_ids": ["nse000001"],
+            }
+        ],
+        "not_required_note_system_ids": [],
+        "unresolved_note_system_ids": [],
+    }
+
+    review = builder(
+        build_observed_index(observed),
+        {"images": [{"image_id": "page-0001-review", "path": "page.png", "source": {"page": 1}}]},
+        plan,
+    )
+
+    assert review is not None
+    assert review["outcomes"][0]["status"] == "found"
+    assert requests[0][0] == image
+    assert requests[0][1].model == "fake-model"
+
+
+def test_note_marker_transport_handles_multi_page_multi_asset_requests(tmp_path, monkeypatch) -> None:
+    observed = make_observed_document(
+        {
+            "doc_id": "sample",
+            "title": "Sample",
+            "language": "en",
+            "source_file": "x",
+            "parser_name": "test",
+            "parser_mode": "structured",
+        },
+        [
+            make_observed_page(1, width=100, height=100),
+            make_observed_page(2, width=100, height=100),
+        ],
+        [
+            make_observation(
+                "obs000001",
+                "footnote_region",
+                page=1,
+                bbox=[0, 80, 100, 100],
+                text="1 Note page one",
+                role_hint="footnote_text",
+            ),
+            make_observation(
+                "obs000002",
+                "footnote_region",
+                page=2,
+                bbox=[0, 80, 100, 100],
+                text="2 Note page two",
+                role_hint="footnote_text",
+            ),
+        ],
+    )
+    image_one = tmp_path / "page-one.png"
+    image_two = tmp_path / "page-two.png"
+    image_one.write_bytes(b"fake-one")
+    image_two.write_bytes(b"fake-two")
+    responses = []
+    monkeypatch.setattr(
+        canonical_v2,
+        "vision_chat_json",
+        lambda path, config, *, prompt: (
+            responses.append((path, config, prompt))
+            or {
+                "markers": [
+                    {
+                        "marker": "1" if path == image_one else "2",
+                        "page": 1 if path == image_one else 2,
+                        "observation_id": "obs000001" if path == image_one else "obs000002",
+                        "bbox": [0, 80, 5, 85],
+                        "adjacent_text": "1 Note page one" if path == image_one else "2 Note page two",
+                        "confidence": "high",
+                    }
+                ]
+            }
+        ),
+    )
+    builder = canonical_v2._note_marker_review_builder(
+        output_dir=tmp_path,
+        use_llm=True,
+        model_name="fake-model",
+        api_url="http://example.test/chat",
+        timeout_seconds=12,
+    )
+    plan = {
+        "metadata": {
+            "schema_name": "inkline_note_marker_review_plan",
+            "schema_version": "0.1-shadow",
+            "doc_id": "sample",
+        },
+        "review_requests": [
+            {
+                "review_request_id": "nmp000001",
+                "note_system_id": "ns000001",
+                "region_kind": "definition",
+                "regions": [
+                    {"page": 1, "bbox": [0, 80, 100, 100], "observation_ids": ["obs000001"]},
+                    {"page": 2, "bbox": [0, 80, 100, 100], "observation_ids": ["obs000002"]},
+                ],
+                "reasons": ["definition_marker_unreadable"],
+                "evidence_ids": ["nse000001"],
+            }
+        ],
+        "not_required_note_system_ids": [],
+        "unresolved_note_system_ids": [],
+    }
+
+    review = builder(
+        build_observed_index(observed),
+        {
+            "images": [
+                {"image_id": "page-0001-review", "path": "page-one.png", "source": {"page": 1}},
+                {"image_id": "page-0002-review", "path": "page-two.png", "source": {"page": 2}},
+            ]
+        },
+        plan,
+    )
+
+    assert review is not None
+    assert review["outcomes"][0]["status"] == "found"
+    assert [call[0] for call in responses] == [image_one, image_two]
+
+
+def test_v2_cli_writes_opt_in_note_marker_outputs(tmp_path) -> None:
+    plan_path = tmp_path / "marker-plan.json"
+    review_path = tmp_path / "markers.json"
+    args = SimpleNamespace(
+        observed_output=None,
+        book_skeleton_output=None,
+        page_review_output=None,
+        visual_relation_review_output=None,
+        note_system_review_output=None,
+        note_marker_review_plan_output=str(plan_path),
+        note_marker_review_output=str(review_path),
+    )
+    artifacts = {
+        "note_marker_review_plan": {"metadata": {"doc_id": "sample"}},
+        "note_marker_review": {"metadata": {"doc_id": "sample"}},
+    }
+
+    canonical_v2._write_optional_artifacts(args, artifacts)
+
+    assert plan_path.exists()
+    assert review_path.exists()

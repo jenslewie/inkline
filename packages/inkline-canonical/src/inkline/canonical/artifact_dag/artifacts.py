@@ -124,7 +124,13 @@ def _validate_completed_artifacts(bundle: CanonicalArtifactBundle) -> None:
         plan, bundle.observed_index, bundle.page_layout, systems
     )
     validate_note_marker_review(markers)
-    validate_note_marker_review_against_plan(markers, plan, bundle.observed_index, page_assets)
+    validate_note_marker_review_against_plan(
+        markers,
+        plan,
+        bundle.observed_index,
+        page_assets,
+        note_system_review=systems,
+    )
     validate_table_flow(tables)
     validate_table_flow_against_sources(
         tables, bundle.observed, bundle.observed_index, bundle.page_review

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import Any, cast
+
 import pytest
 
 from inkline.canonical import (
@@ -13,6 +17,7 @@ from inkline.canonical.note_marker_review import (
     validate_note_marker_review,
     validate_note_marker_review_against_plan,
     validate_note_marker_review_plan,
+    validate_note_marker_review_plan_against_sources,
 )
 
 
@@ -132,3 +137,83 @@ def test_marker_review_rejects_marker_outside_planned_region() -> None:
             _index(),
             {"images": [{"image_id": "page-0001-review", "source": {"page": 1}}]},
         )
+
+
+def test_marker_source_validation_accepts_frozen_mappings_and_rejects_observation_escape() -> None:
+    review = _review()
+    review["outcomes"][0]["markers"][0]["bbox"] = [50, 50, 60, 60]
+
+    with pytest.raises(ValidationError, match="outside"):
+        validate_note_marker_review_against_plan(
+            cast(dict[str, Any], _freeze(review)),
+            cast(dict[str, Any], _freeze(_plan())),
+            _index(),
+            cast(dict[str, Any], _freeze({"images": [{"image_id": "page-0001-review", "source": {"page": 1}}]})),
+        )
+
+
+def test_marker_source_validation_rejects_known_style_mismatch() -> None:
+    review = _review()
+    review["outcomes"][0]["markers"][0]["marker"] = "*"
+    systems = {
+        "metadata": {"doc_id": "sample"},
+        "note_systems": [{"note_system_id": "ns000001", "marker_styles": ["numeric"]}],
+    }
+
+    with pytest.raises(ValidationError, match="marker style"):
+        validate_note_marker_review_against_plan(
+            review,
+            _plan(),
+            _index(),
+            {"images": [{"image_id": "page-0001-review", "source": {"page": 1}}]},
+            note_system_review=systems,
+        )
+
+
+def test_marker_source_validation_rejects_empty_adjacent_text() -> None:
+    review = _review()
+    review["outcomes"][0]["markers"][0]["adjacent_text"] = ""
+
+    with pytest.raises(ValidationError, match="adjacent_text"):
+        validate_note_marker_review_against_plan(
+            review,
+            _plan(),
+            _index(),
+            {"images": [{"image_id": "page-0001-review", "source": {"page": 1}}]},
+        )
+
+
+def test_marker_plan_source_validation_rejects_evidence_from_another_system() -> None:
+    plan = _plan()
+    plan["review_requests"][0]["evidence_ids"] = ["nse000002"]
+    systems = {
+        "metadata": {"doc_id": "sample"},
+        "evidence": [
+            {"evidence_id": "nse000001", "observation_ids": ["obs000001"], "pages": [1]},
+            {"evidence_id": "nse000002", "observation_ids": ["obs000001"], "pages": [1]},
+        ],
+        "note_systems": [
+            {
+                "note_system_id": "ns000001",
+                "evidence_ids": ["nse000001"],
+                "definition_ranges": [[1, 1]],
+                "reference_scope": "page",
+            }
+        ],
+    }
+
+    with pytest.raises(ValidationError, match="evidence"):
+        validate_note_marker_review_plan_against_sources(
+            plan,
+            _index(),
+            {"metadata": {"doc_id": "sample"}, "pages": [{"page": 1}]},
+            systems,
+        )
+
+
+def _freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(nested) for key, nested in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze(nested) for nested in value)
+    return value

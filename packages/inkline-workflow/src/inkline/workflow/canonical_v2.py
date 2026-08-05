@@ -7,6 +7,8 @@ from typing import Any
 from inkline.canonical import (
     CanonicalArtifactBundle,
     build_book_skeleton_from_index,
+    build_note_marker_review,
+    build_note_marker_review_plan,
     build_note_system_review,
     build_observed_index,
     build_page_layout_analysis,
@@ -16,6 +18,8 @@ from inkline.canonical import (
     build_visual_relation_review,
     classify_observed_page_roles,
     validate_book_skeleton_against_index,
+    validate_note_marker_review_against_plan,
+    validate_note_marker_review_plan_against_sources,
     validate_note_system_review_against_sources,
     validate_observed_document,
     validate_page_layout_analysis,
@@ -34,6 +38,8 @@ PageReviewBuilder = Callable[..., dict[str, Any]]
 PageAssetsBuilder = Callable[..., dict[str, Any] | None]
 VisualRelationBuilder = Callable[..., dict[str, Any] | None]
 NoteSystemBuilder = Callable[..., dict[str, Any] | None]
+NoteMarkerPlanBuilder = Callable[..., dict[str, Any] | None]
+NoteMarkerBuilder = Callable[..., dict[str, Any] | None]
 
 
 def canonical_artifact_stages(
@@ -43,6 +49,8 @@ def canonical_artifact_stages(
     page_assets_builder: PageAssetsBuilder | None = None,
     visual_relation_builder: VisualRelationBuilder | None = None,
     note_system_builder: NoteSystemBuilder | None = None,
+    note_marker_plan_builder: NoteMarkerPlanBuilder | None = None,
+    note_marker_builder: NoteMarkerBuilder | None = None,
 ) -> tuple[Stage, ...]:
     """Declare the canonical DAG without executing any stage."""
 
@@ -104,6 +112,20 @@ def canonical_artifact_stages(
             _validate_optional_note_system_review,
         ),
         Stage(
+            "note_marker_review_plan",
+            ("observed_index", "page_layout", "note_system_review"),
+            "note_marker_review_plan",
+            note_marker_plan_builder or _build_note_marker_review_plan_if_resolved,
+            _validate_optional_note_marker_review_plan,
+        ),
+        Stage(
+            "note_marker_review",
+            ("observed_index", "page_assets", "note_marker_review_plan"),
+            "note_marker_review",
+            note_marker_builder or _build_note_marker_review_if_resolved,
+            _validate_optional_note_marker_review,
+        ),
+        Stage(
             "text_flow",
             (
                 "observed",
@@ -113,6 +135,8 @@ def canonical_artifact_stages(
                 "page_layout",
                 "visual_relation_review",
                 "note_system_review",
+                "note_marker_review_plan",
+                "note_marker_review",
             ),
             "text_flow",
             _build_text_flow_if_resolved,
@@ -149,6 +173,8 @@ def build_canonical_artifacts(
         page_assets=artifacts["page_assets"],
         visual_relation_review=artifacts["visual_relation_review"],
         note_system_review=artifacts["note_system_review"],
+        note_marker_review_plan=artifacts["note_marker_review_plan"],
+        note_marker_review=artifacts["note_marker_review"],
     )
 
 
@@ -186,8 +212,10 @@ def _build_text_flow_if_resolved(
     page_layout: dict[str, Any],
     visual_relation_review: dict[str, Any] | None,
     note_system_review: dict[str, Any] | None,
+    note_marker_review_plan: dict[str, Any] | None,
+    note_marker_review: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    del visual_relation_review, note_system_review
+    del visual_relation_review, note_system_review, note_marker_review_plan, note_marker_review
     if not _page_review_is_resolved(page_review):
         return None
     return build_text_flow(
@@ -223,6 +251,26 @@ def _build_note_system_review_if_resolved(
     if not _page_review_is_resolved(page_review) or page_assets is None:
         return None
     return build_note_system_review(observed_index, page_layout, skeleton, page_review, page_assets)
+
+
+def _build_note_marker_review_plan_if_resolved(
+    observed_index: ObservedIndex,
+    page_layout: dict[str, Any],
+    note_system_review: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if note_system_review is None:
+        return None
+    return build_note_marker_review_plan(observed_index, page_layout, note_system_review)
+
+
+def _build_note_marker_review_if_resolved(
+    observed_index: ObservedIndex,
+    page_assets: dict[str, Any] | None,
+    note_marker_review_plan: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if page_assets is None or note_marker_review_plan is None:
+        return None
+    return build_note_marker_review(observed_index, page_assets, note_marker_review_plan)
 
 
 def _build_page_assets(observed: dict[str, Any], page_review: dict[str, Any]) -> dict[str, Any]:
@@ -267,6 +315,16 @@ def _validate_optional_note_system_review(review: Any) -> None:
         raise TypeError("note_system_review stage must produce object or None")
 
 
+def _validate_optional_note_marker_review_plan(plan: Any) -> None:
+    if plan is not None and not isinstance(plan, dict):
+        raise TypeError("note_marker_review_plan stage must produce object or None")
+
+
+def _validate_optional_note_marker_review(review: Any) -> None:
+    if review is not None and not isinstance(review, dict):
+        raise TypeError("note_marker_review stage must produce object or None")
+
+
 def _validate_page_assets(page_assets: Any) -> None:
     if page_assets is not None and not isinstance(page_assets, dict):
         raise TypeError("page_assets stage must produce object or None")
@@ -281,6 +339,8 @@ def _validate_artifact_relationships(artifacts: dict[str, Any]) -> None:
     table_flow = artifacts["table_flow"]
     visual_relation_review = artifacts["visual_relation_review"]
     note_system_review = artifacts["note_system_review"]
+    note_marker_review_plan = artifacts["note_marker_review_plan"]
+    note_marker_review = artifacts["note_marker_review"]
     validate_book_skeleton_against_index(skeleton, index)
     doc_id = index.doc_id
     if page_layout.get("metadata", {}).get("doc_id") != doc_id:
@@ -313,6 +373,23 @@ def _validate_artifact_relationships(artifacts: dict[str, Any]) -> None:
             page_review,
             page_assets,
         )
+        if note_marker_review_plan is None or note_marker_review is None:
+            raise ValueError("NoteSystemReview requires NoteMarkerReviewPlan and NoteMarkerReview")
+        validate_note_marker_review_plan_against_sources(
+            note_marker_review_plan,
+            index,
+            page_layout,
+            note_system_review,
+        )
+        validate_note_marker_review_against_plan(
+            note_marker_review,
+            note_marker_review_plan,
+            index,
+            page_assets,
+            note_system_review=note_system_review,
+        )
+    elif note_marker_review_plan is not None or note_marker_review is not None:
+        raise ValueError("NoteMarkerReview artifacts require NoteSystemReview")
     review_pages = [record.get("page") for record in page_review.get("pages") or []]
     if review_pages != list(index.page_numbers):
         raise ValueError("PageReview must contain every observed page exactly once in order")

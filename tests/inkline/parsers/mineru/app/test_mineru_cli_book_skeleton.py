@@ -174,6 +174,11 @@ def test_mineru_cli_parses_opt_in_bounded_review_arguments(monkeypatch) -> None:
             "--note-system-review-llm",
             "--note-system-review-output",
             "notes.json",
+            "--note-marker-review-llm",
+            "--note-marker-review-plan-output",
+            "marker-plan.json",
+            "--note-marker-review-output",
+            "markers.json",
         ],
     )
 
@@ -183,6 +188,9 @@ def test_mineru_cli_parses_opt_in_bounded_review_arguments(monkeypatch) -> None:
     assert args.visual_relation_review_output == "visual.json"
     assert args.note_system_review_llm is True
     assert args.note_system_review_output == "notes.json"
+    assert args.note_marker_review_llm is True
+    assert args.note_marker_review_plan_output == "marker-plan.json"
+    assert args.note_marker_review_output == "markers.json"
 
 
 def test_book_skeleton_cli_rejects_equal_resolved_output_paths(tmp_path, monkeypatch) -> None:

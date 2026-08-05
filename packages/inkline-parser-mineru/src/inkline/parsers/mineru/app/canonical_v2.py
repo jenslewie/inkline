@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from inkline.canonical import (
     build_bookgraph_from_artifacts,
     build_internal_canonical_from_artifacts,
+    build_note_marker_review,
+    build_note_marker_review_plan,
     build_note_system_review,
     build_visual_relation_review,
     validate_book_skeleton,
@@ -47,6 +49,7 @@ def build_v2_artifacts(
     use_page_review_llm: bool = True,
     use_visual_relation_review_llm: bool = False,
     use_note_system_review_llm: bool = False,
+    use_note_marker_review_llm: bool = False,
     llm_model: str = DEFAULT_QWEN_MODEL,
     llm_api_url: str = DEFAULT_OLLAMA_CHAT_URL,
     llm_timeout_seconds: int = 300,
@@ -115,6 +118,14 @@ def build_v2_artifacts(
         api_url=llm_api_url,
         timeout_seconds=llm_timeout_seconds,
     )
+    note_marker_plan_builder = _note_marker_review_plan_builder()
+    note_marker_builder = _note_marker_review_builder(
+        output_dir=output_dir,
+        use_llm=use_note_marker_review_llm,
+        model_name=llm_model,
+        api_url=llm_api_url,
+        timeout_seconds=llm_timeout_seconds,
+    )
 
     stages = canonical_artifact_stages(
         skeleton_builder=skeleton_builder,
@@ -122,6 +133,8 @@ def build_v2_artifacts(
         page_assets_builder=page_assets_builder,
         visual_relation_builder=visual_relation_builder,
         note_system_builder=note_system_builder,
+        note_marker_plan_builder=note_marker_plan_builder,
+        note_marker_builder=note_marker_builder,
     )
     bundle = build_canonical_artifacts(
         observed,
@@ -136,6 +149,8 @@ def build_v2_artifacts(
         "page_review": bundle.page_review,
         "visual_relation_review": getattr(bundle, "visual_relation_review", None),
         "note_system_review": getattr(bundle, "note_system_review", None),
+        "note_marker_review_plan": getattr(bundle, "note_marker_review_plan", None),
+        "note_marker_review": getattr(bundle, "note_marker_review", None),
         "artifact_bundle": bundle,
         "public_graph": None,
         "internal_canonical": None,
@@ -155,7 +170,13 @@ def _emit_workflow_stage(
 ) -> None:
     if name == "skeleton":
         _emit_stage(callback, "book_skeleton", artifact)
-    elif name in {"page_review", "visual_relation_review", "note_system_review"}:
+    elif name in {
+        "page_review",
+        "visual_relation_review",
+        "note_system_review",
+        "note_marker_review_plan",
+        "note_marker_review",
+    }:
         _emit_stage(callback, name, artifact)
 
 
@@ -254,6 +275,112 @@ def _note_system_review_builder(
     return builder
 
 
+def _note_marker_review_plan_builder() -> Callable[..., dict[str, Any] | None]:
+    def builder(observed_index, page_layout, note_system_review):
+        if note_system_review is None:
+            return None
+        return build_note_marker_review_plan(observed_index, page_layout, note_system_review)
+
+    return builder
+
+
+def _note_marker_review_builder(
+    *,
+    output_dir: Path,
+    use_llm: bool,
+    model_name: str,
+    api_url: str,
+    timeout_seconds: int,
+) -> Callable[..., dict[str, Any] | None]:
+    """Compose optional MinerU transport around bounded marker requests."""
+
+    def builder(observed_index, page_assets, note_marker_review_plan):
+        if page_assets is None or note_marker_review_plan is None:
+            return None
+        image_paths = {
+            str(record["image_id"]): output_dir / str(record["path"])
+            for record in page_assets.get("images", [])
+            if isinstance(record, dict)
+            and isinstance(record.get("image_id"), str)
+            and isinstance(record.get("path"), str)
+        }
+
+        def callback(request: dict[str, Any]) -> dict[str, Any]:
+            asset_ids = request["page_asset_ids"]
+            if not asset_ids:
+                raise RuntimeError("NoteMarkerReview requires planned PageAssets")
+            request_images = []
+            for asset_id in asset_ids:
+                image_path = image_paths.get(str(asset_id))
+                if image_path is None:
+                    raise RuntimeError("PageAssets image path is unavailable for marker review")
+                request_images.append((str(asset_id), image_path))
+            responses = [
+                vision_chat_json(
+                    image_path,
+                    OllamaChatConfig(
+                        model=model_name,
+                        api_url=api_url,
+                        timeout_seconds=timeout_seconds,
+                    ),
+                    prompt=(
+                        f"{request['prompt']}\nInspect bounded PageAsset {asset_id}."
+                    ),
+                )
+                for asset_id, image_path in request_images
+            ]
+            return _merge_note_marker_responses(responses)
+
+        return build_note_marker_review(
+            observed_index,
+            page_assets,
+            note_marker_review_plan,
+            review_callback=callback if use_llm else None,
+            model_name=model_name if use_llm else None,
+        )
+
+    return builder
+
+
+def _merge_note_marker_responses(responses: Sequence[Any]) -> dict[str, Any]:
+    """Merge one bounded vision response per supplied PageAsset."""
+
+    markers: list[Mapping[str, Any]] = []
+    marker_keys: set[str] = set()
+    invalid_response = False
+    for response in responses:
+        if not isinstance(response, Mapping) or set(response) not in (
+            {"markers"},
+            {"status", "markers"},
+        ):
+            invalid_response = True
+            continue
+        response_markers = response.get("markers")
+        if not isinstance(response_markers, Sequence) or isinstance(
+            response_markers, str | bytes
+        ):
+            invalid_response = True
+            continue
+        status = response.get("status")
+        if status not in (None, "found", "absent", "unresolved"):
+            invalid_response = True
+        if status == "unresolved" or (status == "found" and not response_markers):
+            invalid_response = True
+        if status == "absent" and response_markers:
+            invalid_response = True
+        for marker in response_markers:
+            if not isinstance(marker, Mapping):
+                invalid_response = True
+                continue
+            marker_key = json.dumps(dict(marker), ensure_ascii=False, sort_keys=True, default=str)
+            if marker_key not in marker_keys:
+                marker_keys.add(marker_key)
+                markers.append(marker)
+    if invalid_response:
+        return {"status": "unresolved", "markers": []}
+    return {"markers": [dict(marker) for marker in markers]}
+
+
 def _emit_stage(
     callback: Callable[[str, dict[str, Any]], None] | None,
     stage: str,
@@ -285,6 +412,7 @@ def run_v2_cli(args: Any) -> None:
         use_page_review_llm=args.page_review_llm,
         use_visual_relation_review_llm=getattr(args, "visual_relation_review_llm", False),
         use_note_system_review_llm=getattr(args, "note_system_review_llm", False),
+        use_note_marker_review_llm=getattr(args, "note_marker_review_llm", False),
         llm_model=args.book_skeleton_llm_model,
         llm_api_url=args.book_skeleton_llm_api_url,
         llm_timeout_seconds=args.book_skeleton_llm_timeout_seconds,
@@ -319,6 +447,12 @@ def _write_optional_artifacts(args: Any, artifacts: dict[str, Any]) -> None:
     note_system_output = getattr(args, "note_system_review_output", None)
     if note_system_output and artifacts["note_system_review"] is not None:
         _write_json(Path(note_system_output), artifacts["note_system_review"])
+    marker_plan_output = getattr(args, "note_marker_review_plan_output", None)
+    if marker_plan_output and artifacts["note_marker_review_plan"] is not None:
+        _write_json(Path(marker_plan_output), artifacts["note_marker_review_plan"])
+    marker_output = getattr(args, "note_marker_review_output", None)
+    if marker_output and artifacts["note_marker_review"] is not None:
+        _write_json(Path(marker_output), artifacts["note_marker_review"])
 
 
 def _write_stage_artifact(args: Any, stage: str, artifact: dict[str, Any]) -> None:
@@ -334,6 +468,18 @@ def _write_stage_artifact(args: Any, stage: str, artifact: dict[str, Any]) -> No
         _write_json(Path(args.visual_relation_review_output), artifact)
     elif stage == "note_system_review" and getattr(args, "note_system_review_output", None):
         _write_json(Path(args.note_system_review_output), artifact)
+    elif (
+        stage == "note_marker_review_plan"
+        and artifact is not None
+        and getattr(args, "note_marker_review_plan_output", None)
+    ):
+        _write_json(Path(args.note_marker_review_plan_output), artifact)
+    elif (
+        stage == "note_marker_review"
+        and artifact is not None
+        and getattr(args, "note_marker_review_output", None)
+    ):
+        _write_json(Path(args.note_marker_review_output), artifact)
 
 
 def _observed_metadata(args: Any, output_path: Path) -> dict[str, Any]:
