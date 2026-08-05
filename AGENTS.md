@@ -44,6 +44,32 @@ They do not define behavior for other repositories or global Codex sessions.
    is complete. If the scope or acceptance criteria need to change, stop and ask
    the user.
 
+## Root orchestration efficiency
+
+1. The root performs only baseline, scope, and acceptance checks. When it
+   delegates repository tracing to an `inkline_explorer`, it must not duplicate
+   that exploration by reading the same contracts, call chains, or implementation
+   files. The explorer report must be a concise, decision-oriented summary with
+   the authoritative files inspected, call chain, implementation boundary,
+   risks, and exact file references.
+2. The root gives an `inkline_worker` one consolidated initial task containing
+   the allowed files, acceptance criteria, authoritative evidence, and known
+   risks. It must not send progress nudges or incremental requirements unless
+   the worker reports a blocker, new evidence materially changes correctness,
+   or the worker is demonstrably exceeding scope.
+3. While a worker or reviewer is running, the root must not poll progress by
+   reading incomplete edits or by calling `git status`, `git diff`, file counts,
+   or `list_agents`. It waits for a blocker message or final report. If a bounded
+   wait times out, it resumes waiting without an intervening worktree inspection
+   or progress request.
+4. Spawn repository-profile agents with `fork_turns="none"`. This preserves the
+   root's context boundary and avoids an invalid agent-type/full-history fork
+   combination.
+5. These constraints do not remove the required implementation-review loop.
+   Dispatching the worker, reviewer, remediation, and re-review at their stated
+   phase boundaries remains required; the root's final acceptance check occurs
+   only after the reviewed candidate is complete.
+
 ## Multi-session development chains
 
 For work that is explicitly split across sequential Codex sessions:
